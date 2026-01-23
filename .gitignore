@@ -1,0 +1,8 @@
+/target
+Cargo.lock
+*.profraw
+*.profdata
+profile*.json.gz
+.DS_Store
+CLAUDE.md
+.claude/

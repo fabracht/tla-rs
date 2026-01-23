@@ -1,0 +1,25 @@
+[package]
+name = "tlc-executor"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "tlc_executor"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tlc-executor"
+path = "src/main.rs"
+
+[profile.release]
+debug = true
+
+[profile.profiling]
+inherits = "release"
+debug = 2
+lto = false
+codegen-units = 1
+split-debuginfo = "packed"
+
+[dependencies]
+indexmap = "2.13.0"
