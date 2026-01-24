@@ -112,6 +112,8 @@ pub enum Token {
     Seq,
     Print,
     Assert,
+    JavaTime,
+    SystemTime,
     CustomOp(Arc<str>),
 
     Eof,
@@ -585,6 +587,8 @@ impl<'a> Lexer<'a> {
                 "Seq" => Token::Seq,
                 "Print" => Token::Print,
                 "Assert" => Token::Assert,
+                "JavaTime" => Token::JavaTime,
+                "SystemTime" => Token::SystemTime,
                 "BY" => Token::By,
                 "DEF" => Token::ProofDef,
                 "QED" => Token::Qed,

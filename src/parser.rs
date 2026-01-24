@@ -703,6 +703,14 @@ impl Parser {
                 self.expect(Token::RParen)?;
                 Ok(Expr::Assert(Box::new(cond), Box::new(msg)))
             }
+            Token::JavaTime => {
+                self.advance();
+                Ok(Expr::JavaTime)
+            }
+            Token::SystemTime => {
+                self.advance();
+                Ok(Expr::SystemTime)
+            }
             Token::Unchanged => {
                 self.advance();
                 self.parse_unchanged()

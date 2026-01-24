@@ -128,6 +128,8 @@ Cross-checked against:
 |-------|-------------|
 | `Print(val, expr)` | Debug print (outputs to stderr) |
 | `Assert(cond, msg)` | Assertion (fails if cond false) |
+| `SystemTime` | Current time in ms since epoch |
+| `JavaTime` | Errors (use SystemTime instead) |
 
 ### Module Structure
 | Keyword | Description |
@@ -158,7 +160,7 @@ Cross-checked against:
 | `Integers` | ✓ Int set (bounded -1000..1000) |
 | `Sequences` | ✓ All ops including `Seq(S)`, `SelectSeq` |
 | `FiniteSets` | ✓ `Cardinality`, `IsFiniteSet` |
-| `TLC` | ⚠ `Print`, `Assert` (missing `JavaTime`, `Permutations`, `SortSeq`) |
+| `TLC` | ⚠ `Print`, `Assert`, `SystemTime` (missing `Permutations`, `SortSeq`) |
 | `Bags` | ✗ Not implemented |
 
 ---
@@ -182,7 +184,6 @@ Cross-checked against:
 ### TLC Module (Remaining)
 | Operator | Description |
 |----------|-------------|
-| `JavaTime` | System time |
 | `Permutations(S)` | All permutations |
 | `SortSeq(s, cmp)` | Sort sequence |
 
@@ -250,7 +251,7 @@ Cross-checked against:
 | Records | 100% ✓ |
 | Control Flow | 100% ✓ |
 | State Operators | 100% ✓ |
-| TLC Module | 40% ⚠ |
+| TLC Module | 60% ⚠ |
 | Module System | 60% ⚠ |
 | Temporal Logic | 10% ✗ |
 | Proofs | 0% ✗ |

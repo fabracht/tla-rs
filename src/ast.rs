@@ -88,6 +88,8 @@ pub enum Expr {
     SeqSet(Box<Expr>),
     Print(Box<Expr>, Box<Expr>),
     Assert(Box<Expr>, Box<Expr>),
+    JavaTime,
+    SystemTime,
 
     If(Box<Expr>, Box<Expr>, Box<Expr>),
     Let(Arc<str>, Box<Expr>, Box<Expr>),

@@ -760,6 +760,19 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             }
         }
 
+        Expr::JavaTime => Err(EvalError::DomainError(
+            "JavaTime is dumb, use SystemTime instead".into(),
+        )),
+
+        Expr::SystemTime => {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            Ok(Value::Int(now))
+        }
+
         Expr::If(cond, then_br, else_br) => {
             if eval_bool(cond, env, defs)? {
                 eval(then_br, env, defs)
