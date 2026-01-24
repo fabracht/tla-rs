@@ -90,6 +90,7 @@ pub enum Expr {
     Assert(Box<Expr>, Box<Expr>),
     JavaTime,
     SystemTime,
+    Permutations(Box<Expr>),
 
     If(Box<Expr>, Box<Expr>, Box<Expr>),
     Let(Arc<str>, Box<Expr>, Box<Expr>),

@@ -773,6 +773,21 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             Ok(Value::Int(now))
         }
 
+        Expr::Permutations(set_expr) => {
+            let set = eval_set(set_expr, env, defs)?;
+            let elements: Vec<Value> = set.into_iter().collect();
+            let n = elements.len();
+            if n > 10 {
+                return Err(EvalError::DomainError(format!(
+                    "Permutations of set with {} elements is too large (max 10)",
+                    n
+                )));
+            }
+            let perms = permutations(&elements);
+            let result: BTreeSet<Value> = perms.into_iter().map(Value::Tuple).collect();
+            Ok(Value::Set(result))
+        }
+
         Expr::If(cond, then_br, else_br) => {
             if eval_bool(cond, env, defs)? {
                 eval(then_br, env, defs)
@@ -1217,4 +1232,20 @@ fn infer_init_candidates(init: &Expr, env: &Env, var: &Arc<str>, defs: &Definiti
 
     collect(init, env, var, defs, &mut candidates)?;
     Ok(candidates.into_iter().collect())
+}
+
+fn permutations(elements: &[Value]) -> Vec<Vec<Value>> {
+    if elements.is_empty() {
+        return vec![vec![]];
+    }
+    let mut result = Vec::new();
+    for (i, elem) in elements.iter().enumerate() {
+        let mut rest: Vec<Value> = elements[..i].to_vec();
+        rest.extend(elements[i + 1..].iter().cloned());
+        for mut perm in permutations(&rest) {
+            perm.insert(0, elem.clone());
+            result.push(perm);
+        }
+    }
+    result
 }

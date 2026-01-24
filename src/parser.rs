@@ -711,6 +711,13 @@ impl Parser {
                 self.advance();
                 Ok(Expr::SystemTime)
             }
+            Token::Permutations => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let set = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::Permutations(Box::new(set)))
+            }
             Token::Unchanged => {
                 self.advance();
                 self.parse_unchanged()
