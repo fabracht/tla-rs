@@ -384,9 +384,7 @@ impl Parser {
                     left = Expr::Equiv(Box::new(left), Box::new(right));
                 }
                 Token::LeadsTo => {
-                    self.advance();
-                    let right = self.parse_or()?;
-                    left = Expr::Implies(Box::new(left), Box::new(right));
+                    return Err("temporal operator ~> (leads-to) is not supported".into());
                 }
                 _ => break,
             }
@@ -473,6 +471,16 @@ impl Parser {
                 let right = self.parse_additive()?;
                 Ok(Expr::ProperSubset(Box::new(left), Box::new(right)))
             }
+            Token::Supseteq => {
+                self.advance();
+                let right = self.parse_additive()?;
+                Ok(Expr::Subset(Box::new(right), Box::new(left)))
+            }
+            Token::ProperSupset => {
+                self.advance();
+                let right = self.parse_additive()?;
+                Ok(Expr::ProperSubset(Box::new(right), Box::new(left)))
+            }
             _ => Ok(left),
         }
     }
@@ -525,6 +533,11 @@ impl Parser {
                     self.advance();
                     let right = self.parse_multiplicative()?;
                     left = Expr::FnMerge(Box::new(left), Box::new(right));
+                }
+                Token::ColonGt => {
+                    self.advance();
+                    let right = self.parse_multiplicative()?;
+                    left = Expr::SingleFn(Box::new(left), Box::new(right));
                 }
                 Token::CustomOp(op_name) => {
                     let op_name = op_name.clone();
@@ -658,8 +671,37 @@ impl Parser {
             }
             Token::SelectSeq => {
                 self.advance();
-                self.skip_to_next_definition();
-                Ok(Expr::TupleLit(vec![]))
+                self.expect(Token::LParen)?;
+                let seq = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let test = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::SelectSeq(Box::new(seq), Box::new(test)))
+            }
+            Token::Seq => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let domain = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::SeqSet(Box::new(domain)))
+            }
+            Token::Print => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let val = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let expr = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::Print(Box::new(val), Box::new(expr)))
+            }
+            Token::Assert => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let cond = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let msg = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::Assert(Box::new(cond), Box::new(msg)))
             }
             Token::Unchanged => {
                 self.advance();
@@ -693,19 +735,8 @@ impl Parser {
                 self.advance();
                 self.parse_let()
             }
-            Token::Eventually => {
-                self.advance();
-                self.parse_unary()
-            }
-            Token::Always => {
-                self.advance();
-                let inner = self.parse_unary()?;
-                if *self.peek() == Token::Underscore {
-                    self.advance();
-                    self.parse_postfix()?;
-                }
-                Ok(inner)
-            }
+            Token::Eventually => Err("temporal operator <> (eventually) is not supported".into()),
+            Token::Always => Err("temporal operator [] (always) is not supported".into()),
             _ => self.parse_postfix(),
         }
     }

@@ -65,6 +65,7 @@ pub enum Expr {
     FnCall(Arc<str>, Vec<Expr>),
     Lambda(Vec<Arc<str>>, Box<Expr>),
     FnMerge(Box<Expr>, Box<Expr>),
+    SingleFn(Box<Expr>, Box<Expr>),
     CustomOp(Arc<str>, Box<Expr>, Box<Expr>),
     Except(Box<Expr>, Vec<(Vec<Expr>, Expr)>),
     Domain(Box<Expr>),
@@ -83,6 +84,10 @@ pub enum Expr {
     Append(Box<Expr>, Box<Expr>),
     Concat(Box<Expr>, Box<Expr>),
     SubSeq(Box<Expr>, Box<Expr>, Box<Expr>),
+    SelectSeq(Box<Expr>, Box<Expr>),
+    SeqSet(Box<Expr>),
+    Print(Box<Expr>, Box<Expr>),
+    Assert(Box<Expr>, Box<Expr>),
 
     If(Box<Expr>, Box<Expr>, Box<Expr>),
     Let(Arc<str>, Box<Expr>, Box<Expr>),

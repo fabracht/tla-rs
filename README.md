@@ -35,6 +35,7 @@ tlc-executor <spec.tla> [options]
 | `--max-states N` | Maximum states to explore (default: 1000000) |
 | `--max-depth N` | Maximum trace depth (default: 100) |
 | `--export-dot FILE` | Export state graph to DOT format |
+| `--allow-deadlock` | Allow states with no successors |
 
 ### Constant Value Formats
 
@@ -151,6 +152,23 @@ State 1
 State 2
   count = 2 *
 ...
+```
+
+### Deadlock Detection
+```
+Deadlock detected!
+
+Trace to deadlock state (3 states):
+  (* marks changed variables)
+
+State 0
+  x = 0
+State 1
+  x = 1 *
+State 2
+  x = 2 *
+
+Use --allow-deadlock to suppress this error.
 ```
 
 ### Progress Reporting

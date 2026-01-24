@@ -57,6 +57,8 @@ pub enum Token {
     SetMinus,
     Subseteq,
     ProperSubset,
+    Supseteq,
+    ProperSupset,
     Times,
 
     Module,
@@ -107,6 +109,9 @@ pub enum Token {
     Append,
     SubSeq,
     SelectSeq,
+    Seq,
+    Print,
+    Assert,
     CustomOp(Arc<str>),
 
     Eof,
@@ -302,11 +307,63 @@ impl<'a> Lexer<'a> {
         if self.consume("\\subset") || self.consume("⊂") {
             return Ok(Token::ProperSubset);
         }
+        if self.consume("\\supseteq") || self.consume("⊇") {
+            return Ok(Token::Supseteq);
+        }
+        if self.consume("\\supset") || self.consume("⊃") {
+            return Ok(Token::ProperSupset);
+        }
         if self.consume("\\times") || self.consume("\\X") || self.consume("×") {
             return Ok(Token::Times);
         }
         if self.consume("\\div") {
             return Ok(Token::Div);
+        }
+        if self.starts_with("\\b") {
+            let rest = &self.input[self.pos + 2..];
+            if let Some(c) = rest.chars().next()
+                && (c == '0' || c == '1')
+            {
+                self.pos += 2;
+                let start = self.pos;
+                while self.peek_char().is_some_and(|c| c == '0' || c == '1') {
+                    self.advance();
+                }
+                let n = i64::from_str_radix(&self.input[start..self.pos], 2)
+                    .map_err(|_| "invalid binary integer")?;
+                return Ok(Token::Int(n));
+            }
+        }
+        if self.starts_with("\\o") {
+            let rest = &self.input[self.pos + 2..];
+            if let Some(c) = rest.chars().next()
+                && c.is_ascii_digit()
+                && c < '8'
+            {
+                self.pos += 2;
+                let start = self.pos;
+                while self.peek_char().is_some_and(|c| c.is_ascii_digit() && c < '8') {
+                    self.advance();
+                }
+                let n = i64::from_str_radix(&self.input[start..self.pos], 8)
+                    .map_err(|_| "invalid octal integer")?;
+                return Ok(Token::Int(n));
+            }
+        }
+        if self.starts_with("\\h") || self.starts_with("\\H") {
+            let rest = &self.input[self.pos + 2..];
+            if let Some(c) = rest.chars().next()
+                && c.is_ascii_hexdigit()
+            {
+                self.pos += 2;
+                let start = self.pos;
+                while self.peek_char().is_some_and(|c| c.is_ascii_hexdigit()) {
+                    self.advance();
+                }
+                let n = i64::from_str_radix(&self.input[start..self.pos], 16)
+                    .map_err(|_| "invalid hexadecimal integer")?;
+                return Ok(Token::Int(n));
+            }
         }
         if self.consume("\\E") || self.consume("\\exists") || self.consume("∃") {
             return Ok(Token::Exists);
@@ -525,6 +582,9 @@ impl<'a> Lexer<'a> {
                 "Append" => Token::Append,
                 "SubSeq" => Token::SubSeq,
                 "SelectSeq" => Token::SelectSeq,
+                "Seq" => Token::Seq,
+                "Print" => Token::Print,
+                "Assert" => Token::Assert,
                 "BY" => Token::By,
                 "DEF" => Token::ProofDef,
                 "QED" => Token::Qed,

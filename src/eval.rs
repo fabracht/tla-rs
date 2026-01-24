@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::ast::{Env, Expr, State, Value};
+use crate::checker::format_value;
 
 pub type Definitions = BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>;
 
@@ -115,6 +116,19 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 }
                 return Ok(Value::Bool(false));
             }
+            if let Expr::SeqSet(domain_expr) = set.as_ref() {
+                let ev = eval(elem, env, defs)?;
+                if let Value::Tuple(seq) = ev {
+                    let domain = eval_set(domain_expr, env, defs)?;
+                    for e in &seq {
+                        if !domain.contains(e) {
+                            return Ok(Value::Bool(false));
+                        }
+                    }
+                    return Ok(Value::Bool(true));
+                }
+                return Ok(Value::Bool(false));
+            }
             let ev = eval(elem, env, defs)?;
             let sv = eval_set(set, env, defs)?;
             Ok(Value::Bool(sv.contains(&ev)))
@@ -143,6 +157,19 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 if let Value::Set(s) = ev {
                     let base = eval_set(inner, env, defs)?;
                     return Ok(Value::Bool(!s.is_subset(&base)));
+                }
+                return Ok(Value::Bool(true));
+            }
+            if let Expr::SeqSet(domain_expr) = set.as_ref() {
+                let ev = eval(elem, env, defs)?;
+                if let Value::Tuple(seq) = ev {
+                    let domain = eval_set(domain_expr, env, defs)?;
+                    for e in &seq {
+                        if !domain.contains(e) {
+                            return Ok(Value::Bool(true));
+                        }
+                    }
+                    return Ok(Value::Bool(false));
                 }
                 return Ok(Value::Bool(true));
             }
@@ -505,6 +532,14 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             }
         }
 
+        Expr::SingleFn(key, val) => {
+            let k = eval(key, env, defs)?;
+            let v = eval(val, env, defs)?;
+            let mut f = BTreeMap::new();
+            f.insert(k, v);
+            Ok(Value::Fn(f))
+        }
+
         Expr::CustomOp(name, _left, _right) => {
             Err(EvalError::DomainError(format!("undefined custom operator: \\{}", name)))
         }
@@ -676,6 +711,55 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             Ok(Value::Tuple(subseq))
         }
 
+        Expr::SelectSeq(seq, test) => {
+            let tv = eval_tuple(seq, env, defs)?;
+            let mut result = Vec::new();
+            for elem in tv {
+                let keep = if let Expr::Lambda(params, body) = test.as_ref() {
+                    if params.len() != 1 {
+                        return Err(EvalError::DomainError(format!(
+                            "SelectSeq test expects 1 parameter, got {}",
+                            params.len()
+                        )));
+                    }
+                    let mut local = env.clone();
+                    local.insert(params[0].clone(), elem.clone());
+                    eval_bool(body, &local, defs)?
+                } else {
+                    return Err(EvalError::DomainError(
+                        "SelectSeq test must be a LAMBDA expression".into(),
+                    ));
+                };
+                if keep {
+                    result.push(elem);
+                }
+            }
+            Ok(Value::Tuple(result))
+        }
+
+        Expr::SeqSet(_) => Err(EvalError::DomainError(
+            "Seq(S) cannot be enumerated (infinite set); use for membership tests only".into(),
+        )),
+
+        Expr::Print(val, result) => {
+            let v = eval(val, env, defs)?;
+            eprintln!("[Print] {}", format_value(&v));
+            eval(result, env, defs)
+        }
+
+        Expr::Assert(cond, msg) => {
+            let c = eval_bool(cond, env, defs)?;
+            if c {
+                Ok(Value::Bool(true))
+            } else {
+                let m = eval(msg, env, defs)?;
+                Err(EvalError::DomainError(format!(
+                    "Assertion failed: {}",
+                    format_value(&m)
+                )))
+            }
+        }
+
         Expr::If(cond, then_br, else_br) => {
             if eval_bool(cond, env, defs)? {
                 eval(then_br, env, defs)
@@ -755,6 +839,19 @@ fn in_set_symbolic(val: &Value, set_expr: &Expr, env: &Env, defs: &Definitions) 
                 }
                 for v in f.values() {
                     if !in_set_symbolic(v, codomain_expr, env, defs)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        Expr::SeqSet(domain_expr) => {
+            if let Value::Tuple(seq) = val {
+                let domain = eval_set(domain_expr, env, defs)?;
+                for e in seq {
+                    if !domain.contains(e) {
                         return Ok(false);
                     }
                 }
