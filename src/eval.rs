@@ -788,6 +788,35 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             Ok(Value::Set(result))
         }
 
+        Expr::SortSeq(seq_expr, cmp_expr) => {
+            let tv = eval_tuple(seq_expr, env, defs)?;
+            let mut result = tv;
+            if let Expr::Lambda(params, body) = cmp_expr.as_ref() {
+                if params.len() != 2 {
+                    return Err(EvalError::DomainError(
+                        "SortSeq comparator must take exactly 2 arguments".into(),
+                    ));
+                }
+                let param_a = &params[0];
+                let param_b = &params[1];
+                result.sort_by(|a, b| {
+                    let mut local = env.clone();
+                    local.insert(param_a.clone(), a.clone());
+                    local.insert(param_b.clone(), b.clone());
+                    match eval_bool(body, &local, defs) {
+                        Ok(true) => std::cmp::Ordering::Less,
+                        Ok(false) => std::cmp::Ordering::Greater,
+                        Err(_) => std::cmp::Ordering::Equal,
+                    }
+                });
+            } else {
+                return Err(EvalError::DomainError(
+                    "SortSeq comparator must be a LAMBDA expression".into(),
+                ));
+            }
+            Ok(Value::Tuple(result))
+        }
+
         Expr::If(cond, then_br, else_br) => {
             if eval_bool(cond, env, defs)? {
                 eval(then_br, env, defs)

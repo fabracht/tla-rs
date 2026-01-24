@@ -718,6 +718,15 @@ impl Parser {
                 self.expect(Token::RParen)?;
                 Ok(Expr::Permutations(Box::new(set)))
             }
+            Token::SortSeq => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let seq = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let cmp = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::SortSeq(Box::new(seq), Box::new(cmp)))
+            }
             Token::Unchanged => {
                 self.advance();
                 self.parse_unchanged()

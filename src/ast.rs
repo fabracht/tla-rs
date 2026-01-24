@@ -91,6 +91,7 @@ pub enum Expr {
     JavaTime,
     SystemTime,
     Permutations(Box<Expr>),
+    SortSeq(Box<Expr>, Box<Expr>),
 
     If(Box<Expr>, Box<Expr>, Box<Expr>),
     Let(Arc<str>, Box<Expr>, Box<Expr>),

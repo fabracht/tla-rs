@@ -115,6 +115,7 @@ pub enum Token {
     JavaTime,
     SystemTime,
     Permutations,
+    SortSeq,
     CustomOp(Arc<str>),
 
     Eof,
@@ -591,6 +592,7 @@ impl<'a> Lexer<'a> {
                 "JavaTime" => Token::JavaTime,
                 "SystemTime" => Token::SystemTime,
                 "Permutations" => Token::Permutations,
+                "SortSeq" => Token::SortSeq,
                 "BY" => Token::By,
                 "DEF" => Token::ProofDef,
                 "QED" => Token::Qed,
