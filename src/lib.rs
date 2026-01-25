@@ -6,5 +6,7 @@ pub mod lexer;
 pub mod parser;
 pub mod stdlib;
 pub mod symmetry;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 pub use eval::{reset_tlc_state, set_checker_level, set_random_seed, update_checker_stats, CheckerStats};

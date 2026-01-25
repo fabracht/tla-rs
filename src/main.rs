@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -142,6 +143,7 @@ fn main() -> ExitCode {
                 let name: Arc<str> = args[i].clone().into();
                 config.symmetric_constants.push(name);
             }
+            #[cfg(not(target_arch = "wasm32"))]
             "--export-dot" => {
                 i += 1;
                 if i >= args.len() {

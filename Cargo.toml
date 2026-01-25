@@ -6,10 +6,15 @@ edition = "2024"
 [lib]
 name = "tlc_executor"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "tlc-executor"
 path = "src/main.rs"
+
+[features]
+default = []
+wasm = ["wasm-bindgen", "serde", "serde_json"]
 
 [profile.release]
 debug = true
@@ -24,3 +29,6 @@ split-debuginfo = "packed"
 [dependencies]
 fastrand = "2.3.0"
 indexmap = "2.13.0"
+wasm-bindgen = { version = "0.2", optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
