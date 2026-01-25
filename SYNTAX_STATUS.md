@@ -142,6 +142,23 @@ Cross-checked against:
 
 **TLCGet String Keys:** `"distinct"`, `"level"`, `"diameter"`, `"queue"`, `"duration"`, `"generated"`
 
+### Bags Operators
+| ASCII | Unicode | Description |
+|-------|---------|-------------|
+| `IsABag(B)` | | Check if B is a valid bag |
+| `BagToSet(B)` | | Domain of bag (elements with count >= 1) |
+| `SetToBag(S)` | | Create bag from set (each element count = 1) |
+| `BagIn(e, B)` | | Element membership in bag |
+| `EmptyBag` | | Empty bag constant |
+| `B1 \oplus B2` | ⊕ | Bag addition (add counts) |
+| `B1 \ominus B2` | ⊖ | Bag subtraction (subtract counts) |
+| `BagUnion(S)` | | Union of all bags in set S |
+| `B1 \sqsubseteq B2` | ⊑ | Bag subset (counts in B1 <= counts in B2) |
+| `SubBag(B)` | | Set of all sub-bags of B |
+| `BagOfAll(F, B)` | | Map function over bag |
+| `BagCardinality(B)` | | Sum of all counts |
+| `CopiesIn(e, B)` | | Number of copies of e in B |
+
 ### Module Structure
 | Keyword | Description |
 |---------|-------------|
@@ -167,30 +184,40 @@ Cross-checked against:
 ### Standard Library Modules
 | Module | Status |
 |--------|--------|
-| `Naturals` | ✓ Nat set (bounded 0..1000) |
-| `Integers` | ✓ Int set (bounded -1000..1000) |
+| `Naturals` | ✓ Nat set (bounded 0..100) |
+| `Integers` | ✓ Int set (bounded -100..100) |
 | `Sequences` | ✓ All ops including `Seq(S)`, `SelectSeq` |
 | `FiniteSets` | ✓ `Cardinality`, `IsFiniteSet` |
 | `TLC` | ✓ All 14 operators implemented |
-| `Bags` | ✗ Not implemented |
+| `Bags` | ✓ All 13 operators implemented |
+
+---
+
+## Parsed But Not Evaluated ⚠️
+
+### Temporal Operators
+These operators are parsed into the AST but error at evaluation time. They can appear in skipped definitions (like `Spec`) without causing errors.
+
+| ASCII | Unicode | Description | Status |
+|-------|---------|-------------|--------|
+| `[]P` | □ | Always | Parsed, errors if evaluated |
+| `<>P` | ◇ | Eventually | Parsed, errors if evaluated |
+| `~>` | | Leads-to | Parsed, errors if evaluated |
+| `WF_v(A)` | | Weak fairness | Parsed, errors if evaluated |
+| `SF_v(A)` | | Strong fairness | Parsed, errors if evaluated |
+| `ENABLED A` | | Action enabled | Parsed, errors if evaluated |
+| `[A]_v` | | Box action | Parsed, errors if evaluated |
+| `<<A>>_v` | | Diamond action | Parsed, errors if evaluated |
 
 ---
 
 ## Not Implemented ✗
 
-### Temporal Operators
-| ASCII | Unicode | Description | Status |
-|-------|---------|-------------|--------|
-| `[]P` | □ | Always | Errors explicitly |
-| `<>P` | ◇ | Eventually | Errors explicitly |
-| `~>` | | Leads-to | Errors explicitly |
-| `WF_v(A)` | | Weak fairness | Not implemented |
-| `SF_v(A)` | | Strong fairness | Not implemented |
-| `ENABLED A` | | Action enabled | Lexed, not evaluated |
-| `[A]_v` | | Box action | Not implemented |
-| `<<A>>_v` | | Diamond action | Not implemented |
-| `^+` | ⁺ | Transitive closure | Not implemented |
-| `^*` | | Reflexive-transitive closure | Not implemented |
+### Transitive Closure
+| ASCII | Unicode | Description |
+|-------|---------|-------------|
+| `^+` | ⁺ | Transitive closure |
+| `^*` | | Reflexive-transitive closure |
 
 ### Proof Constructs
 - `THEOREM`, `LEMMA`, `COROLLARY` - Parsed and skipped
@@ -229,14 +256,19 @@ Cross-checked against:
 | ∀ | `\A` |
 | ↦ | `\|->` |
 | → | `->` |
+| ⊕ | `\oplus` |
+| ⊖ | `\ominus` |
+| ⊑ | `\sqsubseteq` |
 
-### Not Supported
+### Parsed (Temporal - errors at eval)
 | Unicode | ASCII Equivalent |
 |---------|------------------|
 | □ | `[]` |
 | ◇ | `<>` |
-| ⊇ | `\supseteq` |
-| ⊃ | `\supset` |
+
+### Not Supported
+| Unicode | ASCII Equivalent |
+|---------|------------------|
 | ⁺ | `^+` |
 
 ---
@@ -248,7 +280,7 @@ Cross-checked against:
 | Logical Operators | 100% ✓ |
 | Comparison | 100% ✓ |
 | Arithmetic | 100% ✓ |
-| Set Operators | 95% ✓ |
+| Set Operators | 100% ✓ |
 | Quantifiers | 100% ✓ |
 | Functions | 100% ✓ |
 | Sequences | 100% ✓ |
@@ -256,8 +288,9 @@ Cross-checked against:
 | Control Flow | 100% ✓ |
 | State Operators | 100% ✓ |
 | TLC Module | 100% ✓ |
-| Module System | 60% ⚠ |
-| Temporal Logic | 10% ✗ |
+| Bags Module | 100% ✓ |
+| Module System | 70% ⚠ |
+| Temporal Logic | 80% ⚠ |
 | Proofs | 0% ✗ |
 | Number Formats | 100% ✓ |
 
@@ -267,9 +300,8 @@ Cross-checked against:
 
 ### Low Priority (Remaining)
 1. **Full INSTANCE** with substitution
-2. **Fairness** (`WF_`, `SF_`)
-3. **Transitive closure** (`^+`, `^*`)
-4. **Proof constructs** (currently safely skipped)
+2. **Transitive closure** (`^+`, `^*`)
+3. **Proof constructs** (currently safely skipped)
 
 ---
 

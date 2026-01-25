@@ -932,6 +932,188 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
 
         Expr::TLCEval(val) => eval(val, env, defs),
 
+        Expr::IsABag(bag_expr) => {
+            let v = eval(bag_expr, env, defs)?;
+            if let Value::Fn(f) = v {
+                for count in f.values() {
+                    if let Value::Int(n) = count {
+                        if *n < 1 {
+                            return Ok(Value::Bool(false));
+                        }
+                    } else {
+                        return Ok(Value::Bool(false));
+                    }
+                }
+                Ok(Value::Bool(true))
+            } else {
+                Ok(Value::Bool(false))
+            }
+        }
+
+        Expr::BagToSet(bag_expr) => {
+            let f = eval_fn(bag_expr, env, defs)?;
+            let dom: BTreeSet<Value> = f.keys().cloned().collect();
+            Ok(Value::Set(dom))
+        }
+
+        Expr::SetToBag(set_expr) => {
+            let s = eval_set(set_expr, env, defs)?;
+            let mut bag = BTreeMap::new();
+            for elem in s {
+                bag.insert(elem, Value::Int(1));
+            }
+            Ok(Value::Fn(bag))
+        }
+
+        Expr::BagIn(elem_expr, bag_expr) => {
+            let elem = eval(elem_expr, env, defs)?;
+            let bag = eval_fn(bag_expr, env, defs)?;
+            if let Some(Value::Int(count)) = bag.get(&elem) {
+                Ok(Value::Bool(*count >= 1))
+            } else {
+                Ok(Value::Bool(false))
+            }
+        }
+
+        Expr::EmptyBag => Ok(Value::Fn(BTreeMap::new())),
+
+        Expr::BagAdd(left, right) => {
+            let b1 = eval_fn(left, env, defs)?;
+            let b2 = eval_fn(right, env, defs)?;
+            let mut result = b1.clone();
+            for (elem, count) in b2 {
+                let c2 = if let Value::Int(n) = count { n } else { 0 };
+                let c1 = result.get(&elem)
+                    .and_then(|v| if let Value::Int(n) = v { Some(*n) } else { None })
+                    .unwrap_or(0);
+                result.insert(elem, Value::Int(c1 + c2));
+            }
+            Ok(Value::Fn(result))
+        }
+
+        Expr::BagSub(left, right) => {
+            let b1 = eval_fn(left, env, defs)?;
+            let b2 = eval_fn(right, env, defs)?;
+            let mut result = BTreeMap::new();
+            for (elem, count) in &b1 {
+                let c1 = if let Value::Int(n) = count { *n } else { 0 };
+                let c2 = b2.get(elem)
+                    .and_then(|v| if let Value::Int(n) = v { Some(*n) } else { None })
+                    .unwrap_or(0);
+                let diff = c1 - c2;
+                if diff > 0 {
+                    result.insert(elem.clone(), Value::Int(diff));
+                }
+            }
+            Ok(Value::Fn(result))
+        }
+
+        Expr::BagUnion(bags_expr) => {
+            let bags_set = eval_set(bags_expr, env, defs)?;
+            let mut result: BTreeMap<Value, Value> = BTreeMap::new();
+            for bag_val in bags_set {
+                if let Value::Fn(bag) = bag_val {
+                    for (elem, count) in bag {
+                        let c_new = if let Value::Int(n) = count { n } else { 0 };
+                        let c_old = result.get(&elem)
+                            .and_then(|v| if let Value::Int(n) = v { Some(*n) } else { None })
+                            .unwrap_or(0);
+                        result.insert(elem, Value::Int(c_old + c_new));
+                    }
+                } else {
+                    return Err(EvalError::TypeMismatch {
+                        expected: "Bag (Fn)",
+                        got: bag_val,
+                    });
+                }
+            }
+            Ok(Value::Fn(result))
+        }
+
+        Expr::SqSubseteq(left, right) => {
+            let b1 = eval_fn(left, env, defs)?;
+            let b2 = eval_fn(right, env, defs)?;
+            for (elem, count) in &b1 {
+                let c1 = if let Value::Int(n) = count { *n } else { 0 };
+                let c2 = b2.get(elem)
+                    .and_then(|v| if let Value::Int(n) = v { Some(*n) } else { None })
+                    .unwrap_or(0);
+                if c1 > c2 {
+                    return Ok(Value::Bool(false));
+                }
+            }
+            Ok(Value::Bool(true))
+        }
+
+        Expr::SubBag(bag_expr) => {
+            let bag = eval_fn(bag_expr, env, defs)?;
+            let elements: Vec<(Value, i64)> = bag.iter()
+                .filter_map(|(elem, count)| {
+                    if let Value::Int(n) = count {
+                        Some((elem.clone(), *n))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if elements.iter().map(|(_, c)| *c).sum::<i64>() > 20 {
+                return Err(EvalError::DomainError(
+                    "SubBag of bag with more than 20 total copies is too large".into()
+                ));
+            }
+            let mut result_set = BTreeSet::new();
+            enumerate_subbags(&elements, 0, BTreeMap::new(), &mut result_set);
+            Ok(Value::Set(result_set))
+        }
+
+        Expr::BagOfAll(expr, bag_expr) => {
+            let bag = eval_fn(bag_expr, env, defs)?;
+            let mut result: BTreeMap<Value, Value> = BTreeMap::new();
+            if let Expr::Lambda(params, body) = expr.as_ref() {
+                if params.len() != 1 {
+                    return Err(EvalError::DomainError(
+                        "BagOfAll expects a single-argument lambda".into()
+                    ));
+                }
+                for (elem, count) in bag {
+                    let c = if let Value::Int(n) = count { n } else { 0 };
+                    let mut local = env.clone();
+                    local.insert(params[0].clone(), elem);
+                    let mapped = eval(body, &local, defs)?;
+                    let prev = result.get(&mapped)
+                        .and_then(|v| if let Value::Int(n) = v { Some(*n) } else { None })
+                        .unwrap_or(0);
+                    result.insert(mapped, Value::Int(prev + c));
+                }
+            } else {
+                return Err(EvalError::DomainError(
+                    "BagOfAll requires a LAMBDA expression".into()
+                ));
+            }
+            Ok(Value::Fn(result))
+        }
+
+        Expr::BagCardinality(bag_expr) => {
+            let bag = eval_fn(bag_expr, env, defs)?;
+            let mut total = 0i64;
+            for count in bag.values() {
+                if let Value::Int(n) = count {
+                    total += n;
+                }
+            }
+            Ok(Value::Int(total))
+        }
+
+        Expr::CopiesIn(elem_expr, bag_expr) => {
+            let elem = eval(elem_expr, env, defs)?;
+            let bag = eval_fn(bag_expr, env, defs)?;
+            if let Some(Value::Int(count)) = bag.get(&elem) {
+                Ok(Value::Int(*count))
+            } else {
+                Ok(Value::Int(0))
+            }
+        }
+
         Expr::If(cond, then_br, else_br) => {
             if eval_bool(cond, env, defs)? {
                 eval(then_br, env, defs)
@@ -969,6 +1151,38 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             }
             Ok(Value::Bool(true))
         }
+
+        Expr::Always(_) => Err(EvalError::DomainError(
+            "temporal operator [] (always) cannot be evaluated in explicit-state model checking".into()
+        )),
+
+        Expr::Eventually(_) => Err(EvalError::DomainError(
+            "temporal operator <> (eventually) cannot be evaluated in explicit-state model checking".into()
+        )),
+
+        Expr::LeadsTo(_, _) => Err(EvalError::DomainError(
+            "temporal operator ~> (leads-to) cannot be evaluated in explicit-state model checking".into()
+        )),
+
+        Expr::WeakFairness(_, _) => Err(EvalError::DomainError(
+            "temporal operator WF (weak fairness) cannot be evaluated in explicit-state model checking".into()
+        )),
+
+        Expr::StrongFairness(_, _) => Err(EvalError::DomainError(
+            "temporal operator SF (strong fairness) cannot be evaluated in explicit-state model checking".into()
+        )),
+
+        Expr::BoxAction(_, _) => Err(EvalError::DomainError(
+            "temporal operator [A]_v (box action) cannot be evaluated in explicit-state model checking".into()
+        )),
+
+        Expr::DiamondAction(_, _) => Err(EvalError::DomainError(
+            "temporal operator <<A>>_v (diamond action) cannot be evaluated in explicit-state model checking".into()
+        )),
+
+        Expr::EnabledOp(_) => Err(EvalError::DomainError(
+            "ENABLED operator cannot be evaluated in explicit-state model checking".into()
+        )),
     }
 }
 
@@ -1392,4 +1606,24 @@ fn permutations(elements: &[Value]) -> Vec<Vec<Value>> {
         }
     }
     result
+}
+
+fn enumerate_subbags(
+    elements: &[(Value, i64)],
+    idx: usize,
+    current: BTreeMap<Value, Value>,
+    results: &mut BTreeSet<Value>,
+) {
+    if idx >= elements.len() {
+        results.insert(Value::Fn(current));
+        return;
+    }
+    let (elem, max_count) = &elements[idx];
+    for count in 0..=*max_count {
+        let mut next = current.clone();
+        if count > 0 {
+            next.insert(elem.clone(), Value::Int(count));
+        }
+        enumerate_subbags(elements, idx + 1, next, results);
+    }
 }

@@ -123,6 +123,19 @@ pub enum Token {
     TLCSet,
     Any,
     TLCEval,
+    IsABag,
+    BagToSet,
+    SetToBag,
+    BagIn,
+    EmptyBag,
+    BagUnion,
+    SubBag,
+    BagOfAll,
+    BagCardinality,
+    CopiesIn,
+    BagAdd,
+    BagSub,
+    SqSubseteq,
     CustomOp(Arc<str>),
 
     Eof,
@@ -326,6 +339,15 @@ impl<'a> Lexer<'a> {
         }
         if self.consume("\\times") || self.consume("\\X") || self.consume("×") {
             return Ok(Token::Times);
+        }
+        if self.consume("\\oplus") || self.consume("(+)") || self.consume("⊕") {
+            return Ok(Token::BagAdd);
+        }
+        if self.consume("\\ominus") || self.consume("(-)") || self.consume("⊖") {
+            return Ok(Token::BagSub);
+        }
+        if self.consume("\\sqsubseteq") || self.consume("⊑") {
+            return Ok(Token::SqSubseteq);
         }
         if self.consume("\\div") {
             return Ok(Token::Div);
@@ -607,6 +629,16 @@ impl<'a> Lexer<'a> {
                 "TLCSet" => Token::TLCSet,
                 "Any" => Token::Any,
                 "TLCEval" => Token::TLCEval,
+                "IsABag" => Token::IsABag,
+                "BagToSet" => Token::BagToSet,
+                "SetToBag" => Token::SetToBag,
+                "BagIn" => Token::BagIn,
+                "EmptyBag" => Token::EmptyBag,
+                "BagUnion" => Token::BagUnion,
+                "SubBag" => Token::SubBag,
+                "BagOfAll" => Token::BagOfAll,
+                "BagCardinality" => Token::BagCardinality,
+                "CopiesIn" => Token::CopiesIn,
                 "BY" => Token::By,
                 "DEF" => Token::ProofDef,
                 "QED" => Token::Qed,

@@ -15,6 +15,7 @@ pub fn load_module(name: &str, env: &mut Env) {
         "Sequences" => load_sequences(env),
         "FiniteSets" => load_finitesets(env),
         "TLC" => load_tlc(env),
+        "Bags" => load_bags(env),
         _ => {}
     }
 }
@@ -37,4 +38,7 @@ fn load_finitesets(_env: &mut Env) {
 }
 
 fn load_tlc(_env: &mut Env) {
+}
+
+fn load_bags(_env: &mut Env) {
 }

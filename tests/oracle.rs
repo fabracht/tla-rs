@@ -373,3 +373,14 @@ fn test_should_pass_tlc_operators() {
         result
     );
 }
+
+#[test]
+fn test_should_pass_bags_operators() {
+    let path = Path::new("test_cases/should_pass/bags_operators.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "bags_operators.tla should pass, got: {:?}",
+        result
+    );
+}

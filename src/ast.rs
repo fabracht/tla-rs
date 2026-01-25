@@ -100,11 +100,34 @@ pub enum Expr {
     Any,
     TLCEval(Box<Expr>),
 
+    IsABag(Box<Expr>),
+    BagToSet(Box<Expr>),
+    SetToBag(Box<Expr>),
+    BagIn(Box<Expr>, Box<Expr>),
+    EmptyBag,
+    BagAdd(Box<Expr>, Box<Expr>),
+    BagSub(Box<Expr>, Box<Expr>),
+    BagUnion(Box<Expr>),
+    SqSubseteq(Box<Expr>, Box<Expr>),
+    SubBag(Box<Expr>),
+    BagOfAll(Box<Expr>, Box<Expr>),
+    BagCardinality(Box<Expr>),
+    CopiesIn(Box<Expr>, Box<Expr>),
+
     If(Box<Expr>, Box<Expr>, Box<Expr>),
     Let(Arc<str>, Box<Expr>, Box<Expr>),
     Case(Vec<(Expr, Expr)>),
 
     Unchanged(Vec<Arc<str>>),
+
+    Always(Box<Expr>),
+    Eventually(Box<Expr>),
+    LeadsTo(Box<Expr>, Box<Expr>),
+    WeakFairness(Arc<str>, Box<Expr>),
+    StrongFairness(Arc<str>, Box<Expr>),
+    BoxAction(Box<Expr>, Arc<str>),
+    DiamondAction(Box<Expr>, Arc<str>),
+    EnabledOp(Box<Expr>),
 }
 
 pub type Env = BTreeMap<Arc<str>, Value>;

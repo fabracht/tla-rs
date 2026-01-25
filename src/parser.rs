@@ -384,7 +384,9 @@ impl Parser {
                     left = Expr::Equiv(Box::new(left), Box::new(right));
                 }
                 Token::LeadsTo => {
-                    return Err("temporal operator ~> (leads-to) is not supported".into());
+                    self.advance();
+                    let right = self.parse_or()?;
+                    left = Expr::LeadsTo(Box::new(left), Box::new(right));
                 }
                 _ => break,
             }
@@ -481,6 +483,11 @@ impl Parser {
                 let right = self.parse_additive()?;
                 Ok(Expr::ProperSubset(Box::new(right), Box::new(left)))
             }
+            Token::SqSubseteq => {
+                self.advance();
+                let right = self.parse_additive()?;
+                Ok(Expr::SqSubseteq(Box::new(left), Box::new(right)))
+            }
             _ => Ok(left),
         }
     }
@@ -544,6 +551,16 @@ impl Parser {
                     self.advance();
                     let right = self.parse_multiplicative()?;
                     left = Expr::CustomOp(op_name, Box::new(left), Box::new(right));
+                }
+                Token::BagAdd => {
+                    self.advance();
+                    let right = self.parse_multiplicative()?;
+                    left = Expr::BagAdd(Box::new(left), Box::new(right));
+                }
+                Token::BagSub => {
+                    self.advance();
+                    let right = self.parse_multiplicative()?;
+                    left = Expr::BagSub(Box::new(left), Box::new(right));
                 }
                 _ => break,
             }
@@ -775,6 +792,79 @@ impl Parser {
                 self.expect(Token::RParen)?;
                 Ok(Expr::TLCEval(Box::new(val)))
             }
+            Token::IsABag => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let bag = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::IsABag(Box::new(bag)))
+            }
+            Token::BagToSet => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let bag = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::BagToSet(Box::new(bag)))
+            }
+            Token::SetToBag => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let set = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::SetToBag(Box::new(set)))
+            }
+            Token::BagIn => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let elem = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let bag = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::BagIn(Box::new(elem), Box::new(bag)))
+            }
+            Token::EmptyBag => {
+                self.advance();
+                Ok(Expr::EmptyBag)
+            }
+            Token::BagUnion => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let bags = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::BagUnion(Box::new(bags)))
+            }
+            Token::SubBag => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let bag = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::SubBag(Box::new(bag)))
+            }
+            Token::BagOfAll => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let expr = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let bag = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::BagOfAll(Box::new(expr), Box::new(bag)))
+            }
+            Token::BagCardinality => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let bag = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::BagCardinality(Box::new(bag)))
+            }
+            Token::CopiesIn => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let elem = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let bag = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::CopiesIn(Box::new(elem), Box::new(bag)))
+            }
             Token::Unchanged => {
                 self.advance();
                 self.parse_unchanged()
@@ -807,8 +897,29 @@ impl Parser {
                 self.advance();
                 self.parse_let()
             }
-            Token::Eventually => Err("temporal operator <> (eventually) is not supported".into()),
-            Token::Always => Err("temporal operator [] (always) is not supported".into()),
+            Token::Eventually => {
+                self.advance();
+                let inner = self.parse_unary()?;
+                Ok(Expr::Eventually(Box::new(inner)))
+            }
+            Token::Always => {
+                self.advance();
+                if *self.peek() == Token::LBracket {
+                    self.advance();
+                    let action = self.parse_expr()?;
+                    self.expect(Token::RBracket)?;
+                    self.expect(Token::Underscore)?;
+                    let var = self.expect_ident()?;
+                    return Ok(Expr::BoxAction(Box::new(action), var));
+                }
+                let inner = self.parse_unary()?;
+                Ok(Expr::Always(Box::new(inner)))
+            }
+            Token::Enabled => {
+                self.advance();
+                let action = self.parse_unary()?;
+                Ok(Expr::EnabledOp(Box::new(action)))
+            }
             _ => self.parse_postfix(),
         }
     }
@@ -878,6 +989,22 @@ impl Parser {
             Token::At => {
                 self.advance();
                 Ok(Expr::OldValue)
+            }
+            Token::Ident(name) if name.starts_with("WF_") => {
+                let var: Arc<str> = name[3..].into();
+                self.advance();
+                self.expect(Token::LParen)?;
+                let action = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::WeakFairness(var, Box::new(action)))
+            }
+            Token::Ident(name) if name.starts_with("SF_") => {
+                let var: Arc<str> = name[3..].into();
+                self.advance();
+                self.expect(Token::LParen)?;
+                let action = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::StrongFairness(var, Box::new(action)))
             }
             Token::Ident(name) => {
                 self.advance();
@@ -1123,15 +1250,36 @@ impl Parser {
     fn parse_tuple(&mut self) -> Result<Expr> {
         if *self.peek() == Token::RAngle {
             self.advance();
+            if *self.peek() == Token::Underscore {
+                self.advance();
+                let var = self.expect_ident()?;
+                return Ok(Expr::DiamondAction(Box::new(Expr::TupleLit(vec![])), var));
+            }
             return Ok(Expr::TupleLit(vec![]));
         }
 
-        let mut elems = vec![self.parse_expr()?];
+        let first = self.parse_expr()?;
+        if *self.peek() == Token::RAngle {
+            self.advance();
+            if *self.peek() == Token::Underscore {
+                self.advance();
+                let var = self.expect_ident()?;
+                return Ok(Expr::DiamondAction(Box::new(first), var));
+            }
+            return Ok(Expr::TupleLit(vec![first]));
+        }
+
+        let mut elems = vec![first];
         while *self.peek() == Token::Comma {
             self.advance();
             elems.push(self.parse_expr()?);
         }
         self.expect(Token::RAngle)?;
+        if *self.peek() == Token::Underscore {
+            self.advance();
+            let var = self.expect_ident()?;
+            return Ok(Expr::DiamondAction(Box::new(Expr::TupleLit(elems)), var));
+        }
         Ok(Expr::TupleLit(elems))
     }
 
