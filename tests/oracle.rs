@@ -437,3 +437,26 @@ fn test_transitive_closure() {
         result
     );
 }
+
+#[test]
+fn test_official_hanoi() {
+    let path = Path::new("test_cases/official/Hanoi.tla");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let spec = parse(&input).expect("failed to parse spec");
+
+    let mut domains = Env::new();
+    domains.insert(Arc::from("D"), Value::Int(2));
+    domains.insert(Arc::from("N"), Value::Int(3));
+
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
+    let result = check(&spec, &domains, &config);
+
+    assert!(
+        matches!(result, CheckResult::InvariantViolation { .. }),
+        "Hanoi.tla should find solution (violate NotSolved), got: {:?}",
+        result
+    );
+}

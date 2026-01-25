@@ -717,17 +717,17 @@ impl Parser {
             }
             Token::Domain => {
                 self.advance();
-                let expr = self.parse_postfix()?;
+                let expr = self.parse_unary()?;
                 Ok(Expr::Domain(Box::new(expr)))
             }
             Token::Subset => {
                 self.advance();
-                let expr = self.parse_postfix()?;
+                let expr = self.parse_unary()?;
                 Ok(Expr::Powerset(Box::new(expr)))
             }
             Token::BigUnion => {
                 self.advance();
-                let expr = self.parse_postfix()?;
+                let expr = self.parse_unary()?;
                 Ok(Expr::BigUnion(Box::new(expr)))
             }
             Token::Cardinality => {
@@ -1452,7 +1452,7 @@ impl Parser {
                 }
             }
             self.expect(Token::In)?;
-            let domain = self.parse_additive()?;
+            let domain = self.parse_range()?;
             for v in vars {
                 bindings.push((v, domain.clone()));
             }

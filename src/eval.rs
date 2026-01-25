@@ -63,6 +63,133 @@ pub enum EvalError {
 
 type Result<T> = std::result::Result<T, EvalError>;
 
+fn eval_fn_def_recursive(
+    fn_name: &Arc<str>,
+    param: &Arc<str>,
+    domain: &[Value],
+    body: &Expr,
+    env: &Env,
+    defs: &Definitions,
+) -> Result<BTreeMap<Value, Value>> {
+    let memo: RefCell<BTreeMap<Value, Value>> = RefCell::new(BTreeMap::new());
+
+    for val in domain.iter() {
+        if memo.borrow().contains_key(val) {
+            continue;
+        }
+        let mut local = env.clone();
+        local.insert(param.clone(), val.clone());
+        let result = eval_with_memo(body, &local, defs, fn_name, param, domain, &memo)?;
+        memo.borrow_mut().insert(val.clone(), result);
+    }
+
+    Ok(memo.into_inner())
+}
+
+fn eval_with_memo(
+    expr: &Expr,
+    env: &Env,
+    defs: &Definitions,
+    fn_name: &Arc<str>,
+    fn_param: &Arc<str>,
+    fn_domain: &[Value],
+    memo: &RefCell<BTreeMap<Value, Value>>,
+) -> Result<Value> {
+    match expr {
+        Expr::FnApp(f, arg) => {
+            if let Expr::Var(name) = f.as_ref()
+                && name == fn_name
+            {
+                let av = eval_with_memo(arg, env, defs, fn_name, fn_param, fn_domain, memo)?;
+                if let Some(v) = memo.borrow().get(&av) {
+                    return Ok(v.clone());
+                }
+                if let Some((params, fn_body)) = defs.get(name)
+                    && params.is_empty()
+                    && let Expr::FnDef(p, _, body) = fn_body
+                {
+                    let mut local = env.clone();
+                    local.insert(p.clone(), av.clone());
+                    let result =
+                        eval_with_memo(body, &local, defs, fn_name, fn_param, fn_domain, memo)?;
+                    memo.borrow_mut().insert(av, result.clone());
+                    return Ok(result);
+                }
+            }
+            let fval = eval_with_memo(f, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            let av = eval_with_memo(arg, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            match fval {
+                Value::Fn(fv) => fv
+                    .get(&av)
+                    .cloned()
+                    .ok_or_else(|| EvalError::DomainError("key not in function domain".into())),
+                _ => Err(EvalError::TypeMismatch { expected: "Fn", got: fval }),
+            }
+        }
+
+        Expr::Let(var, binding, body) => {
+            let mut local_defs = defs.clone();
+            local_defs.insert(var.clone(), (vec![], (**binding).clone()));
+            eval_with_memo(body, env, &local_defs, fn_name, fn_param, fn_domain, memo)
+        }
+
+        Expr::If(cond, then_br, else_br) => {
+            let cv = eval_with_memo(cond, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            match cv {
+                Value::Bool(true) => eval_with_memo(then_br, env, defs, fn_name, fn_param, fn_domain, memo),
+                Value::Bool(false) => eval_with_memo(else_br, env, defs, fn_name, fn_param, fn_domain, memo),
+                _ => Err(EvalError::TypeMismatch { expected: "Bool", got: cv }),
+            }
+        }
+
+        Expr::Add(l, r) => {
+            let lv = eval_with_memo(l, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            let rv = eval_with_memo(r, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            match (lv, rv) {
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
+                (a, b) => Err(EvalError::DomainError(format!("cannot add {:?} and {:?}", a, b))),
+            }
+        }
+
+        Expr::Eq(l, r) => {
+            let lv = eval_with_memo(l, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            let rv = eval_with_memo(r, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            Ok(Value::Bool(lv == rv))
+        }
+
+        Expr::SetMinus(l, r) => {
+            let lv = eval_with_memo(l, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            let rv = eval_with_memo(r, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            match (lv, rv) {
+                (Value::Set(a), Value::Set(b)) => Ok(Value::Set(a.difference(&b).cloned().collect())),
+                (a, b) => Err(EvalError::DomainError(format!("set minus on {:?} and {:?}", a, b))),
+            }
+        }
+
+        Expr::SetEnum(elems) => {
+            let mut result = BTreeSet::new();
+            for e in elems {
+                result.insert(eval_with_memo(e, env, defs, fn_name, fn_param, fn_domain, memo)?);
+            }
+            Ok(Value::Set(result))
+        }
+
+        Expr::Var(name) => {
+            if let Some(val) = env.get(name) {
+                return Ok(val.clone());
+            }
+            if let Some((params, body)) = defs.get(name)
+                && params.is_empty()
+            {
+                return eval_with_memo(body, env, defs, fn_name, fn_param, fn_domain, memo);
+            }
+            Err(EvalError::UndefinedVar(name.clone()))
+        }
+
+        _ => eval(expr, env, defs),
+    }
+}
+
 pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
     match expr {
         Expr::Lit(v) => Ok(v.clone()),
@@ -602,13 +729,9 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
 
         Expr::FnDef(var, domain, body) => {
             let dom = eval_set(domain, env, defs)?;
-            let mut result = BTreeMap::new();
-            for val in dom {
-                let mut local = env.clone();
-                local.insert(var.clone(), val.clone());
-                let out = eval(body, &local, defs)?;
-                result.insert(val, out);
-            }
+            let dom_vec: Vec<_> = dom.into_iter().collect();
+            let placeholder_name: Arc<str> = "".into();
+            let result = eval_fn_def_recursive(&placeholder_name, var, &dom_vec, body, env, defs)?;
             Ok(Value::Fn(result))
         }
 
@@ -778,10 +901,23 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::TupleAccess(tup, idx) => {
-            let tv = eval_tuple(tup, env, defs)?;
-            tv.get(*idx)
-                .cloned()
-                .ok_or_else(|| EvalError::DomainError(format!("index {} out of bounds", idx)))
+            let v = eval(tup, env, defs)?;
+            match v {
+                Value::Tuple(tv) => tv
+                    .get(*idx)
+                    .cloned()
+                    .ok_or_else(|| EvalError::DomainError(format!("index {} out of bounds", idx))),
+                Value::Fn(fv) => {
+                    let key = Value::Int((*idx + 1) as i64);
+                    fv.get(&key)
+                        .cloned()
+                        .ok_or_else(|| EvalError::DomainError("key not in function domain".into()))
+                }
+                other => Err(EvalError::TypeMismatch {
+                    expected: "Tuple or Fn",
+                    got: other,
+                }),
+            }
         }
 
         Expr::Len(seq) => {
@@ -1196,10 +1332,21 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Let(var, binding, body) => {
-            let val = eval(binding, env, defs)?;
-            let mut local = env.clone();
-            local.insert(var.clone(), val);
-            eval(body, &local, defs)
+            if let Expr::FnDef(param, domain_expr, fn_body) = binding.as_ref() {
+                let mut local_defs = defs.clone();
+                local_defs.insert(var.clone(), (vec![], (**binding).clone()));
+                let dom = eval_set(domain_expr, env, &local_defs)?;
+                let dom_vec: Vec<_> = dom.into_iter().collect();
+                let fn_result = eval_fn_def_recursive(var, param, &dom_vec, fn_body, env, &local_defs)?;
+                let mut local = env.clone();
+                local.insert(var.clone(), Value::Fn(fn_result));
+                eval(body, &local, &local_defs)
+            } else {
+                let val = eval(binding, env, defs)?;
+                let mut local = env.clone();
+                local.insert(var.clone(), val);
+                eval(body, &local, defs)
+            }
         }
 
         Expr::Case(branches) => {
@@ -1568,6 +1715,20 @@ fn collect_candidates(
                 && let Some(current) = env.get(var) {
                     candidates.insert(current.clone());
                 }
+        }
+
+        Expr::FnCall(name, args) => {
+            if let Some((params, body)) = defs.get(name)
+                && params.len() == args.len()
+            {
+                let mut local = env.clone();
+                for (param, arg) in params.iter().zip(args.iter()) {
+                    if let Ok(val) = eval(arg, env, defs) {
+                        local.insert(param.clone(), val);
+                    }
+                }
+                collect_candidates(body, &local, var, defs, candidates)?;
+            }
         }
 
         _ => {}
