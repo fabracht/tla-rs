@@ -16,6 +16,7 @@ pub fn load_module(name: &str, env: &mut Env) {
         "FiniteSets" => load_finitesets(env),
         "TLC" => load_tlc(env),
         "Bags" => load_bags(env),
+        "Bits" => {}
         _ => {}
     }
 }

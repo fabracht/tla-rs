@@ -266,6 +266,72 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             Ok(Value::Int(lv % rv))
         }
 
+        Expr::BitwiseAnd(l, r) => {
+            let lv = eval_int(l, env, defs)?;
+            let rv = eval_int(r, env, defs)?;
+            Ok(Value::Int(lv & rv))
+        }
+
+        Expr::TransitiveClosure(rel_expr) => {
+            let rel = eval_set(rel_expr, env, defs)?;
+            let mut result = rel.clone();
+            let mut changed = true;
+            while changed {
+                changed = false;
+                let pairs: Vec<_> = result.iter().cloned().collect();
+                for p1 in &pairs {
+                    for p2 in &pairs {
+                        if let (Value::Tuple(t1), Value::Tuple(t2)) = (p1, p2)
+                            && t1.len() == 2 && t2.len() == 2 && t1[1] == t2[0]
+                        {
+                            let new_pair = Value::Tuple(vec![t1[0].clone(), t2[1].clone()]);
+                            if !result.contains(&new_pair) {
+                                result.insert(new_pair);
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(Value::Set(result))
+        }
+
+        Expr::ReflexiveTransitiveClosure(rel_expr) => {
+            let rel = eval_set(rel_expr, env, defs)?;
+            let mut result = rel.clone();
+            let mut changed = true;
+            while changed {
+                changed = false;
+                let pairs: Vec<_> = result.iter().cloned().collect();
+                for p1 in &pairs {
+                    for p2 in &pairs {
+                        if let (Value::Tuple(t1), Value::Tuple(t2)) = (p1, p2)
+                            && t1.len() == 2 && t2.len() == 2 && t1[1] == t2[0]
+                        {
+                            let new_pair = Value::Tuple(vec![t1[0].clone(), t2[1].clone()]);
+                            if !result.contains(&new_pair) {
+                                result.insert(new_pair);
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+            for pair in result.clone() {
+                if let Value::Tuple(t) = pair
+                    && t.len() == 2
+                {
+                    result.insert(Value::Tuple(vec![t[0].clone(), t[0].clone()]));
+                    result.insert(Value::Tuple(vec![t[1].clone(), t[1].clone()]));
+                }
+            }
+            Ok(Value::Set(result))
+        }
+
+        Expr::ActionCompose(_, _) => Err(EvalError::DomainError(
+            "action composition (\\cdot) cannot be evaluated in explicit-state model checking".into()
+        )),
+
         Expr::Exp(base, exp) => {
             let b = eval_int(base, env, defs)?;
             let e = eval_int(exp, env, defs)?;
@@ -817,12 +883,19 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         )),
 
         Expr::SystemTime => {
-            use std::time::{SystemTime, UNIX_EPOCH};
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0);
-            Ok(Value::Int(now))
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                Ok(Value::Int(now))
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                Ok(Value::Int(0))
+            }
         }
 
         Expr::Permutations(set_expr) => {

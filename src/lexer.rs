@@ -100,6 +100,9 @@ pub enum Token {
     Dollar,
     Pipe,
     Caret,
+    TransitiveClosure,
+    ReflexiveTransitiveClosure,
+    ActionCompose,
     Ampersand,
     LeftArrow,
     RightArrow,
@@ -356,6 +359,9 @@ impl<'a> Lexer<'a> {
         if self.consume("\\div") {
             return Ok(Token::Div);
         }
+        if self.consume("\\cdot") || self.consume("⋅") {
+            return Ok(Token::ActionCompose);
+        }
         if self.starts_with("\\b") {
             let rest = &self.input[self.pos + 2..];
             if let Some(c) = rest.chars().next()
@@ -503,6 +509,12 @@ impl<'a> Lexer<'a> {
         if c == '|' {
             self.advance();
             return Ok(Token::Pipe);
+        }
+        if self.consume("^+") {
+            return Ok(Token::TransitiveClosure);
+        }
+        if self.consume("^*") {
+            return Ok(Token::ReflexiveTransitiveClosure);
         }
         if c == '^' {
             self.advance();

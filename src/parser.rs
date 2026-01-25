@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use crate::ast::{Expr, Spec, Value};
+use crate::ast::{Expr, InstanceDecl, Spec, Value};
 use crate::lexer::{Lexer, Token};
 
 pub struct Parser {
@@ -13,6 +13,7 @@ pub struct Parser {
     constants: Vec<Arc<str>>,
     extends: Vec<Arc<str>>,
     assumes: Vec<Expr>,
+    instances: Vec<InstanceDecl>,
 }
 
 #[derive(Debug)]
@@ -49,6 +50,7 @@ impl Parser {
             constants: Vec::new(),
             extends: Vec::new(),
             assumes: Vec::new(),
+            instances: Vec::new(),
         })
     }
 
@@ -64,6 +66,20 @@ impl Parser {
         !s.is_empty()
             && (s.chars().all(|c| c.is_ascii_uppercase())
                 || s.ends_with('_'))
+    }
+
+    fn is_invariant_name(name: &str) -> bool {
+        for suffix in ["TypeOK", "Inv"] {
+            if name.starts_with(suffix) {
+                return true;
+            }
+            if let Some(prefix) = name.strip_suffix(suffix)
+                && Self::is_module_prefix(prefix)
+            {
+                return true;
+            }
+        }
+        name.starts_with("NotSolved")
     }
 
     fn advance(&mut self) -> Token {
@@ -222,14 +238,16 @@ impl Parser {
                     self.advance();
                     if *self.peek() == Token::Instance {
                         self.advance();
-                        self.parse_instance()?;
+                        let inst = self.parse_instance(None)?;
+                        self.instances.push(inst);
                     } else if let Token::Ident(_) = self.peek() {
                         self.skip_to_next_definition();
                     }
                 }
                 Token::Instance => {
                     self.advance();
-                    self.parse_instance()?;
+                    let inst = self.parse_instance(None)?;
+                    self.instances.push(inst);
                 }
                 Token::Lemma | Token::ProofStep => {
                     self.skip_to_next_definition();
@@ -276,6 +294,13 @@ impl Parser {
                         continue;
                     }
 
+                    if *self.peek() == Token::Instance {
+                        self.advance();
+                        let inst = self.parse_instance(Some(name))?;
+                        self.instances.push(inst);
+                        continue;
+                    }
+
                     let expr = match self.parse_expr() {
                         Ok(e) => e,
                         Err(_) => {
@@ -295,10 +320,7 @@ impl Parser {
                     } else if is_next_name {
                         next = Some(expr.clone());
                         self.definitions.insert(name, expr);
-                    } else if name.starts_with("Inv")
-                        || name.starts_with("TypeOK")
-                        || name.starts_with("NotSolved")
-                    {
+                    } else if Self::is_invariant_name(&name) {
                         invariants.push(expr.clone());
                         invariant_names.push(Some(name.clone()));
                         self.definitions.insert(name, expr);
@@ -334,6 +356,7 @@ impl Parser {
             extends: self.extends.clone(),
             definitions: all_defs,
             assumes: self.assumes.clone(),
+            instances: self.instances.clone(),
             init,
             next,
             invariants,
@@ -432,11 +455,21 @@ impl Parser {
             self.skip_label();
         }
         let mut left = self.parse_comparison()?;
-        while *self.peek() == Token::And {
-            self.advance();
-            self.skip_label();
-            let right = self.parse_comparison()?;
-            left = Expr::And(Box::new(left), Box::new(right));
+        loop {
+            match self.peek() {
+                Token::And => {
+                    self.advance();
+                    self.skip_label();
+                    let right = self.parse_comparison()?;
+                    left = Expr::And(Box::new(left), Box::new(right));
+                }
+                Token::ActionCompose => {
+                    self.advance();
+                    let right = self.parse_comparison()?;
+                    left = Expr::ActionCompose(Box::new(left), Box::new(right));
+                }
+                _ => break,
+            }
         }
         Ok(left)
     }
@@ -647,6 +680,11 @@ impl Parser {
                     self.advance();
                     let right = self.parse_exponential()?;
                     left = Expr::Mod(Box::new(left), Box::new(right));
+                }
+                Token::Ampersand => {
+                    self.advance();
+                    let right = self.parse_exponential()?;
+                    left = Expr::BitwiseAnd(Box::new(left), Box::new(right));
                 }
                 _ => break,
             }
@@ -1022,6 +1060,14 @@ impl Parser {
                     self.advance();
                     let field = self.expect_ident()?;
                     expr = Expr::RecordAccess(Box::new(expr), field);
+                }
+                Token::TransitiveClosure => {
+                    self.advance();
+                    expr = Expr::TransitiveClosure(Box::new(expr));
+                }
+                Token::ReflexiveTransitiveClosure => {
+                    self.advance();
+                    expr = Expr::ReflexiveTransitiveClosure(Box::new(expr));
                 }
                 _ => break,
             }
@@ -1569,21 +1615,27 @@ impl Parser {
         Ok(())
     }
 
-    fn parse_instance(&mut self) -> Result<()> {
-        self.expect_ident()?;
+    fn parse_instance(&mut self, alias: Option<Arc<str>>) -> Result<InstanceDecl> {
+        let module_name = self.expect_ident()?;
+        let mut substitutions = Vec::new();
         if *self.peek() == Token::With {
             self.advance();
             loop {
-                self.expect_ident()?;
+                let param = self.expect_ident()?;
                 self.expect(Token::LeftArrow)?;
-                self.parse_expr()?;
+                let expr = self.parse_expr()?;
+                substitutions.push((param, expr));
                 if *self.peek() != Token::Comma {
                     break;
                 }
                 self.advance();
             }
         }
-        Ok(())
+        Ok(InstanceDecl {
+            alias,
+            module_name,
+            substitutions,
+        })
     }
 
     fn parse_except_updates(&mut self) -> Result<Vec<(Vec<Expr>, Expr)>> {

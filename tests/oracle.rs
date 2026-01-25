@@ -384,3 +384,56 @@ fn test_should_pass_bags_operators() {
         result
     );
 }
+
+#[test]
+fn test_official_twophase() {
+    let path = Path::new("test_cases/official/TwoPhase.tla");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let spec = parse(&input).expect("failed to parse spec");
+
+    let rm_set: BTreeSet<Value> = ["r1", "r2"]
+        .iter()
+        .map(|s| Value::Str(Arc::from(*s)))
+        .collect();
+
+    let mut domains = Env::new();
+    domains.insert(Arc::from("RM"), Value::Set(rm_set));
+
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
+    let result = check(&spec, &domains, &config);
+
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "TwoPhase.tla should pass, got: {:?}",
+        result
+    );
+    assert!(
+        !spec.invariants.is_empty(),
+        "TwoPhase.tla should have TPTypeOK detected as invariant"
+    );
+}
+
+#[test]
+fn test_bitwise_and() {
+    let path = Path::new("test_cases/should_pass/bitwise_and.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "bitwise_and.tla should pass, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_transitive_closure() {
+    let path = Path::new("test_cases/should_pass/transitive_closure.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "transitive_closure.tla should pass, got: {:?}",
+        result
+    );
+}

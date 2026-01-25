@@ -36,6 +36,10 @@ pub enum Expr {
     Mod(Box<Expr>, Box<Expr>),
     Exp(Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
+    BitwiseAnd(Box<Expr>, Box<Expr>),
+    TransitiveClosure(Box<Expr>),
+    ReflexiveTransitiveClosure(Box<Expr>),
+    ActionCompose(Box<Expr>, Box<Expr>),
     Lt(Box<Expr>, Box<Expr>),
     Le(Box<Expr>, Box<Expr>),
     Gt(Box<Expr>, Box<Expr>),
@@ -159,12 +163,20 @@ impl Default for State {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct InstanceDecl {
+    pub alias: Option<Arc<str>>,
+    pub module_name: Arc<str>,
+    pub substitutions: Vec<(Arc<str>, Expr)>,
+}
+
 pub struct Spec {
     pub vars: Vec<Arc<str>>,
     pub constants: Vec<Arc<str>>,
     pub extends: Vec<Arc<str>>,
     pub definitions: BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>,
     pub assumes: Vec<Expr>,
+    pub instances: Vec<InstanceDecl>,
     pub init: Expr,
     pub next: Expr,
     pub invariants: Vec<Expr>,

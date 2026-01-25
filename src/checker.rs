@@ -1,14 +1,19 @@
 use std::collections::VecDeque;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::BufWriter;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
 use indexmap::IndexSet;
 
 use crate::ast::{Env, Spec, State, Value};
 use crate::eval::{eval, init_states, next_states, update_checker_stats, CheckerStats as EvalCheckerStats, EvalError};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::export::export_dot;
 use crate::stdlib;
 use crate::symmetry::SymmetryConfig;
@@ -18,6 +23,7 @@ pub struct CheckerConfig {
     pub max_states: usize,
     pub max_depth: usize,
     pub symmetric_constants: Vec<Arc<str>>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub export_dot_path: Option<PathBuf>,
     pub allow_deadlock: bool,
 }
@@ -28,6 +34,7 @@ impl Default for CheckerConfig {
             max_states: 1_000_000,
             max_depth: 100,
             symmetric_constants: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             export_dot_path: None,
             allow_deadlock: false,
         }
@@ -141,7 +148,17 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         return CheckResult::NoInitialStates;
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     let start_time = Instant::now();
+    #[cfg(not(target_arch = "wasm32"))]
+    let elapsed_secs = || start_time.elapsed().as_secs_f64();
+    #[cfg(target_arch = "wasm32")]
+    let elapsed_secs = || 0.0_f64;
+    #[cfg(not(target_arch = "wasm32"))]
+    let elapsed_secs_i64 = || start_time.elapsed().as_secs() as i64;
+    #[cfg(target_arch = "wasm32")]
+    let elapsed_secs_i64 = || 0_i64;
+
     let mut states: IndexSet<State> = IndexSet::new();
     let mut parent: Vec<Option<usize>> = Vec::new();
     let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
@@ -172,6 +189,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         trace
     };
 
+    #[cfg(not(target_arch = "wasm32"))]
     let do_export = |states: &IndexSet<State>, parent: &[Option<usize>], error_state: Option<usize>| {
         if let Some(ref path) = config.export_dot_path {
             match File::create(path) {
@@ -187,6 +205,8 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             }
         }
     };
+    #[cfg(target_arch = "wasm32")]
+    let do_export = |_states: &IndexSet<State>, _parent: &[Option<usize>], _error_state: Option<usize>| {};
 
     while let Some((current_idx, depth)) = queue.pop_front() {
         stats.states_explored += 1;
@@ -197,12 +217,12 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             level: depth as i64,
             diameter: stats.max_depth_reached as i64,
             queue: queue.len() as i64,
-            duration: start_time.elapsed().as_secs() as i64,
+            duration: elapsed_secs_i64(),
             generated: stats.transitions as i64,
         });
 
         if stats.states_explored.is_multiple_of(1000) {
-            let elapsed = start_time.elapsed().as_secs_f64();
+            let elapsed = elapsed_secs();
             let rate = stats.states_explored as f64 / elapsed.max(0.001);
             let remaining = config.max_states.saturating_sub(stats.states_explored);
             let eta = remaining as f64 / rate;
@@ -213,13 +233,13 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         }
 
         if stats.states_explored > config.max_states {
-            stats.elapsed_secs = start_time.elapsed().as_secs_f64();
+            stats.elapsed_secs = elapsed_secs();
             do_export(&states, &parent, None);
             return CheckResult::MaxStatesExceeded(stats);
         }
 
         if depth > config.max_depth {
-            stats.elapsed_secs = start_time.elapsed().as_secs_f64();
+            stats.elapsed_secs = elapsed_secs();
             do_export(&states, &parent, None);
             return CheckResult::MaxDepthExceeded(stats);
         }
@@ -235,7 +255,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 Ok(Value::Bool(true)) => {}
                 Ok(Value::Bool(false)) => {
                     let trace = reconstruct_trace(current_idx, &states, &parent);
-                    stats.elapsed_secs = start_time.elapsed().as_secs_f64();
+                    stats.elapsed_secs = elapsed_secs();
                     do_export(&states, &parent, Some(current_idx));
                     return CheckResult::InvariantViolation(
                         Counterexample {
@@ -279,7 +299,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
         if successors.is_empty() && !config.allow_deadlock {
             let trace = reconstruct_trace(current_idx, &states, &parent);
-            stats.elapsed_secs = start_time.elapsed().as_secs_f64();
+            stats.elapsed_secs = elapsed_secs();
             do_export(&states, &parent, Some(current_idx));
             return CheckResult::Deadlock(trace, stats);
         }
@@ -295,7 +315,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         }
     }
 
-    stats.elapsed_secs = start_time.elapsed().as_secs_f64();
+    stats.elapsed_secs = elapsed_secs();
     do_export(&states, &parent, None);
     CheckResult::Ok(stats)
 }
@@ -430,6 +450,7 @@ mod tests {
             extends: vec![],
             definitions: BTreeMap::new(),
             assumes: vec![],
+            instances: vec![],
             init: eq(var_expr("count"), lit_int(0)),
             next: and(
                 in_set(var_expr("count"), set_range(lit_int(0), lit_int(2))),
@@ -461,6 +482,7 @@ mod tests {
             extends: vec![],
             definitions: BTreeMap::new(),
             assumes: vec![],
+            instances: vec![],
             init: eq(var_expr("count"), lit_int(0)),
             next: and(
                 in_set(var_expr("count"), set_range(lit_int(0), lit_int(4))),
@@ -493,6 +515,7 @@ mod tests {
             extends: vec![],
             definitions: BTreeMap::new(),
             assumes: vec![],
+            instances: vec![],
             init: and(
                 eq(var_expr("lo"), lit_int(0)),
                 eq(var_expr("hi"), lit_int(0)),
@@ -542,6 +565,7 @@ mod tests {
             extends: vec![],
             definitions: BTreeMap::new(),
             assumes: vec![],
+            instances: vec![],
             init: eq(var_expr("x"), lit_int(0)),
             next: and(
                 eq(var_expr("x"), lit_int(99)),
@@ -573,6 +597,7 @@ mod tests {
             extends: vec![],
             definitions: BTreeMap::new(),
             assumes: vec![],
+            instances: vec![],
             init: eq(var_expr("x"), lit_int(0)),
             next: and(
                 lt(var_expr("x"), lit_int(2)),
