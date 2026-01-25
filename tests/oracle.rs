@@ -362,3 +362,14 @@ fn test_symmetry_reduces_states() {
         ),
     }
 }
+
+#[test]
+fn test_should_pass_tlc_operators() {
+    let path = Path::new("test_cases/should_pass/tlc_operators.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "tlc_operators.tla should pass, got: {:?}",
+        result
+    );
+}

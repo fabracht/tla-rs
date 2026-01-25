@@ -127,11 +127,20 @@ Cross-checked against:
 | ASCII | Description |
 |-------|-------------|
 | `Print(val, expr)` | Debug print (outputs to stderr) |
+| `PrintT(val)` | Shorthand for Print(val, TRUE) |
 | `Assert(cond, msg)` | Assertion (fails if cond false) |
+| `ToString(v)` | Convert value to string |
 | `SystemTime` | Current time in ms since epoch |
 | `JavaTime` | Errors (use SystemTime instead) |
 | `Permutations(S)` | All permutations of set (max 10 elements) |
 | `SortSeq(s, cmp)` | Sort sequence with comparator LAMBDA |
+| `RandomElement(S)` | Random element from set (deterministic with seed) |
+| `TLCGet(i)` | Get TLC state value at index i, or stats with string keys |
+| `TLCSet(i, v)` | Set TLC state value at index i |
+| `Any` | Special constant where `v \in Any` for all v |
+| `TLCEval(v)` | Force eager evaluation (no-op in tlc-executor) |
+
+**TLCGet String Keys:** `"distinct"`, `"level"`, `"diameter"`, `"queue"`, `"duration"`, `"generated"`
 
 ### Module Structure
 | Keyword | Description |
@@ -162,7 +171,7 @@ Cross-checked against:
 | `Integers` | ✓ Int set (bounded -1000..1000) |
 | `Sequences` | ✓ All ops including `Seq(S)`, `SelectSeq` |
 | `FiniteSets` | ✓ `Cardinality`, `IsFiniteSet` |
-| `TLC` | ✓ `Print`, `Assert`, `SystemTime`, `Permutations`, `SortSeq` |
+| `TLC` | ✓ All 14 operators implemented |
 | `Bags` | ✗ Not implemented |
 
 ---
@@ -191,7 +200,6 @@ Cross-checked against:
 ### Other Missing
 | Feature | Description |
 |---------|-------------|
-| `Seq(S)` | Set of all sequences over S |
 | `\cdot` | Action composition |
 | Unbounded quantifiers | `\E x : P` without domain |
 
@@ -285,3 +293,4 @@ Cross-checked against:
 - [Specifying Systems](https://lamport.azurewebsites.net/tla/book-02-08-08.pdf)
 - [Learn TLA+](https://learntla.com)
 - [TLA+ Summary](https://lamport.azurewebsites.net/tla/summary-standalone.pdf)
+- [TLC.tla source](https://github.com/tlaplus/tlaplus/blob/master/tlatools/org.lamport.tlatools/src/tla2sany/StandardModules/TLC.tla)

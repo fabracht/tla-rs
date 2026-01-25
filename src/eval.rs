@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -5,6 +6,51 @@ use crate::ast::{Env, Expr, State, Value};
 use crate::checker::format_value;
 
 pub type Definitions = BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>;
+
+thread_local! {
+    static RNG: RefCell<fastrand::Rng> = RefCell::new(fastrand::Rng::with_seed(0));
+    static TLC_STATE: RefCell<BTreeMap<i64, Value>> = const { RefCell::new(BTreeMap::new()) };
+    static CHECKER_STATS: RefCell<CheckerStats> = const { RefCell::new(CheckerStats::new()) };
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CheckerStats {
+    pub distinct: i64,
+    pub level: i64,
+    pub diameter: i64,
+    pub queue: i64,
+    pub duration: i64,
+    pub generated: i64,
+}
+
+impl CheckerStats {
+    pub const fn new() -> Self {
+        Self {
+            distinct: 0,
+            level: 0,
+            diameter: 0,
+            queue: 0,
+            duration: 0,
+            generated: 0,
+        }
+    }
+}
+
+pub fn set_random_seed(seed: u64) {
+    RNG.with(|rng| *rng.borrow_mut() = fastrand::Rng::with_seed(seed));
+}
+
+pub fn reset_tlc_state() {
+    TLC_STATE.with(|state| state.borrow_mut().clear());
+}
+
+pub fn update_checker_stats(stats: CheckerStats) {
+    CHECKER_STATS.with(|s| *s.borrow_mut() = stats);
+}
+
+pub fn set_checker_level(level: i64) {
+    CHECKER_STATS.with(|s| s.borrow_mut().level = level);
+}
 
 #[derive(Debug, Clone)]
 pub enum EvalError {
@@ -91,6 +137,9 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::In(elem, set) => {
+            if matches!(set.as_ref(), Expr::Any) {
+                return Ok(Value::Bool(true));
+            }
             if let Expr::FunctionSet(domain_expr, codomain_expr) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
                 if let Value::Fn(f) = ev {
@@ -135,6 +184,9 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::NotIn(elem, set) => {
+            if matches!(set.as_ref(), Expr::Any) {
+                return Ok(Value::Bool(false));
+            }
             if let Expr::FunctionSet(domain_expr, codomain_expr) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
                 if let Value::Fn(f) = ev {
@@ -816,6 +868,69 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             }
             Ok(Value::Tuple(result))
         }
+
+        Expr::PrintT(val) => {
+            let v = eval(val, env, defs)?;
+            eprintln!("[Print] {}", format_value(&v));
+            Ok(Value::Bool(true))
+        }
+
+        Expr::TLCToString(val) => {
+            let v = eval(val, env, defs)?;
+            Ok(Value::Str(format_value(&v).into()))
+        }
+
+        Expr::RandomElement(set_expr) => {
+            let set = eval_set(set_expr, env, defs)?;
+            if set.is_empty() {
+                return Err(EvalError::DomainError("RandomElement of empty set".into()));
+            }
+            let elements: Vec<_> = set.into_iter().collect();
+            let idx = RNG.with(|rng| rng.borrow_mut().usize(..elements.len()));
+            Ok(elements.into_iter().nth(idx).unwrap())
+        }
+
+        Expr::TLCGet(idx_expr) => {
+            let key = eval(idx_expr, env, defs)?;
+            match key {
+                Value::Int(idx) => TLC_STATE.with(|state| {
+                    Ok(state.borrow().get(&idx).cloned().unwrap_or(Value::Bool(false)))
+                }),
+                Value::Str(s) => CHECKER_STATS.with(|stats| {
+                    let stats = stats.borrow();
+                    match s.as_ref() {
+                        "distinct" => Ok(Value::Int(stats.distinct)),
+                        "level" => Ok(Value::Int(stats.level)),
+                        "diameter" => Ok(Value::Int(stats.diameter)),
+                        "queue" => Ok(Value::Int(stats.queue)),
+                        "duration" => Ok(Value::Int(stats.duration)),
+                        "generated" => Ok(Value::Int(stats.generated)),
+                        other => Err(EvalError::DomainError(format!(
+                            "TLCGet: unknown key \"{}\"", other
+                        ))),
+                    }
+                }),
+                other => Err(EvalError::TypeMismatch {
+                    expected: "Int or Str",
+                    got: other,
+                }),
+            }
+        }
+
+        Expr::TLCSet(idx_expr, val_expr) => {
+            let idx = eval_int(idx_expr, env, defs)?;
+            let val = eval(val_expr, env, defs)?;
+            TLC_STATE.with(|state| {
+                state.borrow_mut().insert(idx, val);
+            });
+            Ok(Value::Bool(true))
+        }
+
+        Expr::Any => Err(EvalError::DomainError(
+            "Any cannot be evaluated directly, only used in membership tests".into(),
+        )),
+
+        Expr::TLCEval(val) => eval(val, env, defs),
 
         Expr::If(cond, then_br, else_br) => {
             if eval_bool(cond, env, defs)? {

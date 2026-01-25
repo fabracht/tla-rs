@@ -727,6 +727,54 @@ impl Parser {
                 self.expect(Token::RParen)?;
                 Ok(Expr::SortSeq(Box::new(seq), Box::new(cmp)))
             }
+            Token::PrintT => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let val = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::PrintT(Box::new(val)))
+            }
+            Token::TLCToString => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let val = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::TLCToString(Box::new(val)))
+            }
+            Token::RandomElement => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let set = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::RandomElement(Box::new(set)))
+            }
+            Token::TLCGet => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let idx = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::TLCGet(Box::new(idx)))
+            }
+            Token::TLCSet => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let idx = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let val = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::TLCSet(Box::new(idx), Box::new(val)))
+            }
+            Token::Any => {
+                self.advance();
+                Ok(Expr::Any)
+            }
+            Token::TLCEval => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let val = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::TLCEval(Box::new(val)))
+            }
             Token::Unchanged => {
                 self.advance();
                 self.parse_unchanged()

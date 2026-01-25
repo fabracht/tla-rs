@@ -8,7 +8,7 @@ use std::time::Instant;
 use indexmap::IndexSet;
 
 use crate::ast::{Env, Spec, State, Value};
-use crate::eval::{eval, init_states, next_states, EvalError};
+use crate::eval::{eval, init_states, next_states, update_checker_stats, CheckerStats as EvalCheckerStats, EvalError};
 use crate::export::export_dot;
 use crate::stdlib;
 use crate::symmetry::SymmetryConfig;
@@ -121,6 +121,15 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         );
     }
 
+    update_checker_stats(EvalCheckerStats {
+        distinct: 0,
+        level: 0,
+        diameter: 0,
+        queue: 0,
+        duration: 0,
+        generated: 0,
+    });
+
     eprintln!("  Computing initial states...");
     let initial = match init_states(&spec.init, &spec.vars, &domains, &spec.definitions) {
         Ok(states) => states,
@@ -182,6 +191,15 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     while let Some((current_idx, depth)) = queue.pop_front() {
         stats.states_explored += 1;
         stats.max_depth_reached = stats.max_depth_reached.max(depth);
+
+        update_checker_stats(EvalCheckerStats {
+            distinct: states.len() as i64,
+            level: depth as i64,
+            diameter: stats.max_depth_reached as i64,
+            queue: queue.len() as i64,
+            duration: start_time.elapsed().as_secs() as i64,
+            generated: stats.transitions as i64,
+        });
 
         if stats.states_explored.is_multiple_of(1000) {
             let elapsed = start_time.elapsed().as_secs_f64();
