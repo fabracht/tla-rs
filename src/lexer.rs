@@ -95,6 +95,7 @@ pub enum Token {
     Lemma,
     Enabled,
     ProofStep,
+    LabelSep,
     Semicolon,
     Dollar,
     Pipe,
@@ -282,6 +283,9 @@ impl<'a> Lexer<'a> {
         }
         if self.consume("|->") {
             return Ok(Token::MapsTo);
+        }
+        if self.consume("::") {
+            return Ok(Token::LabelSep);
         }
         if self.consume(":>") {
             return Ok(Token::ColonGt);

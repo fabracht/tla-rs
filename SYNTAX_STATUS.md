@@ -168,6 +168,7 @@ Cross-checked against:
 | `CONSTANT(S)` | Constants |
 | `ASSUME` | Constraint on constants |
 | `RECURSIVE` | Recursive operator |
+| `Label::` | Proof labels (skipped) |
 
 ---
 
@@ -309,12 +310,17 @@ These operators are parsed into the AST but error at evaluation time. They can a
 
 | Spec | Status | Notes |
 |------|--------|-------|
-| DieHard | ✓ | Finds solution |
+| DieHard | ✓ | Finds solution (11 states) |
 | HourClock | ✓ | 12 states |
+| EWD840 | ✓ | Termination detection (64 states, N=2) |
+| TwoPhase | ✓ | Two-phase commit (56 states, RM=2) |
+| TCommit | ✓ | Transaction commit (12 states) |
+| MissionariesAndCannibals | ✓ | Classic puzzle (64 states) |
+| SimpleAllocator | ✓ | 64 states |
 | Voting | ✓ | Needs bounded Nat |
 | Paxos | ✓ | Large state space |
-| SimpleAllocator | ✓ | 64 states |
 | Prisoners | ✓ | 74 states |
+| Hanoi | ✗ | Needs Bits module (bitwise ops) |
 
 ---
 

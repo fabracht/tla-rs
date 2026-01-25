@@ -56,6 +56,16 @@ impl Parser {
         self.tokens.get(self.pos).unwrap_or(&Token::Eof)
     }
 
+    fn peek_n(&self, n: usize) -> &Token {
+        self.tokens.get(self.pos + n).unwrap_or(&Token::Eof)
+    }
+
+    fn is_module_prefix(s: &str) -> bool {
+        !s.is_empty()
+            && (s.chars().all(|c| c.is_ascii_uppercase())
+                || s.ends_with('_'))
+    }
+
     fn advance(&mut self) -> Token {
         let tok = self.peek().clone();
         if tok != Token::Eof {
@@ -274,17 +284,17 @@ impl Parser {
                         }
                     };
 
-                    let name_lower = name.to_lowercase();
-                    if name.as_ref() == "Init"
-                        || name_lower.ends_with("init")
-                        || name_lower.ends_with("ini")
-                    {
-                        init = Some(expr);
-                    } else if name.as_ref() == "Next"
-                        || name_lower.ends_with("next")
-                        || name_lower.ends_with("nxt")
-                    {
-                        next = Some(expr);
+                    let is_init_name = name.as_ref() == "Init"
+                        || (name.ends_with("Init") && Self::is_module_prefix(&name[..name.len() - 4]));
+                    let is_next_name = name.as_ref() == "Next"
+                        || (name.ends_with("Next") && Self::is_module_prefix(&name[..name.len() - 4]));
+
+                    if is_init_name {
+                        init = Some(expr.clone());
+                        self.definitions.insert(name, expr);
+                    } else if is_next_name {
+                        next = Some(expr.clone());
+                        self.definitions.insert(name, expr);
                     } else if name.starts_with("Inv")
                         || name.starts_with("TypeOK")
                         || name.starts_with("NotSolved")
@@ -394,13 +404,22 @@ impl Parser {
         Ok(left)
     }
 
+    fn skip_label(&mut self) {
+        if matches!(self.peek(), Token::Ident(_)) && *self.peek_n(1) == Token::LabelSep {
+            self.advance();
+            self.advance();
+        }
+    }
+
     fn parse_or(&mut self) -> Result<Expr> {
         if *self.peek() == Token::Or {
             self.advance();
+            self.skip_label();
         }
         let mut left = self.parse_and()?;
         while *self.peek() == Token::Or {
             self.advance();
+            self.skip_label();
             let right = self.parse_and()?;
             left = Expr::Or(Box::new(left), Box::new(right));
         }
@@ -410,85 +429,132 @@ impl Parser {
     fn parse_and(&mut self) -> Result<Expr> {
         if *self.peek() == Token::And {
             self.advance();
+            self.skip_label();
         }
         let mut left = self.parse_comparison()?;
         while *self.peek() == Token::And {
             self.advance();
+            self.skip_label();
             let right = self.parse_comparison()?;
             left = Expr::And(Box::new(left), Box::new(right));
         }
         Ok(left)
     }
 
+    fn parse_single_expr(&mut self) -> Result<Expr> {
+        self.parse_single_implies()
+    }
+
+    fn parse_single_implies(&mut self) -> Result<Expr> {
+        let mut left = self.parse_single_or()?;
+        loop {
+            match self.peek() {
+                Token::Implies => {
+                    self.advance();
+                    let right = self.parse_single_or()?;
+                    left = Expr::Implies(Box::new(left), Box::new(right));
+                }
+                Token::Equiv => {
+                    self.advance();
+                    let right = self.parse_single_or()?;
+                    left = Expr::Equiv(Box::new(left), Box::new(right));
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_single_or(&mut self) -> Result<Expr> {
+        let left = self.parse_single_and()?;
+        Ok(left)
+    }
+
+    fn parse_single_and(&mut self) -> Result<Expr> {
+        let left = self.parse_comparison()?;
+        Ok(left)
+    }
+
     fn parse_comparison(&mut self) -> Result<Expr> {
-        let left = self.parse_additive()?;
+        let left = self.parse_range()?;
         match self.peek() {
             Token::Eq => {
                 self.advance();
-                let right = self.parse_additive()?;
+                let right = self.parse_range()?;
                 Ok(Expr::Eq(Box::new(left), Box::new(right)))
             }
             Token::Neq => {
                 self.advance();
-                let right = self.parse_additive()?;
+                let right = self.parse_range()?;
                 Ok(Expr::Neq(Box::new(left), Box::new(right)))
             }
             Token::Lt => {
                 self.advance();
-                let right = self.parse_additive()?;
+                let right = self.parse_range()?;
                 Ok(Expr::Lt(Box::new(left), Box::new(right)))
             }
             Token::Le => {
                 self.advance();
-                let right = self.parse_additive()?;
+                let right = self.parse_range()?;
                 Ok(Expr::Le(Box::new(left), Box::new(right)))
             }
             Token::Gt => {
                 self.advance();
-                let right = self.parse_additive()?;
+                let right = self.parse_range()?;
                 Ok(Expr::Gt(Box::new(left), Box::new(right)))
             }
             Token::Ge => {
                 self.advance();
-                let right = self.parse_additive()?;
+                let right = self.parse_range()?;
                 Ok(Expr::Ge(Box::new(left), Box::new(right)))
             }
             Token::In => {
                 self.advance();
-                let right = self.parse_additive()?;
+                let right = self.parse_range()?;
                 Ok(Expr::In(Box::new(left), Box::new(right)))
             }
             Token::NotIn => {
                 self.advance();
-                let right = self.parse_additive()?;
+                let right = self.parse_range()?;
                 Ok(Expr::NotIn(Box::new(left), Box::new(right)))
             }
             Token::Subseteq => {
                 self.advance();
-                let right = self.parse_additive()?;
+                let right = self.parse_range()?;
                 Ok(Expr::Subset(Box::new(left), Box::new(right)))
             }
             Token::ProperSubset => {
                 self.advance();
-                let right = self.parse_additive()?;
+                let right = self.parse_range()?;
                 Ok(Expr::ProperSubset(Box::new(left), Box::new(right)))
             }
             Token::Supseteq => {
                 self.advance();
-                let right = self.parse_additive()?;
+                let right = self.parse_range()?;
                 Ok(Expr::Subset(Box::new(right), Box::new(left)))
             }
             Token::ProperSupset => {
                 self.advance();
-                let right = self.parse_additive()?;
+                let right = self.parse_range()?;
                 Ok(Expr::ProperSubset(Box::new(right), Box::new(left)))
             }
             Token::SqSubseteq => {
                 self.advance();
-                let right = self.parse_additive()?;
+                let right = self.parse_range()?;
                 Ok(Expr::SqSubseteq(Box::new(left), Box::new(right)))
             }
             _ => Ok(left),
+        }
+    }
+
+    fn parse_range(&mut self) -> Result<Expr> {
+        let left = self.parse_additive()?;
+        if *self.peek() == Token::DotDot {
+            self.advance();
+            let right = self.parse_additive()?;
+            Ok(Expr::SetRange(Box::new(left), Box::new(right)))
+        } else {
+            Ok(left)
         }
     }
 
@@ -525,11 +591,6 @@ impl Parser {
                     self.advance();
                     let right = self.parse_multiplicative()?;
                     left = Expr::Cartesian(Box::new(left), Box::new(right));
-                }
-                Token::DotDot => {
-                    self.advance();
-                    let right = self.parse_multiplicative()?;
-                    left = Expr::SetRange(Box::new(left), Box::new(right));
                 }
                 Token::Concat => {
                     self.advance();
@@ -1372,11 +1433,11 @@ impl Parser {
     }
 
     fn parse_if(&mut self) -> Result<Expr> {
-        let cond = self.parse_expr()?;
+        let cond = self.parse_single_expr()?;
         self.expect(Token::Then)?;
-        let then_br = self.parse_expr()?;
+        let then_br = self.parse_single_expr()?;
         self.expect(Token::Else)?;
-        let else_br = self.parse_expr()?;
+        let else_br = self.parse_single_expr()?;
         Ok(Expr::If(
             Box::new(cond),
             Box::new(then_br),
