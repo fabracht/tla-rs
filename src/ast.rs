@@ -132,6 +132,10 @@ pub enum Expr {
     BoxAction(Box<Expr>, Arc<str>),
     DiamondAction(Box<Expr>, Arc<str>),
     EnabledOp(Box<Expr>),
+
+    QualifiedCall(Arc<str>, Arc<str>, Vec<Expr>),
+
+    LabeledAction(Arc<str>, Box<Expr>),
 }
 
 pub type Env = BTreeMap<Arc<str>, Value>;
@@ -170,6 +174,12 @@ pub struct InstanceDecl {
     pub substitutions: Vec<(Arc<str>, Expr)>,
 }
 
+#[derive(Debug, Clone)]
+pub enum FairnessConstraint {
+    Weak(Expr, Expr),
+    Strong(Expr, Expr),
+}
+
 pub struct Spec {
     pub vars: Vec<Arc<str>>,
     pub constants: Vec<Arc<str>>,
@@ -181,4 +191,6 @@ pub struct Spec {
     pub next: Expr,
     pub invariants: Vec<Expr>,
     pub invariant_names: Vec<Option<Arc<str>>>,
+    pub fairness: Vec<FairnessConstraint>,
+    pub liveness_properties: Vec<Expr>,
 }
