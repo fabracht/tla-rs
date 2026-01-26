@@ -165,6 +165,16 @@ Cross-checked against:
 | `BagCardinality(B)` | | Sum of all counts |
 | `CopiesIn(e, B)` | | Number of copies of e in B |
 
+### Bits Module Operators
+| ASCII | Description |
+|-------|-------------|
+| `BitAnd(a, b)` | Bitwise AND |
+| `BitOr(a, b)` | Bitwise OR |
+| `BitXor(a, b)` | Bitwise XOR |
+| `BitNot(a)` | Bitwise NOT (complement) |
+| `ShiftLeft(a, n)` | Left shift by n bits (also `LeftShift`) |
+| `ShiftRight(a, n)` | Right shift by n bits (also `RightShift`) |
+
 ### Module Structure
 | Keyword | Description |
 |---------|-------------|
@@ -198,7 +208,7 @@ Cross-checked against:
 | `FiniteSets` | ✓ `Cardinality`, `IsFiniteSet` |
 | `TLC` | ✓ All 13 operators implemented |
 | `Bags` | ✓ All 13 operators implemented |
-| `Bits` | ⚠ Parsed but no operators implemented |
+| `Bits` | ✓ All 6 operators implemented |
 
 ---
 
@@ -234,7 +244,6 @@ These operators are parsed into the AST but error at evaluation time. They can a
 |---------|-------------|
 | `\cdot` | Action composition |
 | Unbounded quantifiers | `\E x : P` without domain |
-| Bits module operators | Bitwise AND, OR, XOR, shifts |
 
 ---
 
@@ -292,7 +301,7 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | Relation Operators | 100% ✓ |
 | TLC Module | 100% ✓ |
 | Bags Module | 100% ✓ |
-| Bits Module | 0% ✗ |
+| Bits Module | 100% ✓ |
 | Module System | 90% ⚠ |
 | Temporal/Liveness | 60% ⚠ |
 | Proofs | 0% ✗ |
@@ -303,9 +312,8 @@ These operators are parsed into the AST but error at evaluation time. They can a
 ## Implementation Priority
 
 ### Low Priority (Remaining)
-1. **Bits module** (`BitAnd`, `BitOr`, `BitXor`, `ShiftLeft`, `ShiftRight`)
-2. **Proof constructs** (currently safely skipped)
-3. **Unbounded quantifiers** (`\E x : P` without domain)
+1. **Proof constructs** (currently safely skipped)
+2. **Unbounded quantifiers** (`\E x : P` without domain)
 
 ---
 

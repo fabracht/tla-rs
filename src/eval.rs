@@ -768,6 +768,78 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::FnCall(name, args) => {
+            match name.as_ref() {
+                "BitAnd" => {
+                    if args.len() != 2 {
+                        return Err(EvalError::DomainError(format!(
+                            "BitAnd expects 2 args, got {}", args.len()
+                        )));
+                    }
+                    let a = eval_int(&args[0], env, defs)?;
+                    let b = eval_int(&args[1], env, defs)?;
+                    return Ok(Value::Int(a & b));
+                }
+                "BitOr" => {
+                    if args.len() != 2 {
+                        return Err(EvalError::DomainError(format!(
+                            "BitOr expects 2 args, got {}", args.len()
+                        )));
+                    }
+                    let a = eval_int(&args[0], env, defs)?;
+                    let b = eval_int(&args[1], env, defs)?;
+                    return Ok(Value::Int(a | b));
+                }
+                "BitXor" => {
+                    if args.len() != 2 {
+                        return Err(EvalError::DomainError(format!(
+                            "BitXor expects 2 args, got {}", args.len()
+                        )));
+                    }
+                    let a = eval_int(&args[0], env, defs)?;
+                    let b = eval_int(&args[1], env, defs)?;
+                    return Ok(Value::Int(a ^ b));
+                }
+                "BitNot" => {
+                    if args.len() != 1 {
+                        return Err(EvalError::DomainError(format!(
+                            "BitNot expects 1 arg, got {}", args.len()
+                        )));
+                    }
+                    let a = eval_int(&args[0], env, defs)?;
+                    return Ok(Value::Int(!a));
+                }
+                "ShiftLeft" | "LeftShift" => {
+                    if args.len() != 2 {
+                        return Err(EvalError::DomainError(format!(
+                            "{} expects 2 args, got {}", name, args.len()
+                        )));
+                    }
+                    let a = eval_int(&args[0], env, defs)?;
+                    let b = eval_int(&args[1], env, defs)?;
+                    if !(0..=63).contains(&b) {
+                        return Err(EvalError::DomainError(format!(
+                            "shift amount {} out of range (0-63)", b
+                        )));
+                    }
+                    return Ok(Value::Int(a << b));
+                }
+                "ShiftRight" | "RightShift" => {
+                    if args.len() != 2 {
+                        return Err(EvalError::DomainError(format!(
+                            "{} expects 2 args, got {}", name, args.len()
+                        )));
+                    }
+                    let a = eval_int(&args[0], env, defs)?;
+                    let b = eval_int(&args[1], env, defs)?;
+                    if !(0..=63).contains(&b) {
+                        return Err(EvalError::DomainError(format!(
+                            "shift amount {} out of range (0-63)", b
+                        )));
+                    }
+                    return Ok(Value::Int(a >> b));
+                }
+                _ => {}
+            }
             if let Some((params, body)) = defs.get(name) {
                 if args.len() != params.len() {
                     return Err(EvalError::DomainError(format!(
