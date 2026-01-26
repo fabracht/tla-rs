@@ -181,8 +181,9 @@ Cross-checked against:
 ## Partially Implemented ⚠️
 
 ### `INSTANCE` Module Instantiation
-- **Status:** Parsed but substitution not implemented
+- **Status:** Implemented for qualified calls (`Instance!Operator`)
 - **Example:** `INSTANCE ModuleName WITH param <- value`
+- **Note:** Requires module file to be in same directory as spec
 
 ### `RECURSIVE` Operator Definitions
 - **Status:** Parsed, works via lazy evaluation
@@ -265,9 +266,6 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | ⊖ | `\ominus` |
 | ⊑ | `\sqsubseteq` |
 
-### Not Supported (use ASCII equivalents)
-| Unicode | ASCII Equivalent |
-|---------|------------------|
 | ≡ | `<=>` |
 | ↦ | `\|->` |
 | → | `->` |
@@ -295,7 +293,7 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | TLC Module | 100% ✓ |
 | Bags Module | 100% ✓ |
 | Bits Module | 0% ✗ |
-| Module System | 70% ⚠ |
+| Module System | 90% ⚠ |
 | Temporal/Liveness | 60% ⚠ |
 | Proofs | 0% ✗ |
 | Number Formats | 100% ✓ |
@@ -305,9 +303,9 @@ These operators are parsed into the AST but error at evaluation time. They can a
 ## Implementation Priority
 
 ### Low Priority (Remaining)
-1. **Full INSTANCE** with substitution
-2. **Bits module** (`BitAnd`, `BitOr`, `BitXor`, `ShiftLeft`, `ShiftRight`)
-3. **Proof constructs** (currently safely skipped)
+1. **Bits module** (`BitAnd`, `BitOr`, `BitXor`, `ShiftLeft`, `ShiftRight`)
+2. **Proof constructs** (currently safely skipped)
+3. **Unbounded quantifiers** (`\E x : P` without domain)
 
 ---
 
@@ -325,7 +323,7 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | Voting | ✓ | Needs bounded Nat |
 | Paxos | ✓ | Large state space |
 | Prisoners | ✓ | 74 states |
-| Hanoi | ✗ | Needs Bits module operators |
+| Hanoi | ✓ | Tower of Hanoi puzzle |
 
 ---
 
