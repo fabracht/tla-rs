@@ -12,7 +12,8 @@ use std::time::Instant;
 use indexmap::IndexSet;
 
 use crate::ast::{Env, Expr, Spec, State, Value};
-use crate::eval::{eval, eval_with_context, init_states, next_states, update_checker_stats, CheckerStats as EvalCheckerStats, Definitions, EvalContext, EvalError};
+use crate::eval::{eval, eval_with_context, init_states, next_states, update_checker_stats, set_resolved_instances, CheckerStats as EvalCheckerStats, Definitions, EvalContext, EvalError};
+use crate::modules::{resolve_instances, ModuleRegistry};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::export::export_dot;
 use crate::graph::StateGraph;
@@ -31,6 +32,9 @@ pub struct CheckerConfig {
     pub allow_deadlock: bool,
     pub check_liveness: bool,
     pub quiet: bool,
+    pub quick_mode: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub spec_path: Option<PathBuf>,
 }
 
 impl Default for CheckerConfig {
@@ -44,6 +48,9 @@ impl Default for CheckerConfig {
             allow_deadlock: false,
             check_liveness: false,
             quiet: false,
+            quick_mode: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            spec_path: None,
         }
     }
 }
@@ -94,6 +101,36 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     }
     for (k, v) in user_constants {
         domains.insert(k, v);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if !spec.instances.is_empty()
+        && let Some(ref spec_path) = config.spec_path
+    {
+        let mut registry = ModuleRegistry::new();
+        for inst in &spec.instances {
+            match registry.load(&inst.module_name, spec_path) {
+                Ok(_) => {}
+                Err(e) => {
+                    if !config.quiet {
+                        eprintln!("  Warning: could not load module {}: {:?}", inst.module_name, e);
+                    }
+                }
+            }
+        }
+        match resolve_instances(spec, &registry) {
+            Ok(instances) => {
+                if !instances.is_empty() && !config.quiet {
+                    eprintln!("  Resolved {} instance(s)", instances.len());
+                }
+                set_resolved_instances(instances);
+            }
+            Err(e) => {
+                if !config.quiet {
+                    eprintln!("  Warning: could not resolve instances: {:?}", e);
+                }
+            }
+        }
     }
 
     let missing: Vec<_> = spec
@@ -158,6 +195,15 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
     if initial.is_empty() {
         return CheckResult::NoInitialStates;
+    }
+
+    if !config.quiet {
+        let limit_desc = if config.quick_mode {
+            format!("{} states, quick mode", config.max_states)
+        } else {
+            format!("{} states", config.max_states)
+        };
+        eprintln!("  Starting exploration (limit: {})...", limit_desc);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -235,15 +281,26 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             generated: stats.transitions as i64,
         });
 
-        if !config.quiet && stats.states_explored.is_multiple_of(1000) {
-            let elapsed = elapsed_secs();
-            let rate = stats.states_explored as f64 / elapsed.max(0.001);
-            let remaining = config.max_states.saturating_sub(stats.states_explored);
-            let eta = remaining as f64 / rate;
-            eprintln!(
-                "  Progress: {} states ({:.0}/s), queue: {}, depth: {}, limit ETA: {:.1}s",
-                stats.states_explored, rate, queue.len(), depth, eta
-            );
+        let should_report = matches!(stats.states_explored, 1 | 10 | 100)
+            || stats.states_explored.is_multiple_of(1000);
+        if !config.quiet && should_report {
+            if stats.states_explored == 1 {
+                eprintln!("  Exploring states...");
+            } else if stats.states_explored <= 100 {
+                eprintln!(
+                    "  Progress: {} states explored, queue: {}",
+                    stats.states_explored, queue.len()
+                );
+            } else {
+                let elapsed = elapsed_secs();
+                let rate = stats.states_explored as f64 / elapsed.max(0.001);
+                let remaining = config.max_states.saturating_sub(stats.states_explored);
+                let eta = remaining as f64 / rate;
+                eprintln!(
+                    "  Progress: {} states ({:.0}/s), queue: {}, depth: {}, limit ETA: {:.1}s",
+                    stats.states_explored, rate, queue.len(), depth, eta
+                );
+            }
         }
 
         if stats.states_explored > config.max_states {

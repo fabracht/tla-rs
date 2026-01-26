@@ -77,6 +77,11 @@ fn parse_constant_value(s: &str) -> Option<Value> {
     None
 }
 
+fn is_likely_subcommand(arg: &str) -> bool {
+    ["check", "run", "verify", "parse", "lint", "test"]
+        .contains(&arg.to_lowercase().as_str())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
 
@@ -162,6 +167,10 @@ fn main() -> ExitCode {
             "--check-liveness" => {
                 config.check_liveness = true;
             }
+            "--quick" | "-q" => {
+                config.max_states = 10_000;
+                config.quick_mode = true;
+            }
             "--scenario" => {
                 i += 1;
                 if i >= args.len() {
@@ -196,6 +205,7 @@ fn main() -> ExitCode {
                 println!("  --export-dot FILE          Export state graph to DOT format");
                 println!("  --allow-deadlock           Allow states with no successors");
                 println!("  --check-liveness           Check liveness and fairness properties");
+                println!("  --quick, -q                Quick exploration (limit: 10,000 states)");
                 println!("  --scenario TEXT            Explore a specific scenario (or @file)");
                 println!("  --help, -h                 Show this help");
                 println!();
@@ -214,9 +224,22 @@ fn main() -> ExitCode {
             }
             arg if arg.starts_with('-') => {
                 eprintln!("unknown option: {}", arg);
+                eprintln!("Use --help for available options");
                 return ExitCode::FAILURE;
             }
             path => {
+                if spec_path.is_none() && is_likely_subcommand(path) {
+                    eprintln!(
+                        "error: '{}' looks like a subcommand, but tlc-executor doesn't use subcommands.",
+                        path
+                    );
+                    eprintln!();
+                    eprintln!("Usage: {} <spec.tla> [options]", args[0]);
+                    eprintln!();
+                    eprintln!("Example: {} yourspec.tla --max-states 10000", args[0]);
+                    eprintln!("         {} yourspec.tla --quick", args[0]);
+                    return ExitCode::FAILURE;
+                }
                 spec_path = Some(path.to_string());
             }
         }
@@ -308,6 +331,7 @@ fn main() -> ExitCode {
     println!("  Invariants: {}", spec.invariants.len());
     println!();
 
+    config.spec_path = Some(PathBuf::from(&spec_path));
     let result = check(&spec, &domains, &config);
 
     match result {
@@ -401,15 +425,38 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         CheckResult::MaxStatesExceeded(stats) => {
-            println!("State limit exceeded ({} states)", config.max_states);
-            println!();
-            println!("  States explored: {}", stats.states_explored);
-            println!("  Transitions: {}", stats.transitions);
-            println!("  Max depth: {}", stats.max_depth_reached);
-            println!("  Time: {:.3}s", stats.elapsed_secs);
-            println!();
-            println!("Increase with --max-states N");
-            ExitCode::FAILURE
+            if config.quick_mode {
+                println!("Quick mode: explored {} states", stats.states_explored);
+                println!();
+                println!("Summary of explored state space:");
+                println!("  States explored: {}", stats.states_explored);
+                println!("  Transitions: {}", stats.transitions);
+                println!("  Max depth: {}", stats.max_depth_reached);
+                println!("  Time: {:.3}s", stats.elapsed_secs);
+                println!();
+                println!("  No invariant violations found in explored states.");
+                println!();
+                println!("To continue exploration:");
+                println!("  --max-states {}   Explore more states", config.max_states * 2);
+                ExitCode::SUCCESS
+            } else {
+                println!("State limit reached ({} states)", config.max_states);
+                println!();
+                println!("Summary of explored state space:");
+                println!("  States explored: {}", stats.states_explored);
+                println!("  Transitions: {}", stats.transitions);
+                println!("  Max depth: {}", stats.max_depth_reached);
+                println!("  Time: {:.3}s", stats.elapsed_secs);
+                println!();
+                println!("  No invariant violations found in explored states.");
+                println!();
+                println!("To continue exploration:");
+                println!("  --max-states {}   Double the limit", config.max_states * 2);
+                println!();
+                println!("To reduce state space:");
+                println!("  --symmetry CONST     Enable symmetry reduction");
+                ExitCode::FAILURE
+            }
         }
         CheckResult::MaxDepthExceeded(stats) => {
             println!("Depth limit exceeded ({} levels)", config.max_depth);

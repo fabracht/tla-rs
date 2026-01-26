@@ -20,6 +20,7 @@ thread_local! {
     static RNG: RefCell<fastrand::Rng> = RefCell::new(fastrand::Rng::with_seed(0));
     static TLC_STATE: RefCell<BTreeMap<i64, Value>> = const { RefCell::new(BTreeMap::new()) };
     static CHECKER_STATS: RefCell<CheckerStats> = const { RefCell::new(CheckerStats::new()) };
+    static RESOLVED_INSTANCES: RefCell<ResolvedInstances> = const { RefCell::new(BTreeMap::new()) };
 }
 
 #[derive(Debug, Clone, Default)]
@@ -59,6 +60,14 @@ pub fn update_checker_stats(stats: CheckerStats) {
 
 pub fn set_checker_level(level: i64) {
     CHECKER_STATS.with(|s| s.borrow_mut().level = level);
+}
+
+pub fn set_resolved_instances(instances: ResolvedInstances) {
+    RESOLVED_INSTANCES.with(|inst| *inst.borrow_mut() = instances);
+}
+
+pub fn clear_resolved_instances() {
+    RESOLVED_INSTANCES.with(|inst| inst.borrow_mut().clear());
 }
 
 #[derive(Debug, Clone)]
@@ -1427,11 +1436,42 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             "ENABLED operator cannot be evaluated in explicit-state model checking".into()
         )),
 
-        Expr::QualifiedCall(instance, op, _args) => {
-            Err(EvalError::DomainError(format!(
-                "qualified call {}!{} requires resolved instances (use eval_with_instances)",
-                instance, op
-            )))
+        Expr::QualifiedCall(instance, op, args) => {
+            RESOLVED_INSTANCES.with(|inst_ref| {
+                let instances = inst_ref.borrow();
+                if instances.is_empty() {
+                    return Err(EvalError::DomainError(format!(
+                        "qualified call {}!{} requires resolved instances",
+                        instance, op
+                    )));
+                }
+
+                let instance_defs = instances
+                    .get(instance)
+                    .ok_or_else(|| EvalError::DomainError(format!("instance {} not found", instance)))?;
+
+                let (params, body) = instance_defs
+                    .get(op)
+                    .ok_or_else(|| EvalError::DomainError(format!(
+                        "operator {} not found in instance {}",
+                        op, instance
+                    )))?;
+
+                if args.len() != params.len() {
+                    return Err(EvalError::DomainError(format!(
+                        "{}!{} expects {} args, got {}",
+                        instance, op, params.len(), args.len()
+                    )));
+                }
+
+                let mut local = env.clone();
+                for (param, arg_expr) in params.iter().zip(args) {
+                    let arg_val = eval(arg_expr, env, defs)?;
+                    local.insert(param.clone(), arg_val);
+                }
+
+                eval(body, &local, defs)
+            })
         }
 
         Expr::LabeledAction(_label, action) => {

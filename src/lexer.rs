@@ -248,13 +248,13 @@ impl<'a> Lexer<'a> {
             return Ok(Token::Eof);
         }
 
-        if self.consume("<=>") {
+        if self.consume("<=>") || self.consume("≡") {
             return Ok(Token::Equiv);
         }
-        if self.consume("<>") {
+        if self.consume("<>") || self.consume("◇") {
             return Ok(Token::Eventually);
         }
-        if self.consume("[]") {
+        if self.consume("[]") || self.consume("□") {
             return Ok(Token::Always);
         }
         if self.consume("~>") {
@@ -286,7 +286,7 @@ impl<'a> Lexer<'a> {
         if self.consume("..") {
             return Ok(Token::DotDot);
         }
-        if self.consume("|->") {
+        if self.consume("|->") || self.consume("↦") {
             return Ok(Token::MapsTo);
         }
         if self.consume("::") {
@@ -450,7 +450,7 @@ impl<'a> Lexer<'a> {
         if self.consume("<-") {
             return Ok(Token::LeftArrow);
         }
-        if self.consume("->") {
+        if self.consume("->") || self.consume("→") {
             return Ok(Token::RightArrow);
         }
 
@@ -512,7 +512,7 @@ impl<'a> Lexer<'a> {
             self.advance();
             return Ok(Token::Pipe);
         }
-        if self.consume("^+") {
+        if self.consume("^+") || self.consume("⁺") {
             return Ok(Token::TransitiveClosure);
         }
         if self.consume("^*") {
@@ -714,13 +714,13 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_token_inner(&mut self) -> Result<Token, LexError> {
-        if self.consume("<=>") {
+        if self.consume("<=>") || self.consume("≡") {
             return Ok(Token::Equiv);
         }
-        if self.consume("<>") {
+        if self.consume("<>") || self.consume("◇") {
             return Ok(Token::Eventually);
         }
-        if self.consume("[]") {
+        if self.consume("[]") || self.consume("□") {
             return Ok(Token::Always);
         }
         if self.consume("~>") {
@@ -752,7 +752,7 @@ impl<'a> Lexer<'a> {
         if self.consume("..") {
             return Ok(Token::DotDot);
         }
-        if self.consume("|->") {
+        if self.consume("|->") || self.consume("↦") {
             return Ok(Token::MapsTo);
         }
         if self.consume("::") {
@@ -916,7 +916,7 @@ impl<'a> Lexer<'a> {
         if self.consume("<-") {
             return Ok(Token::LeftArrow);
         }
-        if self.consume("->") {
+        if self.consume("->") || self.consume("→") {
             return Ok(Token::RightArrow);
         }
 
@@ -978,7 +978,7 @@ impl<'a> Lexer<'a> {
             self.advance();
             return Ok(Token::Pipe);
         }
-        if self.consume("^+") {
+        if self.consume("^+") || self.consume("⁺") {
             return Ok(Token::TransitiveClosure);
         }
         if self.consume("^*") {
