@@ -73,7 +73,7 @@ pub fn clear_resolved_instances() {
 #[derive(Debug, Clone)]
 pub enum EvalError {
     UndefinedVar { name: Arc<str>, suggestion: Option<Arc<str>> },
-    TypeMismatch { expected: &'static str, got: Value },
+    TypeMismatch { expected: &'static str, got: Value, context: Option<&'static str> },
     DivisionByZero,
     EmptyChoose,
     DomainError(String),
@@ -93,6 +93,18 @@ impl EvalError {
 }
 
 type Result<T> = std::result::Result<T, EvalError>;
+
+fn value_type_name(val: &Value) -> &'static str {
+    match val {
+        Value::Bool(_) => "Bool",
+        Value::Int(_) => "Int",
+        Value::Str(_) => "Str",
+        Value::Set(_) => "Set",
+        Value::Fn(_) => "Function",
+        Value::Record(_) => "Record",
+        Value::Tuple(_) => "Sequence",
+    }
+}
 
 fn eval_fn_def_recursive(
     fn_name: &Arc<str>,
@@ -154,8 +166,11 @@ fn eval_with_memo(
                 Value::Fn(fv) => fv
                     .get(&av)
                     .cloned()
-                    .ok_or_else(|| EvalError::DomainError("key not in function domain".into())),
-                _ => Err(EvalError::TypeMismatch { expected: "Fn", got: fval }),
+                    .ok_or_else(|| EvalError::DomainError(format!(
+                        "key {} not in function domain",
+                        format_value(&av)
+                    ))),
+                _ => Err(EvalError::TypeMismatch { expected: "Fn", got: fval, context: Some("function application") }),
             }
         }
 
@@ -170,7 +185,7 @@ fn eval_with_memo(
             match cv {
                 Value::Bool(true) => eval_with_memo(then_br, env, defs, fn_name, fn_param, fn_domain, memo),
                 Value::Bool(false) => eval_with_memo(else_br, env, defs, fn_name, fn_param, fn_domain, memo),
-                _ => Err(EvalError::TypeMismatch { expected: "Bool", got: cv }),
+                _ => Err(EvalError::TypeMismatch { expected: "Bool", got: cv, context: Some("IF condition") }),
             }
         }
 
@@ -179,7 +194,11 @@ fn eval_with_memo(
             let rv = eval_with_memo(r, env, defs, fn_name, fn_param, fn_domain, memo)?;
             match (lv, rv) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
-                (a, b) => Err(EvalError::DomainError(format!("cannot add {:?} and {:?}", a, b))),
+                (a, b) => Err(EvalError::DomainError(format!(
+                    "cannot add {} and {} (expected Int + Int)",
+                    value_type_name(&a),
+                    value_type_name(&b)
+                ))),
             }
         }
 
@@ -194,7 +213,11 @@ fn eval_with_memo(
             let rv = eval_with_memo(r, env, defs, fn_name, fn_param, fn_domain, memo)?;
             match (lv, rv) {
                 (Value::Set(a), Value::Set(b)) => Ok(Value::Set(a.difference(&b).cloned().collect())),
-                (a, b) => Err(EvalError::DomainError(format!("set minus on {:?} and {:?}", a, b))),
+                (a, b) => Err(EvalError::DomainError(format!(
+                    "set minus requires Set \\ Set, got {} \\ {}",
+                    value_type_name(&a),
+                    value_type_name(&b)
+                ))),
             }
         }
 
@@ -655,6 +678,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                     return Err(EvalError::TypeMismatch {
                         expected: "Set",
                         got: val,
+                        context: Some("UNION element"),
                     });
                 }
             }
@@ -727,7 +751,10 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 Value::Fn(fv) => fv
                     .get(&av)
                     .cloned()
-                    .ok_or_else(|| EvalError::DomainError("key not in function domain".into())),
+                    .ok_or_else(|| EvalError::DomainError(format!(
+                        "key {} not in function domain",
+                        format_value(&av)
+                    ))),
                 Value::Tuple(tv) => {
                     if let Value::Int(idx) = av {
                         let i = idx as usize;
@@ -735,20 +762,22 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                             Ok(tv[i - 1].clone())
                         } else {
                             Err(EvalError::DomainError(format!(
-                                "tuple index {} out of bounds",
-                                idx
+                                "sequence index {} out of bounds (sequence has {} elements)",
+                                idx, tv.len()
                             )))
                         }
                     } else {
                         Err(EvalError::TypeMismatch {
                             expected: "Int",
                             got: av,
+                            context: Some("sequence index"),
                         })
                     }
                 }
                 other => Err(EvalError::TypeMismatch {
                     expected: "Fn or Tuple",
                     got: other,
+                    context: Some("function application"),
                 }),
             }
         }
@@ -873,6 +902,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 (l, r) => Err(EvalError::TypeMismatch {
                     expected: "Fn @@ Fn",
                     got: Value::Tuple(vec![l, r]),
+                    context: Some("function merge"),
                 }),
             }
         }
@@ -1010,16 +1040,23 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 Value::Tuple(tv) => tv
                     .get(*idx)
                     .cloned()
-                    .ok_or_else(|| EvalError::DomainError(format!("index {} out of bounds", idx))),
+                    .ok_or_else(|| EvalError::DomainError(format!(
+                        "sequence index {} out of bounds (sequence has {} elements)",
+                        idx + 1, tv.len()
+                    ))),
                 Value::Fn(fv) => {
                     let key = Value::Int((*idx + 1) as i64);
                     fv.get(&key)
                         .cloned()
-                        .ok_or_else(|| EvalError::DomainError("key not in function domain".into()))
+                        .ok_or_else(|| EvalError::DomainError(format!(
+                            "key {} not in function domain",
+                            idx + 1
+                        )))
                 }
                 other => Err(EvalError::TypeMismatch {
                     expected: "Tuple or Fn",
                     got: other,
+                    context: Some("tuple access"),
                 }),
             }
         }
@@ -1226,6 +1263,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 other => Err(EvalError::TypeMismatch {
                     expected: "Int or Str",
                     got: other,
+                    context: Some("TLCGet key"),
                 }),
             }
         }
@@ -1337,6 +1375,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                     return Err(EvalError::TypeMismatch {
                         expected: "Bag (Fn)",
                         got: bag_val,
+                        context: Some("BagUnion element"),
                     });
                 }
             }
@@ -1705,6 +1744,7 @@ fn eval_bool_with_context(expr: &Expr, env: &Env, defs: &Definitions, ctx: &Eval
         other => Err(EvalError::TypeMismatch {
             expected: "Bool",
             got: other,
+            context: None,
         }),
     }
 }
@@ -1715,6 +1755,7 @@ fn eval_bool(expr: &Expr, env: &Env, defs: &Definitions) -> Result<bool> {
         other => Err(EvalError::TypeMismatch {
             expected: "Bool",
             got: other,
+            context: None,
         }),
     }
 }
@@ -1725,6 +1766,7 @@ fn eval_int(expr: &Expr, env: &Env, defs: &Definitions) -> Result<i64> {
         other => Err(EvalError::TypeMismatch {
             expected: "Int",
             got: other,
+            context: None,
         }),
     }
 }
@@ -1782,6 +1824,7 @@ fn eval_set(expr: &Expr, env: &Env, defs: &Definitions) -> Result<BTreeSet<Value
         other => Err(EvalError::TypeMismatch {
             expected: "Set",
             got: other,
+            context: None,
         }),
     }
 }
@@ -1792,6 +1835,7 @@ fn eval_fn(expr: &Expr, env: &Env, defs: &Definitions) -> Result<BTreeMap<Value,
         other => Err(EvalError::TypeMismatch {
             expected: "Fn",
             got: other,
+            context: None,
         }),
     }
 }
@@ -1802,6 +1846,7 @@ fn eval_record(expr: &Expr, env: &Env, defs: &Definitions) -> Result<BTreeMap<Ar
         other => Err(EvalError::TypeMismatch {
             expected: "Record",
             got: other,
+            context: None,
         }),
     }
 }
@@ -1812,6 +1857,7 @@ fn eval_tuple(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Vec<Value>> 
         other => Err(EvalError::TypeMismatch {
             expected: "Tuple",
             got: other,
+            context: None,
         }),
     }
 }
@@ -1849,7 +1895,10 @@ fn get_nested(base: &Value, keys: &[Value]) -> Result<Value> {
         (Value::Fn(f), key) => {
             let v = f
                 .get(key)
-                .ok_or_else(|| EvalError::DomainError("key not in function domain".into()))?;
+                .ok_or_else(|| EvalError::DomainError(format!(
+                    "key {} not in function domain",
+                    format_value(key)
+                )))?;
             get_nested(v, &keys[1..])
         }
         _ => Err(EvalError::DomainError("cannot access into this value".into())),
@@ -1866,12 +1915,16 @@ fn update_nested(f: &mut BTreeMap<Value, Value>, keys: &[Value], val: Value) -> 
     }
     let inner = f
         .get_mut(&keys[0])
-        .ok_or_else(|| EvalError::DomainError("key not in function domain".into()))?;
+        .ok_or_else(|| EvalError::DomainError(format!(
+            "key {} not in function domain",
+            format_value(&keys[0])
+        )))?;
     match inner {
         Value::Fn(inner_fn) => update_nested(inner_fn, &keys[1..], val),
         _ => Err(EvalError::TypeMismatch {
             expected: "Fn",
             got: inner.clone(),
+            context: Some("nested EXCEPT update"),
         }),
     }
 }

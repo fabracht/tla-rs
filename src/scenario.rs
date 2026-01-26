@@ -169,6 +169,7 @@ fn matches_step(
                 Ok(other) => Err(EvalError::TypeMismatch {
                     expected: "Bool",
                     got: other,
+                    context: Some("scenario condition"),
                 }),
                 Err(e) => Err(e),
             }

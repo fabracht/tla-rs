@@ -140,6 +140,7 @@ fn action_matches(
         Ok(_) => Err(EvalError::TypeMismatch {
             expected: "Bool",
             got: Value::Bool(false),
+            context: Some("fairness action"),
         }),
         Err(e) => Err(e),
     }
@@ -169,6 +170,7 @@ pub fn check_eventually(
                     return Err(EvalError::TypeMismatch {
                         expected: "Bool",
                         got: Value::Bool(false),
+                        context: Some("liveness property"),
                     })
                 }
                 Err(e) => return Err(e),
@@ -208,6 +210,7 @@ pub fn check_leads_to(
                     return Err(EvalError::TypeMismatch {
                         expected: "Bool",
                         got: Value::Bool(false),
+                        context: Some("leads-to antecedent"),
                     })
                 }
                 Err(e) => return Err(e),
@@ -220,6 +223,7 @@ pub fn check_leads_to(
                     return Err(EvalError::TypeMismatch {
                         expected: "Bool",
                         got: Value::Bool(false),
+                        context: Some("leads-to consequent"),
                     })
                 }
                 Err(e) => return Err(e),

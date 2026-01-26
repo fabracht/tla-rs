@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use tlc_executor::ast::{Env, Value};
-use tlc_executor::checker::{check, format_eval_error, format_trace, format_trace_with_diffs, CheckResult, CheckerConfig};
+use tlc_executor::checker::{check, eval_error_to_diagnostic, format_eval_error, format_trace, format_trace_with_diffs, CheckResult, CheckerConfig};
 use tlc_executor::diagnostic::Diagnostic;
 use tlc_executor::parser::parse;
 use tlc_executor::scenario::{execute_scenario, format_scenario_result, parse_scenario};
@@ -404,21 +404,21 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         CheckResult::InitError(e) => {
-            eprintln!("error: evaluating Init");
-            eprintln!("  {}", format_eval_error(&e));
+            let diag = eval_error_to_diagnostic(&e);
+            eprintln!("error evaluating Init: {}", diag.render_simple());
             ExitCode::FAILURE
         }
         CheckResult::NextError(e, trace) => {
-            eprintln!("error: evaluating Next");
-            eprintln!("  {}", format_eval_error(&e));
+            let diag = eval_error_to_diagnostic(&e);
+            eprintln!("error evaluating Next: {}", diag.render_simple());
             eprintln!();
             eprintln!("State when error occurred:");
             print!("{}", format_trace(&trace, &spec.vars));
             ExitCode::FAILURE
         }
         CheckResult::InvariantError(e, trace) => {
-            eprintln!("error: evaluating invariant");
-            eprintln!("  {}", format_eval_error(&e));
+            let diag = eval_error_to_diagnostic(&e);
+            eprintln!("error evaluating invariant: {}", diag.render_simple());
             eprintln!();
             eprintln!("State when error occurred:");
             print!("{}", format_trace(&trace, &spec.vars));
@@ -488,8 +488,8 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         CheckResult::AssumeError(idx, e) => {
-            eprintln!("error: evaluating ASSUME {}", idx);
-            eprintln!("  {}", format_eval_error(&e));
+            let diag = eval_error_to_diagnostic(&e);
+            eprintln!("error evaluating ASSUME {}: {}", idx, diag.render_simple());
             ExitCode::FAILURE
         }
     }

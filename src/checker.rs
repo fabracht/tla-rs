@@ -153,6 +153,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                     EvalError::TypeMismatch {
                         expected: "Bool",
                         got: Value::Bool(false),
+                        context: Some("ASSUME evaluation"),
                     },
                 )
             }
@@ -349,6 +350,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                         EvalError::TypeMismatch {
                             expected: "Bool",
                             got: Value::Bool(false),
+                            context: Some("invariant evaluation"),
                         },
                         trace,
                     );
@@ -574,12 +576,59 @@ pub fn format_eval_error(err: &EvalError) -> String {
             }
             msg
         }
-        EvalError::TypeMismatch { expected, got } => {
-            format!("type mismatch: expected {}, got {}", expected, format_value(got))
+        EvalError::TypeMismatch { expected, got, context } => {
+            let type_name = value_type_name(got);
+            let mut msg = format!("type mismatch: expected {}, got {}", expected, type_name);
+            if let Some(ctx) = context {
+                msg.push_str(&format!(" (in {})", ctx));
+            }
+            msg
         }
         EvalError::DivisionByZero => "division by zero".to_string(),
-        EvalError::EmptyChoose => "CHOOSE from empty set".to_string(),
+        EvalError::EmptyChoose => {
+            "CHOOSE found no satisfying value (domain may be empty or no element satisfies the predicate)".to_string()
+        }
         EvalError::DomainError(msg) => msg.clone(),
+    }
+}
+
+fn value_type_name(val: &Value) -> &'static str {
+    match val {
+        Value::Bool(_) => "Bool",
+        Value::Int(_) => "Int",
+        Value::Str(_) => "Str",
+        Value::Set(_) => "Set",
+        Value::Fn(_) => "Function",
+        Value::Record(_) => "Record",
+        Value::Tuple(_) => "Sequence",
+    }
+}
+
+pub fn eval_error_to_diagnostic(err: &EvalError) -> crate::diagnostic::Diagnostic {
+    use crate::diagnostic::Diagnostic;
+    match err {
+        EvalError::UndefinedVar { name, suggestion } => {
+            let mut diag = Diagnostic::error(format!("undefined variable `{}`", name));
+            if let Some(s) = suggestion {
+                diag = diag.with_help(format!("did you mean `{}`?", s));
+            }
+            diag
+        }
+        EvalError::TypeMismatch { expected, got, context } => {
+            let type_name = value_type_name(got);
+            let msg = if let Some(ctx) = context {
+                format!("type mismatch in {}: expected {}, got {}", ctx, expected, type_name)
+            } else {
+                format!("type mismatch: expected {}, got {}", expected, type_name)
+            };
+            Diagnostic::error(msg)
+        }
+        EvalError::DivisionByZero => Diagnostic::error("division by zero"),
+        EvalError::EmptyChoose => {
+            Diagnostic::error("CHOOSE found no satisfying value")
+                .with_help("the domain may be empty or no element satisfies the predicate")
+        }
+        EvalError::DomainError(msg) => Diagnostic::error(msg.clone()),
     }
 }
 
