@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use tlc_executor::ast::{Env, Value};
-use tlc_executor::checker::{check, eval_error_to_diagnostic, format_eval_error, format_trace, format_trace_with_diffs, CheckResult, CheckerConfig};
+use tlc_executor::checker::{check, check_result_to_json, eval_error_to_diagnostic, format_eval_error, format_trace, format_trace_with_diffs, write_trace_json, CheckResult, CheckerConfig};
 use tlc_executor::diagnostic::Diagnostic;
 use tlc_executor::parser::parse;
 use tlc_executor::scenario::{execute_scenario, format_scenario_result, parse_scenario};
@@ -94,6 +94,8 @@ fn main() -> ExitCode {
     let mut spec_path = None;
     let mut constants: Vec<(Arc<str>, Value)> = Vec::new();
     let mut scenario_input: Option<String> = None;
+    let mut validate_only = false;
+    let mut list_invariants = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -171,6 +173,30 @@ fn main() -> ExitCode {
                 config.max_states = 10_000;
                 config.quick_mode = true;
             }
+            "--verbose" | "-v" => {
+                config.verbosity = 2;
+            }
+            "-vv" => {
+                config.verbosity = 3;
+            }
+            "--json" => {
+                config.json_output = true;
+            }
+            "--validate" => {
+                validate_only = true;
+            }
+            "--list-invariants" => {
+                list_invariants = true;
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            "--trace-json" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--trace-json requires a filename");
+                    return ExitCode::FAILURE;
+                }
+                config.trace_json_path = Some(PathBuf::from(&args[i]));
+            }
             "--scenario" => {
                 i += 1;
                 if i >= args.len() {
@@ -203,9 +229,15 @@ fn main() -> ExitCode {
                 println!("  --max-states N             Maximum states to explore (default: 1000000)");
                 println!("  --max-depth N              Maximum trace depth (default: 100)");
                 println!("  --export-dot FILE          Export state graph to DOT format");
+                println!("  --trace-json FILE          Export counterexample trace to JSON format");
                 println!("  --allow-deadlock           Allow states with no successors");
                 println!("  --check-liveness           Check liveness and fairness properties");
                 println!("  --quick, -q                Quick exploration (limit: 10,000 states)");
+                println!("  --verbose, -v              Verbose output (show more details)");
+                println!("  -vv                        Debug output (show all details)");
+                println!("  --json                     Output results in JSON format");
+                println!("  --validate                 Parse and validate spec without model checking");
+                println!("  --list-invariants          Show detected invariants and exit");
                 println!("  --scenario TEXT            Explore a specific scenario (or @file)");
                 println!("  --help, -h                 Show this help");
                 println!();
@@ -286,6 +318,62 @@ fn main() -> ExitCode {
         domains.insert(name, val);
     }
 
+    if list_invariants {
+        println!("Invariants detected in {}:", spec_path);
+        if spec.invariants.is_empty() {
+            println!("  (none)");
+        } else {
+            for (i, name) in spec.invariant_names.iter().enumerate() {
+                let name_str = name.as_ref().map(|n| n.as_ref()).unwrap_or("(unnamed)");
+                println!("  {}: {}", i, name_str);
+            }
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    if validate_only {
+        println!("Validating spec: {}", spec_path);
+        println!();
+
+        let mut has_issues = false;
+
+        if spec.vars.is_empty() {
+            eprintln!("  Warning: no VARIABLES declared");
+            has_issues = true;
+        } else {
+            println!("  Variables: {} declared", spec.vars.len());
+        }
+
+        let missing: Vec<_> = spec
+            .constants
+            .iter()
+            .filter(|c| !domains.contains_key(c.as_ref()))
+            .collect();
+        if !missing.is_empty() {
+            eprintln!("  Missing constants: {}", missing.iter().map(|c| c.as_ref()).collect::<Vec<_>>().join(", "));
+            has_issues = true;
+        } else if !spec.constants.is_empty() {
+            println!("  Constants: {} provided", spec.constants.len());
+        }
+
+        println!("  Invariants: {} detected", spec.invariants.len());
+        println!("  Definitions: {} declared", spec.definitions.len());
+
+        if !spec.assumes.is_empty() {
+            println!("  ASSUME expressions: {}", spec.assumes.len());
+        }
+
+        if has_issues {
+            println!();
+            println!("Validation found issues (see warnings above)");
+            return ExitCode::FAILURE;
+        }
+
+        println!();
+        println!("Validation passed");
+        return ExitCode::SUCCESS;
+    }
+
     if let Some(scenario_text) = scenario_input {
         println!("Scenario exploration: {}", spec_path);
         println!();
@@ -333,6 +421,32 @@ fn main() -> ExitCode {
 
     config.spec_path = Some(PathBuf::from(&spec_path));
     let result = check(&spec, &domains, &config);
+
+    if config.json_output {
+        println!("{}", check_result_to_json(&result, &spec));
+        return match &result {
+            CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_) if config.quick_mode => ExitCode::SUCCESS,
+            CheckResult::Ok(_) => ExitCode::SUCCESS,
+            _ => ExitCode::FAILURE,
+        };
+    }
+
+    if let Some(ref trace_path) = config.trace_json_path {
+        let trace = match &result {
+            CheckResult::InvariantViolation(cex, _) => Some(&cex.trace),
+            CheckResult::Deadlock(trace, _) => Some(trace),
+            CheckResult::NextError(_, trace) => Some(trace),
+            CheckResult::InvariantError(_, trace) => Some(trace),
+            _ => None,
+        };
+        if let Some(trace) = trace {
+            if let Err(e) = write_trace_json(trace_path, trace, &spec.vars) {
+                eprintln!("failed to write trace JSON to {}: {}", trace_path.display(), e);
+            } else if config.verbosity >= 2 {
+                println!("Trace written to {}", trace_path.display());
+            }
+        }
+    }
 
     match result {
         CheckResult::Ok(stats) => {
@@ -469,7 +583,22 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         CheckResult::NoInitialStates => {
-            eprintln!("No initial states found. Check your Init predicate.");
+            eprintln!("No initial states found.");
+            eprintln!();
+            eprintln!("Possible causes:");
+            eprintln!("  - Init predicate evaluates to FALSE for all variable combinations");
+            if !spec.constants.is_empty() {
+                let missing: Vec<_> = spec.constants.iter().filter(|c| !domains.contains_key(c.as_ref())).collect();
+                if !missing.is_empty() {
+                    eprintln!("  - Missing constant values: {}", missing.iter().map(|c| c.as_ref()).collect::<Vec<_>>().join(", "));
+                }
+            }
+            eprintln!("  - Type error or domain error in Init expression");
+            eprintln!();
+            eprintln!("Suggestions:");
+            eprintln!("  - Verify Init predicate can be satisfied");
+            eprintln!("  - Check that all constants have appropriate values");
+            eprintln!("  - Use --validate to check spec structure");
             ExitCode::FAILURE
         }
         CheckResult::MissingConstants(missing) => {
@@ -482,14 +611,28 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         CheckResult::AssumeViolation(idx) => {
-            eprintln!("ASSUME {} evaluated to FALSE", idx);
+            eprintln!("ASSUME violation: constraint {} evaluated to FALSE", idx);
             eprintln!();
-            eprintln!("Check your constant values or ASSUME constraints.");
+            if let Some(assume_expr) = spec.assumes.get(idx) {
+                eprintln!("Expression: {:?}", assume_expr);
+                eprintln!();
+            }
+            eprintln!("The ASSUME constraint is not satisfied by the current constant values.");
+            eprintln!();
+            eprintln!("Suggestions:");
+            eprintln!("  - Check that --constant values satisfy all ASSUME constraints");
+            eprintln!("  - Verify the ASSUME expression is correct");
             ExitCode::FAILURE
         }
         CheckResult::AssumeError(idx, e) => {
             let diag = eval_error_to_diagnostic(&e);
             eprintln!("error evaluating ASSUME {}: {}", idx, diag.render_simple());
+            eprintln!();
+            if let Some(assume_expr) = spec.assumes.get(idx) {
+                eprintln!("Expression: {:?}", assume_expr);
+                eprintln!();
+            }
+            eprintln!("An error occurred while evaluating the ASSUME constraint.");
             ExitCode::FAILURE
         }
     }

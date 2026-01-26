@@ -137,11 +137,7 @@ fn action_matches(
 
     match eval(action, &env, defs) {
         Ok(Value::Bool(b)) => Ok(b),
-        Ok(_) => Err(EvalError::TypeMismatch {
-            expected: "Bool",
-            got: Value::Bool(false),
-            context: Some("fairness action"),
-        }),
+        Ok(_) => Err(EvalError::TypeMismatch { expected: "Bool", got: Value::Bool(false), context: Some("fairness action"),  span: None }),
         Err(e) => Err(e),
     }
 }
@@ -167,11 +163,7 @@ pub fn check_eventually(
                 Ok(Value::Bool(true)) => return Ok(true),
                 Ok(Value::Bool(false)) => continue,
                 Ok(_) => {
-                    return Err(EvalError::TypeMismatch {
-                        expected: "Bool",
-                        got: Value::Bool(false),
-                        context: Some("liveness property"),
-                    })
+                    return Err(EvalError::TypeMismatch { expected: "Bool", got: Value::Bool(false), context: Some("liveness property"),  span: None })
                 }
                 Err(e) => return Err(e),
             }
@@ -207,11 +199,7 @@ pub fn check_leads_to(
                 Ok(Value::Bool(true)) => p_holds_somewhere = true,
                 Ok(Value::Bool(false)) => {}
                 Ok(_) => {
-                    return Err(EvalError::TypeMismatch {
-                        expected: "Bool",
-                        got: Value::Bool(false),
-                        context: Some("leads-to antecedent"),
-                    })
+                    return Err(EvalError::TypeMismatch { expected: "Bool", got: Value::Bool(false), context: Some("leads-to antecedent"),  span: None })
                 }
                 Err(e) => return Err(e),
             }
@@ -220,11 +208,7 @@ pub fn check_leads_to(
                 Ok(Value::Bool(true)) => q_holds_somewhere = true,
                 Ok(Value::Bool(false)) => {}
                 Ok(_) => {
-                    return Err(EvalError::TypeMismatch {
-                        expected: "Bool",
-                        got: Value::Bool(false),
-                        context: Some("leads-to consequent"),
-                    })
+                    return Err(EvalError::TypeMismatch { expected: "Bool", got: Value::Bool(false), context: Some("leads-to consequent"),  span: None })
                 }
                 Err(e) => return Err(e),
             }

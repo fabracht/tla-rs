@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::ast::{Env, Expr, State, Value};
 use crate::checker::format_value;
 use crate::diagnostic::find_similar;
+use crate::span::Span;
 
 pub type Definitions = BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>;
 pub type ResolvedInstances = BTreeMap<Arc<str>, Definitions>;
@@ -72,23 +73,64 @@ pub fn clear_resolved_instances() {
 
 #[derive(Debug, Clone)]
 pub enum EvalError {
-    UndefinedVar { name: Arc<str>, suggestion: Option<Arc<str>> },
-    TypeMismatch { expected: &'static str, got: Value, context: Option<&'static str> },
-    DivisionByZero,
-    EmptyChoose,
-    DomainError(String),
+    UndefinedVar { name: Arc<str>, suggestion: Option<Arc<str>>, span: Option<Span> },
+    TypeMismatch { expected: &'static str, got: Value, context: Option<&'static str>, span: Option<Span> },
+    DivisionByZero { span: Option<Span> },
+    EmptyChoose { span: Option<Span> },
+    DomainError { message: String, span: Option<Span> },
 }
 
 impl EvalError {
     pub fn undefined_var(name: Arc<str>) -> Self {
-        Self::UndefinedVar { name, suggestion: None }
+        Self::UndefinedVar { name, suggestion: None, span: None }
     }
 
     pub fn undefined_var_with_env(name: Arc<str>, env: &Env, defs: &Definitions) -> Self {
         let candidates = env.keys().map(|s| s.as_ref())
             .chain(defs.keys().map(|s| s.as_ref()));
         let suggestion = find_similar(&name, candidates, 2).map(|s| s.into());
-        Self::UndefinedVar { name, suggestion }
+        Self::UndefinedVar { name, suggestion, span: None }
+    }
+
+    pub fn type_mismatch(expected: &'static str, got: Value) -> Self {
+        Self::TypeMismatch { expected, got, context: None, span: None }
+    }
+
+    pub fn type_mismatch_ctx(expected: &'static str, got: Value, context: &'static str) -> Self {
+        Self::TypeMismatch { expected, got, context: Some(context), span: None }
+    }
+
+    pub fn division_by_zero() -> Self {
+        Self::DivisionByZero { span: None }
+    }
+
+    pub fn empty_choose() -> Self {
+        Self::EmptyChoose { span: None }
+    }
+
+    pub fn domain_error(msg: impl Into<String>) -> Self {
+        Self::DomainError { message: msg.into(), span: None }
+    }
+
+    pub fn with_span(mut self, span: Span) -> Self {
+        match &mut self {
+            Self::UndefinedVar { span: s, .. } |
+            Self::TypeMismatch { span: s, .. } |
+            Self::DivisionByZero { span: s } |
+            Self::EmptyChoose { span: s } |
+            Self::DomainError { span: s, .. } => *s = Some(span),
+        }
+        self
+    }
+
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            Self::UndefinedVar { span, .. } |
+            Self::TypeMismatch { span, .. } |
+            Self::DivisionByZero { span } |
+            Self::EmptyChoose { span } |
+            Self::DomainError { span, .. } => *span,
+        }
     }
 }
 
@@ -166,11 +208,11 @@ fn eval_with_memo(
                 Value::Fn(fv) => fv
                     .get(&av)
                     .cloned()
-                    .ok_or_else(|| EvalError::DomainError(format!(
+                    .ok_or_else(|| EvalError::domain_error(format!(
                         "key {} not in function domain",
                         format_value(&av)
                     ))),
-                _ => Err(EvalError::TypeMismatch { expected: "Fn", got: fval, context: Some("function application") }),
+                _ => Err(EvalError::type_mismatch_ctx("Fn", fval, "function application")),
             }
         }
 
@@ -185,7 +227,7 @@ fn eval_with_memo(
             match cv {
                 Value::Bool(true) => eval_with_memo(then_br, env, defs, fn_name, fn_param, fn_domain, memo),
                 Value::Bool(false) => eval_with_memo(else_br, env, defs, fn_name, fn_param, fn_domain, memo),
-                _ => Err(EvalError::TypeMismatch { expected: "Bool", got: cv, context: Some("IF condition") }),
+                _ => Err(EvalError::type_mismatch_ctx("Bool", cv, "IF condition")),
             }
         }
 
@@ -194,7 +236,7 @@ fn eval_with_memo(
             let rv = eval_with_memo(r, env, defs, fn_name, fn_param, fn_domain, memo)?;
             match (lv, rv) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
-                (a, b) => Err(EvalError::DomainError(format!(
+                (a, b) => Err(EvalError::domain_error(format!(
                     "cannot add {} and {} (expected Int + Int)",
                     value_type_name(&a),
                     value_type_name(&b)
@@ -213,7 +255,7 @@ fn eval_with_memo(
             let rv = eval_with_memo(r, env, defs, fn_name, fn_param, fn_domain, memo)?;
             match (lv, rv) {
                 (Value::Set(a), Value::Set(b)) => Ok(Value::Set(a.difference(&b).cloned().collect())),
-                (a, b) => Err(EvalError::DomainError(format!(
+                (a, b) => Err(EvalError::domain_error(format!(
                     "set minus requires Set \\ Set, got {} \\ {}",
                     value_type_name(&a),
                     value_type_name(&b)
@@ -434,7 +476,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             let lv = eval_int(l, env, defs)?;
             let rv = eval_int(r, env, defs)?;
             if rv == 0 {
-                return Err(EvalError::DivisionByZero);
+                return Err(EvalError::division_by_zero());
             }
             Ok(Value::Int(lv / rv))
         }
@@ -443,7 +485,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             let lv = eval_int(l, env, defs)?;
             let rv = eval_int(r, env, defs)?;
             if rv == 0 {
-                return Err(EvalError::DivisionByZero);
+                return Err(EvalError::division_by_zero());
             }
             Ok(Value::Int(lv % rv))
         }
@@ -510,15 +552,13 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             Ok(Value::Set(result))
         }
 
-        Expr::ActionCompose(_, _) => Err(EvalError::DomainError(
-            "action composition (\\cdot) cannot be evaluated in explicit-state model checking".into()
-        )),
+        Expr::ActionCompose(_, _) => Err(EvalError::domain_error("action composition (\\cdot) cannot be evaluated in explicit-state model checking")),
 
         Expr::Exp(base, exp) => {
             let b = eval_int(base, env, defs)?;
             let e = eval_int(exp, env, defs)?;
             if e < 0 {
-                return Err(EvalError::DomainError("negative exponent".into()));
+                return Err(EvalError::domain_error("negative exponent"));
             }
             Ok(Value::Int(b.pow(e as u32)))
         }
@@ -638,7 +678,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             let elements: Vec<_> = s.into_iter().collect();
             let n = elements.len();
             if n > 20 {
-                return Err(EvalError::DomainError(format!(
+                return Err(EvalError::domain_error(format!(
                     "SUBSET of set with {} elements is too large (max 20)",
                     n
                 )));
@@ -675,11 +715,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                         result.insert(v);
                     }
                 } else {
-                    return Err(EvalError::TypeMismatch {
-                        expected: "Set",
-                        got: val,
-                        context: Some("UNION element"),
-                    });
+                    return Err(EvalError::TypeMismatch { expected: "Set", got: val, context: Some("UNION element"),  span: None });
                 }
             }
             Ok(Value::Set(result))
@@ -729,13 +765,13 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                     }
                 }
             }
-            Err(EvalError::EmptyChoose)
+            Err(EvalError::empty_choose())
         }
 
         Expr::FnApp(f, arg) => {
             if let Expr::Lambda(params, body) = f.as_ref() {
                 if params.len() != 1 {
-                    return Err(EvalError::DomainError(format!(
+                    return Err(EvalError::domain_error(format!(
                         "lambda expects {} args for [], got 1",
                         params.len()
                     )));
@@ -751,7 +787,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 Value::Fn(fv) => fv
                     .get(&av)
                     .cloned()
-                    .ok_or_else(|| EvalError::DomainError(format!(
+                    .ok_or_else(|| EvalError::domain_error(format!(
                         "key {} not in function domain",
                         format_value(&av)
                     ))),
@@ -761,31 +797,21 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                         if i >= 1 && i <= tv.len() {
                             Ok(tv[i - 1].clone())
                         } else {
-                            Err(EvalError::DomainError(format!(
+                            Err(EvalError::domain_error(format!(
                                 "sequence index {} out of bounds (sequence has {} elements)",
                                 idx, tv.len()
                             )))
                         }
                     } else {
-                        Err(EvalError::TypeMismatch {
-                            expected: "Int",
-                            got: av,
-                            context: Some("sequence index"),
-                        })
+                        Err(EvalError::TypeMismatch { expected: "Int", got: av, context: Some("sequence index"),  span: None })
                     }
                 }
-                other => Err(EvalError::TypeMismatch {
-                    expected: "Fn or Tuple",
-                    got: other,
-                    context: Some("function application"),
-                }),
+                other => Err(EvalError::TypeMismatch { expected: "Fn or Tuple", got: other, context: Some("function application"),  span: None }),
             }
         }
 
         Expr::Lambda(_params, _body) => {
-            Err(EvalError::DomainError(
-                "lambda expression cannot be evaluated directly; must be applied".into(),
-            ))
+            Err(EvalError::domain_error("lambda expression cannot be evaluated directly; must be applied"))
         }
 
         Expr::FnDef(var, domain, body) => {
@@ -800,7 +826,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             match name.as_ref() {
                 "BitAnd" => {
                     if args.len() != 2 {
-                        return Err(EvalError::DomainError(format!(
+                        return Err(EvalError::domain_error(format!(
                             "BitAnd expects 2 args, got {}", args.len()
                         )));
                     }
@@ -810,7 +836,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 }
                 "BitOr" => {
                     if args.len() != 2 {
-                        return Err(EvalError::DomainError(format!(
+                        return Err(EvalError::domain_error(format!(
                             "BitOr expects 2 args, got {}", args.len()
                         )));
                     }
@@ -820,7 +846,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 }
                 "BitXor" => {
                     if args.len() != 2 {
-                        return Err(EvalError::DomainError(format!(
+                        return Err(EvalError::domain_error(format!(
                             "BitXor expects 2 args, got {}", args.len()
                         )));
                     }
@@ -830,7 +856,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 }
                 "BitNot" => {
                     if args.len() != 1 {
-                        return Err(EvalError::DomainError(format!(
+                        return Err(EvalError::domain_error(format!(
                             "BitNot expects 1 arg, got {}", args.len()
                         )));
                     }
@@ -839,14 +865,14 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 }
                 "ShiftLeft" | "LeftShift" => {
                     if args.len() != 2 {
-                        return Err(EvalError::DomainError(format!(
+                        return Err(EvalError::domain_error(format!(
                             "{} expects 2 args, got {}", name, args.len()
                         )));
                     }
                     let a = eval_int(&args[0], env, defs)?;
                     let b = eval_int(&args[1], env, defs)?;
                     if !(0..=63).contains(&b) {
-                        return Err(EvalError::DomainError(format!(
+                        return Err(EvalError::domain_error(format!(
                             "shift amount {} out of range (0-63)", b
                         )));
                     }
@@ -854,14 +880,14 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 }
                 "ShiftRight" | "RightShift" => {
                     if args.len() != 2 {
-                        return Err(EvalError::DomainError(format!(
+                        return Err(EvalError::domain_error(format!(
                             "{} expects 2 args, got {}", name, args.len()
                         )));
                     }
                     let a = eval_int(&args[0], env, defs)?;
                     let b = eval_int(&args[1], env, defs)?;
                     if !(0..=63).contains(&b) {
-                        return Err(EvalError::DomainError(format!(
+                        return Err(EvalError::domain_error(format!(
                             "shift amount {} out of range (0-63)", b
                         )));
                     }
@@ -871,7 +897,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             }
             if let Some((params, body)) = defs.get(name) {
                 if args.len() != params.len() {
-                    return Err(EvalError::DomainError(format!(
+                    return Err(EvalError::domain_error(format!(
                         "function {} expects {} args, got {}",
                         name,
                         params.len(),
@@ -903,6 +929,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                     expected: "Fn @@ Fn",
                     got: Value::Tuple(vec![l, r]),
                     context: Some("function merge"),
+                    span: None,
                 }),
             }
         }
@@ -916,7 +943,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::CustomOp(name, _left, _right) => {
-            Err(EvalError::DomainError(format!("undefined custom operator: \\{}", name)))
+            Err(EvalError::domain_error(format!("undefined custom operator: \\{}", name)))
         }
 
         Expr::Except(f, updates) => {
@@ -939,18 +966,14 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                         if let [Value::Str(field)] = key_vals.as_slice() {
                             rec.insert(field.clone(), v);
                         } else {
-                            return Err(EvalError::DomainError(
-                                "invalid record update path".to_string(),
-                            ));
+                            return Err(EvalError::domain_error("invalid record update path"));
                         }
                     }
                     Value::Fn(fv) => {
                         update_nested(fv, &key_vals, v)?;
                     }
                     _ => {
-                        return Err(EvalError::DomainError(
-                            "EXCEPT requires record or function".to_string(),
-                        ))
+                        return Err(EvalError::domain_error("EXCEPT requires record or function"))
                     }
                 }
             }
@@ -961,7 +984,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             let at_key: Arc<str> = "@".into();
             env.get(&at_key)
                 .cloned()
-                .ok_or(EvalError::DomainError("@ used outside EXCEPT".to_string()))
+                .ok_or(EvalError::domain_error("@ used outside EXCEPT".to_string()))
         }
 
         Expr::Domain(f) => {
@@ -1023,7 +1046,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             let rv = eval_record(rec, env, defs)?;
             rv.get(field)
                 .cloned()
-                .ok_or_else(|| EvalError::DomainError(format!("field '{}' not in record", field)))
+                .ok_or_else(|| EvalError::domain_error(format!("field '{}' not in record", field)))
         }
 
         Expr::TupleLit(elems) => {
@@ -1040,7 +1063,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 Value::Tuple(tv) => tv
                     .get(*idx)
                     .cloned()
-                    .ok_or_else(|| EvalError::DomainError(format!(
+                    .ok_or_else(|| EvalError::domain_error(format!(
                         "sequence index {} out of bounds (sequence has {} elements)",
                         idx + 1, tv.len()
                     ))),
@@ -1048,16 +1071,12 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                     let key = Value::Int((*idx + 1) as i64);
                     fv.get(&key)
                         .cloned()
-                        .ok_or_else(|| EvalError::DomainError(format!(
+                        .ok_or_else(|| EvalError::domain_error(format!(
                             "key {} not in function domain",
                             idx + 1
                         )))
                 }
-                other => Err(EvalError::TypeMismatch {
-                    expected: "Tuple or Fn",
-                    got: other,
-                    context: Some("tuple access"),
-                }),
+                other => Err(EvalError::TypeMismatch { expected: "Tuple or Fn", got: other, context: Some("tuple access"),  span: None }),
             }
         }
 
@@ -1070,13 +1089,13 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             let tv = eval_tuple(seq, env, defs)?;
             tv.first()
                 .cloned()
-                .ok_or_else(|| EvalError::DomainError("Head of empty sequence".into()))
+                .ok_or_else(|| EvalError::domain_error("Head of empty sequence"))
         }
 
         Expr::Tail(seq) => {
             let tv = eval_tuple(seq, env, defs)?;
             if tv.is_empty() {
-                return Err(EvalError::DomainError("Tail of empty sequence".into()));
+                return Err(EvalError::domain_error("Tail of empty sequence"));
             }
             Ok(Value::Tuple(tv[1..].to_vec()))
         }
@@ -1100,7 +1119,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             let s = eval_int(start, env, defs)? as usize;
             let e = eval_int(end, env, defs)? as usize;
             if s < 1 || s > tv.len() + 1 || e < s - 1 || e > tv.len() {
-                return Err(EvalError::DomainError("SubSeq index out of bounds".into()));
+                return Err(EvalError::domain_error("SubSeq index out of bounds"));
             }
             let subseq = tv.get((s - 1)..e).unwrap_or(&[]).to_vec();
             Ok(Value::Tuple(subseq))
@@ -1112,7 +1131,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             for elem in tv {
                 let keep = if let Expr::Lambda(params, body) = test.as_ref() {
                     if params.len() != 1 {
-                        return Err(EvalError::DomainError(format!(
+                        return Err(EvalError::domain_error(format!(
                             "SelectSeq test expects 1 parameter, got {}",
                             params.len()
                         )));
@@ -1121,9 +1140,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                     local.insert(params[0].clone(), elem.clone());
                     eval_bool(body, &local, defs)?
                 } else {
-                    return Err(EvalError::DomainError(
-                        "SelectSeq test must be a LAMBDA expression".into(),
-                    ));
+                    return Err(EvalError::domain_error("SelectSeq test must be a LAMBDA expression"));
                 };
                 if keep {
                     result.push(elem);
@@ -1132,9 +1149,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             Ok(Value::Tuple(result))
         }
 
-        Expr::SeqSet(_) => Err(EvalError::DomainError(
-            "Seq(S) cannot be enumerated (infinite set); use for membership tests only".into(),
-        )),
+        Expr::SeqSet(_) => Err(EvalError::domain_error("Seq(S) cannot be enumerated (infinite set); use for membership tests only")),
 
         Expr::Print(val, result) => {
             let v = eval(val, env, defs)?;
@@ -1148,16 +1163,14 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 Ok(Value::Bool(true))
             } else {
                 let m = eval(msg, env, defs)?;
-                Err(EvalError::DomainError(format!(
+                Err(EvalError::domain_error(format!(
                     "Assertion failed: {}",
                     format_value(&m)
                 )))
             }
         }
 
-        Expr::JavaTime => Err(EvalError::DomainError(
-            "JavaTime is dumb, use SystemTime instead".into(),
-        )),
+        Expr::JavaTime => Err(EvalError::domain_error("JavaTime is dumb, use SystemTime instead")),
 
         Expr::SystemTime => {
             #[cfg(not(target_arch = "wasm32"))]
@@ -1180,7 +1193,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             let elements: Vec<Value> = set.into_iter().collect();
             let n = elements.len();
             if n > 10 {
-                return Err(EvalError::DomainError(format!(
+                return Err(EvalError::domain_error(format!(
                     "Permutations of set with {} elements is too large (max 10)",
                     n
                 )));
@@ -1195,9 +1208,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             let mut result = tv;
             if let Expr::Lambda(params, body) = cmp_expr.as_ref() {
                 if params.len() != 2 {
-                    return Err(EvalError::DomainError(
-                        "SortSeq comparator must take exactly 2 arguments".into(),
-                    ));
+                    return Err(EvalError::domain_error("SortSeq comparator must take exactly 2 arguments"));
                 }
                 let param_a = &params[0];
                 let param_b = &params[1];
@@ -1212,9 +1223,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                     }
                 });
             } else {
-                return Err(EvalError::DomainError(
-                    "SortSeq comparator must be a LAMBDA expression".into(),
-                ));
+                return Err(EvalError::domain_error("SortSeq comparator must be a LAMBDA expression"));
             }
             Ok(Value::Tuple(result))
         }
@@ -1233,7 +1242,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         Expr::RandomElement(set_expr) => {
             let set = eval_set(set_expr, env, defs)?;
             if set.is_empty() {
-                return Err(EvalError::DomainError("RandomElement of empty set".into()));
+                return Err(EvalError::domain_error("RandomElement of empty set"));
             }
             let elements: Vec<_> = set.into_iter().collect();
             let idx = RNG.with(|rng| rng.borrow_mut().usize(..elements.len()));
@@ -1255,16 +1264,12 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                         "queue" => Ok(Value::Int(stats.queue)),
                         "duration" => Ok(Value::Int(stats.duration)),
                         "generated" => Ok(Value::Int(stats.generated)),
-                        other => Err(EvalError::DomainError(format!(
+                        other => Err(EvalError::domain_error(format!(
                             "TLCGet: unknown key \"{}\"", other
                         ))),
                     }
                 }),
-                other => Err(EvalError::TypeMismatch {
-                    expected: "Int or Str",
-                    got: other,
-                    context: Some("TLCGet key"),
-                }),
+                other => Err(EvalError::TypeMismatch { expected: "Int or Str", got: other, context: Some("TLCGet key"),  span: None }),
             }
         }
 
@@ -1277,9 +1282,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             Ok(Value::Bool(true))
         }
 
-        Expr::Any => Err(EvalError::DomainError(
-            "Any cannot be evaluated directly, only used in membership tests".into(),
-        )),
+        Expr::Any => Err(EvalError::domain_error("Any cannot be evaluated directly, only used in membership tests")),
 
         Expr::TLCEval(val) => eval(val, env, defs),
 
@@ -1372,11 +1375,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                         result.insert(elem, Value::Int(c_old + c_new));
                     }
                 } else {
-                    return Err(EvalError::TypeMismatch {
-                        expected: "Bag (Fn)",
-                        got: bag_val,
-                        context: Some("BagUnion element"),
-                    });
+                    return Err(EvalError::TypeMismatch { expected: "Bag (Fn)", got: bag_val, context: Some("BagUnion element"),  span: None });
                 }
             }
             Ok(Value::Fn(result))
@@ -1409,9 +1408,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 })
                 .collect();
             if elements.iter().map(|(_, c)| *c).sum::<i64>() > 20 {
-                return Err(EvalError::DomainError(
-                    "SubBag of bag with more than 20 total copies is too large".into()
-                ));
+                return Err(EvalError::domain_error("SubBag of bag with more than 20 total copies is too large"));
             }
             let mut result_set = BTreeSet::new();
             enumerate_subbags(&elements, 0, BTreeMap::new(), &mut result_set);
@@ -1423,9 +1420,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             let mut result: BTreeMap<Value, Value> = BTreeMap::new();
             if let Expr::Lambda(params, body) = expr.as_ref() {
                 if params.len() != 1 {
-                    return Err(EvalError::DomainError(
-                        "BagOfAll expects a single-argument lambda".into()
-                    ));
+                    return Err(EvalError::domain_error("BagOfAll expects a single-argument lambda"));
                 }
                 for (elem, count) in bag {
                     let c = if let Value::Int(n) = count { n } else { 0 };
@@ -1438,9 +1433,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                     result.insert(mapped, Value::Int(prev + c));
                 }
             } else {
-                return Err(EvalError::DomainError(
-                    "BagOfAll requires a LAMBDA expression".into()
-                ));
+                return Err(EvalError::domain_error("BagOfAll requires a LAMBDA expression"));
             }
             Ok(Value::Fn(result))
         }
@@ -1498,7 +1491,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                     return eval(result, env, defs);
                 }
             }
-            Err(EvalError::DomainError("no case matched".into()))
+            Err(EvalError::domain_error("no case matched"))
         }
 
         Expr::Unchanged(vars) => {
@@ -1515,43 +1508,27 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             Ok(Value::Bool(true))
         }
 
-        Expr::Always(_) => Err(EvalError::DomainError(
-            "temporal operator [] (always) cannot be evaluated in explicit-state model checking".into()
-        )),
+        Expr::Always(_) => Err(EvalError::domain_error("temporal operator [] (always) cannot be evaluated in explicit-state model checking")),
 
-        Expr::Eventually(_) => Err(EvalError::DomainError(
-            "temporal operator <> (eventually) cannot be evaluated in explicit-state model checking".into()
-        )),
+        Expr::Eventually(_) => Err(EvalError::domain_error("temporal operator <> (eventually) cannot be evaluated in explicit-state model checking")),
 
-        Expr::LeadsTo(_, _) => Err(EvalError::DomainError(
-            "temporal operator ~> (leads-to) cannot be evaluated in explicit-state model checking".into()
-        )),
+        Expr::LeadsTo(_, _) => Err(EvalError::domain_error("temporal operator ~> (leads-to) cannot be evaluated in explicit-state model checking")),
 
-        Expr::WeakFairness(_, _) => Err(EvalError::DomainError(
-            "temporal operator WF (weak fairness) cannot be evaluated in explicit-state model checking".into()
-        )),
+        Expr::WeakFairness(_, _) => Err(EvalError::domain_error("temporal operator WF (weak fairness) cannot be evaluated in explicit-state model checking")),
 
-        Expr::StrongFairness(_, _) => Err(EvalError::DomainError(
-            "temporal operator SF (strong fairness) cannot be evaluated in explicit-state model checking".into()
-        )),
+        Expr::StrongFairness(_, _) => Err(EvalError::domain_error("temporal operator SF (strong fairness) cannot be evaluated in explicit-state model checking")),
 
-        Expr::BoxAction(_, _) => Err(EvalError::DomainError(
-            "temporal operator [A]_v (box action) cannot be evaluated in explicit-state model checking".into()
-        )),
+        Expr::BoxAction(_, _) => Err(EvalError::domain_error("temporal operator [A]_v (box action) cannot be evaluated in explicit-state model checking")),
 
-        Expr::DiamondAction(_, _) => Err(EvalError::DomainError(
-            "temporal operator <<A>>_v (diamond action) cannot be evaluated in explicit-state model checking".into()
-        )),
+        Expr::DiamondAction(_, _) => Err(EvalError::domain_error("temporal operator <<A>>_v (diamond action) cannot be evaluated in explicit-state model checking")),
 
-        Expr::EnabledOp(_) => Err(EvalError::DomainError(
-            "ENABLED operator cannot be evaluated in explicit-state model checking".into()
-        )),
+        Expr::EnabledOp(_) => Err(EvalError::domain_error("ENABLED operator cannot be evaluated in explicit-state model checking")),
 
         Expr::QualifiedCall(instance, op, args) => {
             RESOLVED_INSTANCES.with(|inst_ref| {
                 let instances = inst_ref.borrow();
                 if instances.is_empty() {
-                    return Err(EvalError::DomainError(format!(
+                    return Err(EvalError::domain_error(format!(
                         "qualified call {}!{} requires resolved instances",
                         instance, op
                     )));
@@ -1559,17 +1536,17 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
 
                 let instance_defs = instances
                     .get(instance)
-                    .ok_or_else(|| EvalError::DomainError(format!("instance {} not found", instance)))?;
+                    .ok_or_else(|| EvalError::domain_error(format!("instance {} not found", instance)))?;
 
                 let (params, body) = instance_defs
                     .get(op)
-                    .ok_or_else(|| EvalError::DomainError(format!(
+                    .ok_or_else(|| EvalError::domain_error(format!(
                         "operator {} not found in instance {}",
                         op, instance
                     )))?;
 
                 if args.len() != params.len() {
-                    return Err(EvalError::DomainError(format!(
+                    return Err(EvalError::domain_error(format!(
                         "{}!{} expects {} args, got {}",
                         instance, op, params.len(), args.len()
                     )));
@@ -1601,17 +1578,17 @@ pub fn eval_with_instances(
         Expr::QualifiedCall(instance, op, args) => {
             let instance_defs = instances
                 .get(instance)
-                .ok_or_else(|| EvalError::DomainError(format!("instance {} not found", instance)))?;
+                .ok_or_else(|| EvalError::domain_error(format!("instance {} not found", instance)))?;
 
             let (params, body) = instance_defs
                 .get(op)
-                .ok_or_else(|| EvalError::DomainError(format!(
+                .ok_or_else(|| EvalError::domain_error(format!(
                     "operator {} not found in instance {}",
                     op, instance
                 )))?;
 
             if args.len() != params.len() {
-                return Err(EvalError::DomainError(format!(
+                return Err(EvalError::domain_error(format!(
                     "{}!{} expects {} args, got {}",
                     instance, op, params.len(), args.len()
                 )));
@@ -1684,7 +1661,7 @@ pub fn eval_with_context(
         Expr::FnCall(name, args) => {
             if let Some((params, body)) = defs.get(name) {
                 if args.len() != params.len() {
-                    return Err(EvalError::DomainError(format!(
+                    return Err(EvalError::domain_error(format!(
                         "function {} expects {} args, got {}",
                         name,
                         params.len(),
@@ -1741,33 +1718,21 @@ pub fn eval_with_context(
 fn eval_bool_with_context(expr: &Expr, env: &Env, defs: &Definitions, ctx: &EvalContext) -> Result<bool> {
     match eval_with_context(expr, env, defs, ctx)? {
         Value::Bool(b) => Ok(b),
-        other => Err(EvalError::TypeMismatch {
-            expected: "Bool",
-            got: other,
-            context: None,
-        }),
+        other => Err(EvalError::TypeMismatch { expected: "Bool", got: other, context: None,  span: None }),
     }
 }
 
 fn eval_bool(expr: &Expr, env: &Env, defs: &Definitions) -> Result<bool> {
     match eval(expr, env, defs)? {
         Value::Bool(b) => Ok(b),
-        other => Err(EvalError::TypeMismatch {
-            expected: "Bool",
-            got: other,
-            context: None,
-        }),
+        other => Err(EvalError::TypeMismatch { expected: "Bool", got: other, context: None,  span: None }),
     }
 }
 
 fn eval_int(expr: &Expr, env: &Env, defs: &Definitions) -> Result<i64> {
     match eval(expr, env, defs)? {
         Value::Int(i) => Ok(i),
-        other => Err(EvalError::TypeMismatch {
-            expected: "Int",
-            got: other,
-            context: None,
-        }),
+        other => Err(EvalError::TypeMismatch { expected: "Int", got: other, context: None,  span: None }),
     }
 }
 
@@ -1821,44 +1786,28 @@ fn in_set_symbolic(val: &Value, set_expr: &Expr, env: &Env, defs: &Definitions) 
 fn eval_set(expr: &Expr, env: &Env, defs: &Definitions) -> Result<BTreeSet<Value>> {
     match eval(expr, env, defs)? {
         Value::Set(s) => Ok(s),
-        other => Err(EvalError::TypeMismatch {
-            expected: "Set",
-            got: other,
-            context: None,
-        }),
+        other => Err(EvalError::TypeMismatch { expected: "Set", got: other, context: None,  span: None }),
     }
 }
 
 fn eval_fn(expr: &Expr, env: &Env, defs: &Definitions) -> Result<BTreeMap<Value, Value>> {
     match eval(expr, env, defs)? {
         Value::Fn(f) => Ok(f),
-        other => Err(EvalError::TypeMismatch {
-            expected: "Fn",
-            got: other,
-            context: None,
-        }),
+        other => Err(EvalError::TypeMismatch { expected: "Fn", got: other, context: None,  span: None }),
     }
 }
 
 fn eval_record(expr: &Expr, env: &Env, defs: &Definitions) -> Result<BTreeMap<Arc<str>, Value>> {
     match eval(expr, env, defs)? {
         Value::Record(r) => Ok(r),
-        other => Err(EvalError::TypeMismatch {
-            expected: "Record",
-            got: other,
-            context: None,
-        }),
+        other => Err(EvalError::TypeMismatch { expected: "Record", got: other, context: None,  span: None }),
     }
 }
 
 fn eval_tuple(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Vec<Value>> {
     match eval(expr, env, defs)? {
         Value::Tuple(t) => Ok(t),
-        other => Err(EvalError::TypeMismatch {
-            expected: "Tuple",
-            got: other,
-            context: None,
-        }),
+        other => Err(EvalError::TypeMismatch { expected: "Tuple", got: other, context: None,  span: None }),
     }
 }
 
@@ -1889,19 +1838,19 @@ fn get_nested(base: &Value, keys: &[Value]) -> Result<Value> {
         (Value::Record(rec), Value::Str(field)) => {
             let v = rec
                 .get(field)
-                .ok_or_else(|| EvalError::DomainError(format!("field '{}' not found", field)))?;
+                .ok_or_else(|| EvalError::domain_error(format!("field '{}' not found", field)))?;
             get_nested(v, &keys[1..])
         }
         (Value::Fn(f), key) => {
             let v = f
                 .get(key)
-                .ok_or_else(|| EvalError::DomainError(format!(
+                .ok_or_else(|| EvalError::domain_error(format!(
                     "key {} not in function domain",
                     format_value(key)
                 )))?;
             get_nested(v, &keys[1..])
         }
-        _ => Err(EvalError::DomainError("cannot access into this value".into())),
+        _ => Err(EvalError::domain_error("cannot access into this value")),
     }
 }
 
@@ -1915,17 +1864,13 @@ fn update_nested(f: &mut BTreeMap<Value, Value>, keys: &[Value], val: Value) -> 
     }
     let inner = f
         .get_mut(&keys[0])
-        .ok_or_else(|| EvalError::DomainError(format!(
+        .ok_or_else(|| EvalError::domain_error(format!(
             "key {} not in function domain",
             format_value(&keys[0])
         )))?;
     match inner {
         Value::Fn(inner_fn) => update_nested(inner_fn, &keys[1..], val),
-        _ => Err(EvalError::TypeMismatch {
-            expected: "Fn",
-            got: inner.clone(),
-            context: Some("nested EXCEPT update"),
-        }),
+        _ => Err(EvalError::TypeMismatch { expected: "Fn", got: inner.clone(), context: Some("nested EXCEPT update"),  span: None }),
     }
 }
 

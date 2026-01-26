@@ -454,7 +454,10 @@ impl<'a> Lexer<'a> {
             return Ok(Token::RightArrow);
         }
 
-        let c = self.peek_char().unwrap();
+        let c = match self.peek_char() {
+            Some(c) => c,
+            None => return Err("unexpected end of input".to_string()),
+        };
 
         if c == '(' {
             self.advance();

@@ -33,8 +33,12 @@ pub struct CheckerConfig {
     pub check_liveness: bool,
     pub quiet: bool,
     pub quick_mode: bool,
+    pub verbosity: u8,
+    pub json_output: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pub spec_path: Option<PathBuf>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub trace_json_path: Option<PathBuf>,
 }
 
 impl Default for CheckerConfig {
@@ -49,8 +53,12 @@ impl Default for CheckerConfig {
             check_liveness: false,
             quiet: false,
             quick_mode: false,
+            verbosity: 1,
+            json_output: false,
             #[cfg(not(target_arch = "wasm32"))]
             spec_path: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            trace_json_path: None,
         }
     }
 }
@@ -58,6 +66,20 @@ impl Default for CheckerConfig {
 impl CheckerConfig {
     pub fn new() -> Self {
         Self::default()
+    }
+}
+
+fn format_eta(secs: f64) -> String {
+    if secs.is_nan() || secs.is_infinite() || secs < 0.0 {
+        return "N/A".to_string();
+    }
+    let secs = secs as u64;
+    if secs < 60 {
+        format!("{}s", secs)
+    } else if secs < 3600 {
+        format!("{}m{}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
     }
 }
 
@@ -150,11 +172,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             Ok(_) => {
                 return CheckResult::AssumeError(
                     idx,
-                    EvalError::TypeMismatch {
-                        expected: "Bool",
-                        got: Value::Bool(false),
-                        context: Some("ASSUME evaluation"),
-                    },
+                    EvalError::TypeMismatch { expected: "Bool", got: Value::Bool(false), context: Some("ASSUME evaluation"),  span: None },
                 )
             }
             Err(e) => return CheckResult::AssumeError(idx, e),
@@ -297,9 +315,17 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 let rate = stats.states_explored as f64 / elapsed.max(0.001);
                 let remaining = config.max_states.saturating_sub(stats.states_explored);
                 let eta = remaining as f64 / rate;
+                let pct = (stats.states_explored as f64 / config.max_states as f64 * 100.0).min(100.0);
+                let bar_width = 20;
+                let filled = (pct / 100.0 * bar_width as f64) as usize;
+                let empty = bar_width - filled;
+                let bar: String = std::iter::repeat_n('\u{2588}', filled)
+                    .chain(std::iter::repeat_n('\u{2591}', empty))
+                    .collect();
+                let eta_str = format_eta(eta);
                 eprintln!(
-                    "  Progress: {} states ({:.0}/s), queue: {}, depth: {}, limit ETA: {:.1}s",
-                    stats.states_explored, rate, queue.len(), depth, eta
+                    "  [{}] {}/{} ({:.1}%) | {:.0}/s | depth: {} | ETA: {}",
+                    bar, stats.states_explored, config.max_states, pct, rate, depth, eta_str
                 );
             }
         }
@@ -347,11 +373,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                     let trace = reconstruct_trace(current_idx, &states, &parent);
                     do_export(&states, &parent, Some(current_idx));
                     return CheckResult::InvariantError(
-                        EvalError::TypeMismatch {
-                            expected: "Bool",
-                            got: Value::Bool(false),
-                            context: Some("invariant evaluation"),
-                        },
+                        EvalError::TypeMismatch { expected: "Bool", got: Value::Bool(false), context: Some("invariant evaluation"),  span: None },
                         trace,
                     );
                 }
@@ -522,15 +544,61 @@ pub fn format_trace(trace: &[State], vars: &[Arc<str>]) -> String {
 }
 
 pub fn format_trace_with_diffs(trace: &[State], vars: &[Arc<str>]) -> String {
+    if trace.is_empty() {
+        return String::new();
+    }
+
+    let max_var_len = vars.iter().map(|v| v.len()).max().unwrap_or(0);
+    let total_states = trace.len();
+    let last_idx = total_states - 1;
+
     let mut out = String::new();
     for (i, state) in trace.iter().enumerate() {
-        out.push_str(&format!("State {}\n", i));
         let prev = if i > 0 { Some(&trace[i - 1]) } else { None };
+
+        let changed_vars: Vec<&str> = vars
+            .iter()
+            .filter(|var| {
+                if let (Some(p), Some(curr)) = (prev.and_then(|p| p.vars.get(*var)), state.vars.get(*var)) {
+                    p != curr
+                } else {
+                    false
+                }
+            })
+            .map(|s| s.as_ref())
+            .collect();
+
+        if i == last_idx && total_states > 1 {
+            out.push_str(&format!("State {} of {} [FINAL]\n", i, last_idx));
+        } else if total_states > 1 {
+            out.push_str(&format!("State {} of {}\n", i, last_idx));
+        } else {
+            out.push_str(&format!("State {}\n", i));
+        }
+
+        if !changed_vars.is_empty() && i > 0 {
+            out.push_str(&format!("  (changed: {})\n", changed_vars.join(", ")));
+        }
+
         for var in vars {
             if let Some(val) = state.vars.get(var) {
                 let changed = prev.is_some_and(|p| p.vars.get(var) != Some(val));
                 let marker = if changed { " *" } else { "" };
-                out.push_str(&format!("  {} = {}{}\n", var, format_value(val), marker));
+                let prev_val_str = if changed {
+                    prev.and_then(|p| p.vars.get(var))
+                        .map(|v| format!("  (was: {})", format_value(v)))
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                out.push_str(&format!(
+                    "  {:width$} = {}{}{}\n",
+                    var,
+                    format_value(val),
+                    prev_val_str,
+                    marker,
+                    width = max_var_len
+                ));
             }
         }
     }
@@ -569,14 +637,14 @@ pub fn format_value(val: &Value) -> String {
 
 pub fn format_eval_error(err: &EvalError) -> String {
     match err {
-        EvalError::UndefinedVar { name, suggestion } => {
+        EvalError::UndefinedVar { name, suggestion, .. } => {
             let mut msg = format!("undefined variable `{}`", name);
             if let Some(s) = suggestion {
                 msg.push_str(&format!("\n  help: did you mean `{}`?", s));
             }
             msg
         }
-        EvalError::TypeMismatch { expected, got, context } => {
+        EvalError::TypeMismatch { expected, got, context, .. } => {
             let type_name = value_type_name(got);
             let mut msg = format!("type mismatch: expected {}, got {}", expected, type_name);
             if let Some(ctx) = context {
@@ -584,11 +652,11 @@ pub fn format_eval_error(err: &EvalError) -> String {
             }
             msg
         }
-        EvalError::DivisionByZero => "division by zero".to_string(),
-        EvalError::EmptyChoose => {
+        EvalError::DivisionByZero { .. } => "division by zero".to_string(),
+        EvalError::EmptyChoose { .. } => {
             "CHOOSE found no satisfying value (domain may be empty or no element satisfies the predicate)".to_string()
         }
-        EvalError::DomainError(msg) => msg.clone(),
+        EvalError::DomainError { message, .. } => message.clone(),
     }
 }
 
@@ -606,15 +674,15 @@ fn value_type_name(val: &Value) -> &'static str {
 
 pub fn eval_error_to_diagnostic(err: &EvalError) -> crate::diagnostic::Diagnostic {
     use crate::diagnostic::Diagnostic;
-    match err {
-        EvalError::UndefinedVar { name, suggestion } => {
+    let diag = match err {
+        EvalError::UndefinedVar { name, suggestion, .. } => {
             let mut diag = Diagnostic::error(format!("undefined variable `{}`", name));
             if let Some(s) = suggestion {
                 diag = diag.with_help(format!("did you mean `{}`?", s));
             }
             diag
         }
-        EvalError::TypeMismatch { expected, got, context } => {
+        EvalError::TypeMismatch { expected, got, context, .. } => {
             let type_name = value_type_name(got);
             let msg = if let Some(ctx) = context {
                 format!("type mismatch in {}: expected {}, got {}", ctx, expected, type_name)
@@ -623,13 +691,171 @@ pub fn eval_error_to_diagnostic(err: &EvalError) -> crate::diagnostic::Diagnosti
             };
             Diagnostic::error(msg)
         }
-        EvalError::DivisionByZero => Diagnostic::error("division by zero"),
-        EvalError::EmptyChoose => {
+        EvalError::DivisionByZero { .. } => Diagnostic::error("division by zero"),
+        EvalError::EmptyChoose { .. } => {
             Diagnostic::error("CHOOSE found no satisfying value")
                 .with_help("the domain may be empty or no element satisfies the predicate")
         }
-        EvalError::DomainError(msg) => Diagnostic::error(msg.clone()),
+        EvalError::DomainError { message, .. } => Diagnostic::error(message.clone()),
+    };
+    if let Some(span) = err.span() {
+        diag.with_span(span)
+    } else {
+        diag
     }
+}
+
+pub fn value_to_json(val: &Value) -> String {
+    match val {
+        Value::Bool(b) => b.to_string(),
+        Value::Int(i) => i.to_string(),
+        Value::Str(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+        Value::Set(s) => {
+            let elems: Vec<_> = s.iter().map(value_to_json).collect();
+            format!("[{}]", elems.join(", "))
+        }
+        Value::Fn(f) => {
+            let pairs: Vec<_> = f
+                .iter()
+                .map(|(k, v)| format!("{{\"key\": {}, \"value\": {}}}", value_to_json(k), value_to_json(v)))
+                .collect();
+            format!("[{}]", pairs.join(", "))
+        }
+        Value::Record(r) => {
+            let fields: Vec<_> = r
+                .iter()
+                .map(|(k, v)| format!("\"{}\": {}", k, value_to_json(v)))
+                .collect();
+            format!("{{{}}}", fields.join(", "))
+        }
+        Value::Tuple(t) => {
+            let elems: Vec<_> = t.iter().map(value_to_json).collect();
+            format!("[{}]", elems.join(", "))
+        }
+    }
+}
+
+pub fn state_to_json(state: &State, vars: &[Arc<str>]) -> String {
+    let fields: Vec<_> = vars
+        .iter()
+        .filter_map(|var| {
+            state.vars.get(var).map(|val| format!("\"{}\": {}", var, value_to_json(val)))
+        })
+        .collect();
+    format!("{{{}}}", fields.join(", "))
+}
+
+pub fn trace_to_json(trace: &[State], vars: &[Arc<str>]) -> String {
+    let states: Vec<_> = trace
+        .iter()
+        .enumerate()
+        .map(|(i, state)| format!("{{\"index\": {}, \"state\": {}}}", i, state_to_json(state, vars)))
+        .collect();
+    format!("[{}]", states.join(", "))
+}
+
+pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
+    match result {
+        CheckResult::Ok(stats) => {
+            format!(
+                r#"{{"status": "ok", "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
+                stats.states_explored, stats.transitions, stats.max_depth_reached, stats.elapsed_secs
+            )
+        }
+        CheckResult::InvariantViolation(cex, stats) => {
+            let inv_name = spec
+                .invariant_names
+                .get(cex.violated_invariant)
+                .and_then(|n| n.as_ref())
+                .map(|n| format!("\"{}\"", n))
+                .unwrap_or_else(|| "null".to_string());
+            format!(
+                r#"{{"status": "invariant_violation", "invariant_index": {}, "invariant_name": {}, "trace": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
+                cex.violated_invariant,
+                inv_name,
+                trace_to_json(&cex.trace, &spec.vars),
+                stats.states_explored,
+                stats.transitions,
+                stats.max_depth_reached,
+                stats.elapsed_secs
+            )
+        }
+        CheckResult::Deadlock(trace, stats) => {
+            format!(
+                r#"{{"status": "deadlock", "trace": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
+                trace_to_json(trace, &spec.vars),
+                stats.states_explored,
+                stats.transitions,
+                stats.max_depth_reached,
+                stats.elapsed_secs
+            )
+        }
+        CheckResult::InitError(e) => {
+            format!(r#"{{"status": "init_error", "error": "{}"}}"#, format_eval_error(e).replace('"', "\\\""))
+        }
+        CheckResult::NextError(e, trace) => {
+            format!(
+                r#"{{"status": "next_error", "error": "{}", "trace": {}}}"#,
+                format_eval_error(e).replace('"', "\\\""),
+                trace_to_json(trace, &spec.vars)
+            )
+        }
+        CheckResult::InvariantError(e, trace) => {
+            format!(
+                r#"{{"status": "invariant_error", "error": "{}", "trace": {}}}"#,
+                format_eval_error(e).replace('"', "\\\""),
+                trace_to_json(trace, &spec.vars)
+            )
+        }
+        CheckResult::MaxStatesExceeded(stats) => {
+            format!(
+                r#"{{"status": "max_states_exceeded", "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
+                stats.states_explored, stats.transitions, stats.max_depth_reached, stats.elapsed_secs
+            )
+        }
+        CheckResult::MaxDepthExceeded(stats) => {
+            format!(
+                r#"{{"status": "max_depth_exceeded", "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
+                stats.states_explored, stats.transitions, stats.max_depth_reached, stats.elapsed_secs
+            )
+        }
+        CheckResult::NoInitialStates => {
+            r#"{"status": "no_initial_states"}"#.to_string()
+        }
+        CheckResult::MissingConstants(missing) => {
+            let names: Vec<_> = missing.iter().map(|c| format!("\"{}\"", c)).collect();
+            format!(r#"{{"status": "missing_constants", "constants": [{}]}}"#, names.join(", "))
+        }
+        CheckResult::AssumeViolation(idx) => {
+            format!(r#"{{"status": "assume_violation", "assume_index": {}}}"#, idx)
+        }
+        CheckResult::AssumeError(idx, e) => {
+            format!(
+                r#"{{"status": "assume_error", "assume_index": {}, "error": "{}"}}"#,
+                idx,
+                format_eval_error(e).replace('"', "\\\"")
+            )
+        }
+        CheckResult::LivenessViolation(violation, stats) => {
+            format!(
+                r#"{{"status": "liveness_violation", "property": "{}", "prefix": {}, "cycle": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
+                violation.property.replace('"', "\\\""),
+                trace_to_json(&violation.prefix, &spec.vars),
+                trace_to_json(&violation.cycle, &spec.vars),
+                stats.states_explored,
+                stats.transitions,
+                stats.max_depth_reached,
+                stats.elapsed_secs
+            )
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn write_trace_json(path: &std::path::Path, trace: &[State], vars: &[Arc<str>]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    writeln!(file, "{}", trace_to_json(trace, vars))
 }
 
 #[cfg(test)]

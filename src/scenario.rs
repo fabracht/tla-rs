@@ -73,7 +73,7 @@ pub fn execute_scenario(
 
     let init_states = crate::eval::init_states(&spec.init, &spec.vars, &env, &defs)?;
     if init_states.is_empty() {
-        return Err(EvalError::DomainError("no initial states".into()));
+        return Err(EvalError::domain_error("no initial states"));
     }
 
     let mut current_state = init_states.into_iter().next().unwrap();
@@ -166,11 +166,7 @@ fn matches_step(
             let env = build_scenario_env(current, next, &Env::new());
             match crate::eval::eval(expr, &env, defs) {
                 Ok(Value::Bool(b)) => Ok(b),
-                Ok(other) => Err(EvalError::TypeMismatch {
-                    expected: "Bool",
-                    got: other,
-                    context: Some("scenario condition"),
-                }),
+                Ok(other) => Err(EvalError::TypeMismatch { expected: "Bool", got: other, context: Some("scenario condition"),  span: None }),
                 Err(e) => Err(e),
             }
         }
