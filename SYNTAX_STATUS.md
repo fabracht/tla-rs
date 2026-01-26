@@ -123,6 +123,12 @@ Cross-checked against:
 | `x'` | Primed variable (next state) |
 | `UNCHANGED <<x, y>>` | Variables unchanged |
 
+### Relation Operators
+| ASCII | Unicode | Description |
+|-------|---------|-------------|
+| `^+` | ⁺ | Transitive closure |
+| `^*` | | Reflexive-transitive closure |
+
 ### TLC Operators
 | ASCII | Description |
 |-------|-------------|
@@ -191,6 +197,7 @@ Cross-checked against:
 | `FiniteSets` | ✓ `Cardinality`, `IsFiniteSet` |
 | `TLC` | ✓ All 14 operators implemented |
 | `Bags` | ✓ All 13 operators implemented |
+| `Bits` | ⚠ Parsed but no operators implemented |
 
 ---
 
@@ -204,21 +211,17 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | `[]P` | □ | Always | Parsed, errors if evaluated |
 | `<>P` | ◇ | Eventually | Parsed, errors if evaluated |
 | `~>` | | Leads-to | Parsed, errors if evaluated |
-| `WF_v(A)` | | Weak fairness | Parsed, errors if evaluated |
-| `SF_v(A)` | | Strong fairness | Parsed, errors if evaluated |
-| `ENABLED A` | | Action enabled | Parsed, errors if evaluated |
+| `WF_v(A)` | | Weak fairness | ✓ Used in liveness checking |
+| `SF_v(A)` | | Strong fairness | ✓ Used in liveness checking |
+| `ENABLED A` | | Action enabled | ✓ Used in liveness checking |
 | `[A]_v` | | Box action | Parsed, errors if evaluated |
 | `<<A>>_v` | | Diamond action | Parsed, errors if evaluated |
+
+**Liveness Checking:** Use `--check-liveness` to verify fairness properties. The checker computes SCCs and verifies WF/SF constraints are satisfied.
 
 ---
 
 ## Not Implemented ✗
-
-### Transitive Closure
-| ASCII | Unicode | Description |
-|-------|---------|-------------|
-| `^+` | ⁺ | Transitive closure |
-| `^*` | | Reflexive-transitive closure |
 
 ### Proof Constructs
 - `THEOREM`, `LEMMA`, `COROLLARY` - Parsed and skipped
@@ -230,6 +233,7 @@ These operators are parsed into the AST but error at evaluation time. They can a
 |---------|-------------|
 | `\cdot` | Action composition |
 | Unbounded quantifiers | `\E x : P` without domain |
+| Bits module operators | Bitwise AND, OR, XOR, shifts |
 
 ---
 
@@ -260,6 +264,7 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | ⊕ | `\oplus` |
 | ⊖ | `\ominus` |
 | ⊑ | `\sqsubseteq` |
+| ⁺ | `^+` |
 
 ### Parsed (Temporal - errors at eval)
 | Unicode | ASCII Equivalent |
@@ -268,9 +273,7 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | ◇ | `<>` |
 
 ### Not Supported
-| Unicode | ASCII Equivalent |
-|---------|------------------|
-| ⁺ | `^+` |
+None - all documented Unicode operators are supported.
 
 ---
 
@@ -288,10 +291,12 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | Records | 100% ✓ |
 | Control Flow | 100% ✓ |
 | State Operators | 100% ✓ |
+| Relation Operators | 100% ✓ |
 | TLC Module | 100% ✓ |
 | Bags Module | 100% ✓ |
+| Bits Module | 0% ✗ |
 | Module System | 70% ⚠ |
-| Temporal Logic | 80% ⚠ |
+| Temporal/Liveness | 60% ⚠ |
 | Proofs | 0% ✗ |
 | Number Formats | 100% ✓ |
 
@@ -301,7 +306,7 @@ These operators are parsed into the AST but error at evaluation time. They can a
 
 ### Low Priority (Remaining)
 1. **Full INSTANCE** with substitution
-2. **Transitive closure** (`^+`, `^*`)
+2. **Bits module** (`BitAnd`, `BitOr`, `BitXor`, `ShiftLeft`, `ShiftRight`)
 3. **Proof constructs** (currently safely skipped)
 
 ---
@@ -320,7 +325,7 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | Voting | ✓ | Needs bounded Nat |
 | Paxos | ✓ | Large state space |
 | Prisoners | ✓ | 74 states |
-| Hanoi | ✗ | Needs Bits module (bitwise ops) |
+| Hanoi | ✗ | Needs Bits module operators |
 
 ---
 
