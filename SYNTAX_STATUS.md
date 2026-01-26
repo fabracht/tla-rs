@@ -195,7 +195,7 @@ Cross-checked against:
 | `Integers` | ✓ Int set (bounded -100..100) |
 | `Sequences` | ✓ All ops including `Seq(S)`, `SelectSeq` |
 | `FiniteSets` | ✓ `Cardinality`, `IsFiniteSet` |
-| `TLC` | ✓ All 14 operators implemented |
+| `TLC` | ✓ All 13 operators implemented |
 | `Bags` | ✓ All 13 operators implemented |
 | `Bits` | ⚠ Parsed but no operators implemented |
 
@@ -208,8 +208,8 @@ These operators are parsed into the AST but error at evaluation time. They can a
 
 | ASCII | Unicode | Description | Status |
 |-------|---------|-------------|--------|
-| `[]P` | □ | Always | Parsed, errors if evaluated |
-| `<>P` | ◇ | Eventually | Parsed, errors if evaluated |
+| `[]P` | | Always | Parsed, errors if evaluated |
+| `<>P` | | Eventually | Parsed, errors if evaluated |
 | `~>` | | Leads-to | Parsed, errors if evaluated |
 | `WF_v(A)` | | Weak fairness | ✓ Used in liveness checking |
 | `SF_v(A)` | | Strong fairness | ✓ Used in liveness checking |
@@ -245,12 +245,14 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | ∧ | `/\` |
 | ∨ | `\/` |
 | ¬ | `~` |
-| ⇒ | `=>` |
-| ≡, ⟺ | `<=>` |
+| ⇒, ⟹ | `=>` |
+| ⟺ | `<=>` |
 | ∈ | `\in` |
 | ∉ | `\notin` |
 | ⊆ | `\subseteq` |
 | ⊂ | `\subset` |
+| ⊇ | `\supseteq` |
+| ⊃ | `\supset` |
 | ∪ | `\cup` |
 | ∩ | `\cap` |
 | × | `\times` |
@@ -259,21 +261,19 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | ≠ | `/=` |
 | ∃ | `\E` |
 | ∀ | `\A` |
-| ↦ | `\|->` |
-| → | `->` |
 | ⊕ | `\oplus` |
 | ⊖ | `\ominus` |
 | ⊑ | `\sqsubseteq` |
-| ⁺ | `^+` |
 
-### Parsed (Temporal - errors at eval)
+### Not Supported (use ASCII equivalents)
 | Unicode | ASCII Equivalent |
 |---------|------------------|
+| ≡ | `<=>` |
+| ↦ | `\|->` |
+| → | `->` |
+| ⁺ | `^+` |
 | □ | `[]` |
 | ◇ | `<>` |
-
-### Not Supported
-None - all documented Unicode operators are supported.
 
 ---
 
