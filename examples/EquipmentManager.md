@@ -535,3 +535,101 @@ cargo run -- examples/EquipmentManager.tla \
 cargo run -- examples/EquipmentManager.tla \
   -c 'Serials={"s1"}' -c 'MaxTimestamp=2' --allow-deadlock --check-liveness
 ```
+
+---
+
+## 14. Scenario Exploration
+
+Scenario exploration lets you trace specific execution paths through the spec using TLA+ expressions. Each `step:` line specifies a condition that must be TRUE for the transition.
+
+### Basic Scenario: Equipment Registration and Data Fetch
+
+```bash
+cargo run -- examples/EquipmentManager.tla \
+  -c 'Serials={"s1"}' -c 'MaxTimestamp=2' --allow-deadlock \
+  --scenario @examples/scenario_basic.txt
+```
+
+Where `scenario_basic.txt` contains:
+```
+# Equipment s1 registers (joins activeSerials)
+step: "s1" \in activeSerials'
+
+# Cloud publishes data with timestamp 1
+step: dataAtBroker'["s1"] = 1
+
+# Cloud publishes metadata with timestamp 1
+step: metadataAtBroker'["s1"] = 1
+
+# Agent receives metadata (triggers data subscription)
+step: receivedMetadata'["s1"] = 1 /\ subscribedToData'["s1"] = TRUE
+
+# Agent receives matching data and caches it
+step: cachedTimestamp'["s1"] = 1 /\ subscribedToData'["s1"] = FALSE
+```
+
+### Example Output
+
+```
+━━━ Step 0 ━━━
+Action: Init
+State:
+  activeSerials = {}
+  cachedTimestamp = ["s1" ↦ 0]
+  ...
+
+━━━ Step 1 ━━━
+Condition: "s1" \in activeSerials'
+Changes:
+  • activeSerials: {} → {"s1"}
+  • metadataTimerActive: ["s1" ↦ false] → ["s1" ↦ true]
+State:
+  activeSerials = {"s1"}
+  ...
+
+━━━ Step 2 ━━━
+Condition: dataAtBroker'["s1"] = 1
+Changes:
+  • dataAtBroker: ["s1" ↦ 0] → ["s1" ↦ 1]
+...
+
+✓ Scenario completed successfully
+```
+
+### Failed Scenario Example
+
+If you request an impossible transition:
+```
+step: cachedTimestamp'["s1"] = 1
+```
+
+Without first receiving metadata, you'll see:
+```
+⚠ Scenario failed at step 1
+  Condition: cachedTimestamp'["s1"] = 1
+  Reason: no transition matches condition
+
+  Available transitions:
+    1. activeSerials: {} → {"s1"}; metadataTimerActive: [...] → [...]
+    2. dataAtBroker: ["s1" ↦ 0] → ["s1" ↦ 1]
+    ...
+```
+
+This shows what transitions ARE possible from the current state.
+
+### Expression Syntax
+
+Scenario conditions use full TLA+ expression syntax:
+
+| Pattern | Meaning |
+|---------|---------|
+| `x' = value` | Variable equals specific value after transition |
+| `x' > x` | Variable increases |
+| `x' # x` | Variable changes (any new value) |
+| `"s1" \in set'` | Element joins a set |
+| `"s1" \notin set'` | Element leaves a set |
+| `f'["key"] = value` | Function/record field equals value |
+| `cond1 /\ cond2` | Both conditions must be true |
+| `cond1 \/ cond2` | Either condition must be true |
+
+Unprimed variables (`x`) refer to the current state; primed variables (`x'`) refer to the next state.
