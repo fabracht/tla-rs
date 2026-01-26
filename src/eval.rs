@@ -4,8 +4,17 @@ use std::sync::Arc;
 
 use crate::ast::{Env, Expr, State, Value};
 use crate::checker::format_value;
+use crate::diagnostic::find_similar;
 
 pub type Definitions = BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>;
+pub type ResolvedInstances = BTreeMap<Arc<str>, Definitions>;
+
+#[derive(Clone)]
+pub struct EvalContext {
+    pub state_vars: Vec<Arc<str>>,
+    pub constants: Env,
+    pub current_state: State,
+}
 
 thread_local! {
     static RNG: RefCell<fastrand::Rng> = RefCell::new(fastrand::Rng::with_seed(0));
@@ -54,11 +63,24 @@ pub fn set_checker_level(level: i64) {
 
 #[derive(Debug, Clone)]
 pub enum EvalError {
-    UndefinedVar(Arc<str>),
+    UndefinedVar { name: Arc<str>, suggestion: Option<Arc<str>> },
     TypeMismatch { expected: &'static str, got: Value },
     DivisionByZero,
     EmptyChoose,
     DomainError(String),
+}
+
+impl EvalError {
+    pub fn undefined_var(name: Arc<str>) -> Self {
+        Self::UndefinedVar { name, suggestion: None }
+    }
+
+    pub fn undefined_var_with_env(name: Arc<str>, env: &Env, defs: &Definitions) -> Self {
+        let candidates = env.keys().map(|s| s.as_ref())
+            .chain(defs.keys().map(|s| s.as_ref()));
+        let suggestion = find_similar(&name, candidates, 2).map(|s| s.into());
+        Self::UndefinedVar { name, suggestion }
+    }
 }
 
 type Result<T> = std::result::Result<T, EvalError>;
@@ -86,6 +108,7 @@ fn eval_fn_def_recursive(
     Ok(memo.into_inner())
 }
 
+#[allow(clippy::only_used_in_recursion)]
 fn eval_with_memo(
     expr: &Expr,
     env: &Env,
@@ -183,7 +206,7 @@ fn eval_with_memo(
             {
                 return eval_with_memo(body, env, defs, fn_name, fn_param, fn_domain, memo);
             }
-            Err(EvalError::UndefinedVar(name.clone()))
+            Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
         }
 
         _ => eval(expr, env, defs),
@@ -203,14 +226,14 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             {
                 return eval(body, env, defs);
             }
-            Err(EvalError::UndefinedVar(name.clone()))
+            Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
         }
 
         Expr::Prime(name) => {
             let primed: Arc<str> = format!("{}'", name).into();
             env.get(&primed)
                 .cloned()
-                .ok_or(EvalError::UndefinedVar(primed))
+                .ok_or_else(|| EvalError::undefined_var_with_env(primed, env, defs))
         }
 
         Expr::And(l, r) => {
@@ -752,7 +775,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 }
                 eval(body, &local, defs)
             } else {
-                Err(EvalError::UndefinedVar(name.clone()))
+                Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
             }
         }
 
@@ -1362,9 +1385,9 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
             for var in vars {
                 let current = env
                     .get(var)
-                    .ok_or_else(|| EvalError::UndefinedVar(var.clone()))?;
+                    .ok_or_else(|| EvalError::undefined_var_with_env(var.clone(), env, defs))?;
                 let primed: Arc<str> = format!("{}'", var).into();
-                let next = env.get(&primed).ok_or(EvalError::UndefinedVar(primed))?;
+                let next = env.get(&primed).ok_or_else(|| EvalError::undefined_var_with_env(primed, env, defs))?;
                 if current != next {
                     return Ok(Value::Bool(false));
                 }
@@ -1403,6 +1426,174 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         Expr::EnabledOp(_) => Err(EvalError::DomainError(
             "ENABLED operator cannot be evaluated in explicit-state model checking".into()
         )),
+
+        Expr::QualifiedCall(instance, op, _args) => {
+            Err(EvalError::DomainError(format!(
+                "qualified call {}!{} requires resolved instances (use eval_with_instances)",
+                instance, op
+            )))
+        }
+
+        Expr::LabeledAction(_label, action) => {
+            eval(action, env, defs)
+        }
+    }
+}
+
+pub fn eval_with_instances(
+    expr: &Expr,
+    env: &Env,
+    defs: &Definitions,
+    instances: &ResolvedInstances,
+) -> Result<Value> {
+    match expr {
+        Expr::QualifiedCall(instance, op, args) => {
+            let instance_defs = instances
+                .get(instance)
+                .ok_or_else(|| EvalError::DomainError(format!("instance {} not found", instance)))?;
+
+            let (params, body) = instance_defs
+                .get(op)
+                .ok_or_else(|| EvalError::DomainError(format!(
+                    "operator {} not found in instance {}",
+                    op, instance
+                )))?;
+
+            if args.len() != params.len() {
+                return Err(EvalError::DomainError(format!(
+                    "{}!{} expects {} args, got {}",
+                    instance, op, params.len(), args.len()
+                )));
+            }
+
+            let mut local = env.clone();
+            for (param, arg_expr) in params.iter().zip(args) {
+                let arg_val = eval_with_instances(arg_expr, env, defs, instances)?;
+                local.insert(param.clone(), arg_val);
+            }
+
+            eval_with_instances(body, &local, defs, instances)
+        }
+        _ => eval(expr, env, defs),
+    }
+}
+
+pub fn eval_with_context(
+    expr: &Expr,
+    env: &Env,
+    defs: &Definitions,
+    ctx: &EvalContext,
+) -> Result<Value> {
+    match expr {
+        Expr::EnabledOp(action) => {
+            let enabled = is_action_enabled(
+                action,
+                &ctx.current_state,
+                &ctx.state_vars,
+                &ctx.constants,
+                defs,
+            )?;
+            Ok(Value::Bool(enabled))
+        }
+        Expr::And(l, r) => {
+            let lv = eval_bool_with_context(l, env, defs, ctx)?;
+            if !lv {
+                return Ok(Value::Bool(false));
+            }
+            let rv = eval_bool_with_context(r, env, defs, ctx)?;
+            Ok(Value::Bool(rv))
+        }
+        Expr::Or(l, r) => {
+            let lv = eval_bool_with_context(l, env, defs, ctx)?;
+            if lv {
+                return Ok(Value::Bool(true));
+            }
+            let rv = eval_bool_with_context(r, env, defs, ctx)?;
+            Ok(Value::Bool(rv))
+        }
+        Expr::Not(e) => {
+            let v = eval_bool_with_context(e, env, defs, ctx)?;
+            Ok(Value::Bool(!v))
+        }
+        Expr::Implies(l, r) => {
+            let lv = eval_bool_with_context(l, env, defs, ctx)?;
+            if !lv {
+                return Ok(Value::Bool(true));
+            }
+            let rv = eval_bool_with_context(r, env, defs, ctx)?;
+            Ok(Value::Bool(rv))
+        }
+        Expr::If(cond, then_br, else_br) => {
+            if eval_bool_with_context(cond, env, defs, ctx)? {
+                eval_with_context(then_br, env, defs, ctx)
+            } else {
+                eval_with_context(else_br, env, defs, ctx)
+            }
+        }
+        Expr::FnCall(name, args) => {
+            if let Some((params, body)) = defs.get(name) {
+                if args.len() != params.len() {
+                    return Err(EvalError::DomainError(format!(
+                        "function {} expects {} args, got {}",
+                        name,
+                        params.len(),
+                        args.len()
+                    )));
+                }
+                let mut local = env.clone();
+                for (param, arg_expr) in params.iter().zip(args) {
+                    let arg_val = eval_with_context(arg_expr, env, defs, ctx)?;
+                    local.insert(param.clone(), arg_val);
+                }
+                eval_with_context(body, &local, defs, ctx)
+            } else {
+                Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
+            }
+        }
+        Expr::Var(name) => {
+            if let Some(val) = env.get(name) {
+                return Ok(val.clone());
+            }
+            if let Some((params, body)) = defs.get(name)
+                && params.is_empty()
+            {
+                return eval_with_context(body, env, defs, ctx);
+            }
+            Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
+        }
+        Expr::Forall(var, domain, body) => {
+            let dom = eval_set(domain, env, defs)?;
+            for val in dom {
+                let mut local = env.clone();
+                local.insert(var.clone(), val);
+                if !eval_bool_with_context(body, &local, defs, ctx)? {
+                    return Ok(Value::Bool(false));
+                }
+            }
+            Ok(Value::Bool(true))
+        }
+        Expr::Exists(var, domain, body) => {
+            let dom = eval_set(domain, env, defs)?;
+            for val in dom {
+                let mut local = env.clone();
+                local.insert(var.clone(), val);
+                if eval_bool_with_context(body, &local, defs, ctx)? {
+                    return Ok(Value::Bool(true));
+                }
+            }
+            Ok(Value::Bool(false))
+        }
+        _ => eval(expr, env, defs),
+    }
+}
+
+fn eval_bool_with_context(expr: &Expr, env: &Env, defs: &Definitions, ctx: &EvalContext) -> Result<bool> {
+    match eval_with_context(expr, env, defs, ctx)? {
+        Value::Bool(b) => Ok(b),
+        other => Err(EvalError::TypeMismatch {
+            expected: "Bool",
+            got: other,
+        }),
     }
 }
 
@@ -1589,6 +1780,46 @@ pub fn next_states(
     Ok(results)
 }
 
+pub fn is_action_enabled(
+    action: &Expr,
+    current: &State,
+    vars: &[Arc<str>],
+    constants: &Env,
+    defs: &Definitions,
+) -> Result<bool> {
+    let mut base_env = state_to_env(current);
+    for (k, v) in constants {
+        base_env.insert(k.clone(), v.clone());
+    }
+    check_enabled(action, &base_env, vars, 0, defs)
+}
+
+fn check_enabled(
+    action: &Expr,
+    env: &Env,
+    vars: &[Arc<str>],
+    var_idx: usize,
+    defs: &Definitions,
+) -> Result<bool> {
+    if var_idx >= vars.len() {
+        return eval_bool(action, env, defs);
+    }
+
+    let var = &vars[var_idx];
+    let primed: Arc<str> = format!("{}'", var).into();
+    let candidates = infer_candidates(action, env, var, defs)?;
+
+    for candidate in candidates {
+        let mut local = env.clone();
+        local.insert(primed.clone(), candidate);
+        if check_enabled(action, &local, vars, var_idx + 1, defs)? {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
 fn state_to_env(state: &State) -> Env {
     state.vars.clone()
 }
@@ -1729,6 +1960,10 @@ fn collect_candidates(
                 }
                 collect_candidates(body, &local, var, defs, candidates)?;
             }
+        }
+
+        Expr::LabeledAction(_, action) => {
+            collect_candidates(action, env, var, defs, candidates)?;
         }
 
         _ => {}

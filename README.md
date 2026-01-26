@@ -11,6 +11,7 @@ tlc-executor performs explicit-state model checking of TLA+ specifications, expl
 - **Counterexample traces** with state diffs showing what changed between steps
 - **State graph export** to DOT format for visualization
 - **Progress reporting** with exploration rate and ETA
+- **Helpful error messages** with source locations and suggestions
 
 ## Installation
 
@@ -175,6 +176,23 @@ Use --allow-deadlock to suppress this error.
 For large state spaces, progress is reported every 1000 states:
 ```
 Progress: 10000 states (52341/s), queue: 1247, depth: 15, limit ETA: 18.9s
+```
+
+### Error Messages
+Parse errors show the source location:
+```
+error: expected identifier, found Eof
+  --> spec.tla:5:12
+   |
+ 5 | Next == x' =
+   |            ^ expected identifier, found Eof
+```
+
+Undefined variables suggest similar names:
+```
+error: evaluating Next
+  undefined variable `coutn`
+  help: did you mean `count`?
 ```
 
 ## State Graph Visualization

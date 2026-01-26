@@ -7,8 +7,10 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use tlc_executor::ast::{Env, Value};
-use tlc_executor::checker::{check, format_trace, format_trace_with_diffs, CheckResult, CheckerConfig};
+use tlc_executor::checker::{check, format_eval_error, format_trace, format_trace_with_diffs, CheckResult, CheckerConfig};
+use tlc_executor::diagnostic::Diagnostic;
 use tlc_executor::parser::parse;
+use tlc_executor::Source;
 
 fn split_top_level(s: &str, delim: char) -> Vec<String> {
     let mut parts = Vec::new();
@@ -78,7 +80,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: {} <spec.tla> [--constant NAME=VALUE] [--symmetry CONST] [--max-states N] [--export-dot FILE] [--allow-deadlock]", args[0]);
+        eprintln!("Usage: {} <spec.tla> [--constant NAME=VALUE] [--symmetry CONST] [--max-states N] [--export-dot FILE] [--allow-deadlock] [--check-liveness]", args[0]);
         return ExitCode::FAILURE;
     }
 
@@ -155,6 +157,9 @@ fn main() -> ExitCode {
             "--allow-deadlock" => {
                 config.allow_deadlock = true;
             }
+            "--check-liveness" => {
+                config.check_liveness = true;
+            }
             "--help" | "-h" => {
                 println!("tlc-executor - TLA+ model checker");
                 println!();
@@ -169,6 +174,7 @@ fn main() -> ExitCode {
                 println!("  --max-depth N              Maximum trace depth (default: 100)");
                 println!("  --export-dot FILE          Export state graph to DOT format");
                 println!("  --allow-deadlock           Allow states with no successors");
+                println!("  --check-liveness           Check liveness and fairness properties");
                 println!("  --help, -h                 Show this help");
                 return ExitCode::SUCCESS;
             }
@@ -199,10 +205,21 @@ fn main() -> ExitCode {
         }
     };
 
+    let source = Source::new(spec_path.as_str(), input.as_str());
+
     let spec = match parse(&input) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("parse error: {}", e.message);
+            let mut diag = Diagnostic::error(&e.message);
+            if let Some(span) = e.span {
+                diag = diag.with_span(span);
+            }
+            if let Some(expected) = &e.expected
+                && let Some(found) = &e.found
+            {
+                diag = diag.with_label(format!("expected {}, found {}", expected, found));
+            }
+            eprintln!("{}", diag.render(&source));
             return ExitCode::FAILURE;
         }
     };
@@ -253,6 +270,31 @@ fn main() -> ExitCode {
             println!("  Time: {:.3}s", stats.elapsed_secs);
             ExitCode::FAILURE
         }
+        CheckResult::LivenessViolation(violation, stats) => {
+            println!("Liveness property violated: {}", violation.property);
+            println!();
+            println!("Prefix trace ({} states):", violation.prefix.len());
+            println!("  (* marks changed variables)");
+            println!();
+            print!("{}", format_trace_with_diffs(&violation.prefix, &spec.vars));
+            println!();
+            println!("Cycle ({} states):", violation.cycle.len());
+            println!();
+            print!("{}", format_trace_with_diffs(&violation.cycle, &spec.vars));
+            println!();
+            if !violation.fairness_info.is_empty() {
+                println!("Fairness information:");
+                for (info, taken) in &violation.fairness_info {
+                    let status = if *taken { "satisfied" } else { "violated" };
+                    println!("  {}: {}", info, status);
+                }
+                println!();
+            }
+            println!("  States explored: {}", stats.states_explored);
+            println!("  Transitions: {}", stats.transitions);
+            println!("  Time: {:.3}s", stats.elapsed_secs);
+            ExitCode::FAILURE
+        }
         CheckResult::Deadlock(trace, stats) => {
             println!("Deadlock detected!");
             println!();
@@ -269,18 +311,21 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         CheckResult::InitError(e) => {
-            eprintln!("Error evaluating Init: {:?}", e);
+            eprintln!("error: evaluating Init");
+            eprintln!("  {}", format_eval_error(&e));
             ExitCode::FAILURE
         }
         CheckResult::NextError(e, trace) => {
-            eprintln!("Error evaluating Next: {:?}", e);
+            eprintln!("error: evaluating Next");
+            eprintln!("  {}", format_eval_error(&e));
             eprintln!();
             eprintln!("State when error occurred:");
             print!("{}", format_trace(&trace, &spec.vars));
             ExitCode::FAILURE
         }
         CheckResult::InvariantError(e, trace) => {
-            eprintln!("Error evaluating invariant: {:?}", e);
+            eprintln!("error: evaluating invariant");
+            eprintln!("  {}", format_eval_error(&e));
             eprintln!();
             eprintln!("State when error occurred:");
             print!("{}", format_trace(&trace, &spec.vars));
@@ -327,7 +372,8 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         CheckResult::AssumeError(idx, e) => {
-            eprintln!("Error evaluating ASSUME {}: {:?}", idx, e);
+            eprintln!("error: evaluating ASSUME {}", idx);
+            eprintln!("  {}", format_eval_error(&e));
             ExitCode::FAILURE
         }
     }

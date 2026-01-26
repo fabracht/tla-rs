@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use crate::ast::{Env, Value};
-use crate::checker::{check, format_trace, CheckResult, CheckerConfig};
+use crate::checker::{check, format_eval_error, format_trace, CheckResult, CheckerConfig};
 use crate::parser::parse;
 
 #[derive(Serialize, Deserialize)]
@@ -125,6 +125,16 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             states_explored: stats.states_explored,
             trace: Some(vec![format_trace(&ce.trace, vars)]),
         },
+        CheckResult::LivenessViolation(violation, stats) => WasmCheckResult {
+            success: false,
+            error_type: Some("LivenessViolation".into()),
+            error_message: Some(format!("Liveness property violated: {}", violation.property)),
+            states_explored: stats.states_explored,
+            trace: Some(vec![
+                format_trace(&violation.prefix, vars),
+                format_trace(&violation.cycle, vars),
+            ]),
+        },
         CheckResult::Deadlock(trace, stats) => WasmCheckResult {
             success: false,
             error_type: Some("Deadlock".into()),
@@ -135,21 +145,21 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
         CheckResult::InitError(e) => WasmCheckResult {
             success: false,
             error_type: Some("InitError".into()),
-            error_message: Some(format!("{:?}", e)),
+            error_message: Some(format_eval_error(&e)),
             states_explored: 0,
             trace: None,
         },
         CheckResult::NextError(e, trace) => WasmCheckResult {
             success: false,
             error_type: Some("NextError".into()),
-            error_message: Some(format!("{:?}", e)),
+            error_message: Some(format_eval_error(&e)),
             states_explored: 0,
             trace: Some(vec![format_trace(&trace, vars)]),
         },
         CheckResult::InvariantError(e, trace) => WasmCheckResult {
             success: false,
             error_type: Some("InvariantError".into()),
-            error_message: Some(format!("{:?}", e)),
+            error_message: Some(format_eval_error(&e)),
             states_explored: 0,
             trace: Some(vec![format_trace(&trace, vars)]),
         },
@@ -163,7 +173,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
         CheckResult::AssumeError(idx, e) => WasmCheckResult {
             success: false,
             error_type: Some("AssumeError".into()),
-            error_message: Some(format!("Assume {} error: {:?}", idx, e)),
+            error_message: Some(format!("Assume {} error: {}", idx, format_eval_error(&e))),
             states_explored: 0,
             trace: None,
         },

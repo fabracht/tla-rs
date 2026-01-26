@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use crate::ast::{Expr, InstanceDecl, Spec, Value};
-use crate::lexer::{Lexer, Token};
+use crate::ast::{Expr, FairnessConstraint, InstanceDecl, Spec, Value};
+use crate::lexer::{LexError, Lexer, Token};
+use crate::span::{Span, Spanned};
 
 pub struct Parser {
-    tokens: Vec<Token>,
+    tokens: Vec<Spanned<Token>>,
     pos: usize,
     definitions: BTreeMap<Arc<str>, Expr>,
     fn_definitions: BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>,
@@ -14,24 +15,56 @@ pub struct Parser {
     extends: Vec<Arc<str>>,
     assumes: Vec<Expr>,
     instances: Vec<InstanceDecl>,
+    fairness: Vec<FairnessConstraint>,
+    liveness_properties: Vec<Expr>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ParseError {
     pub message: String,
+    pub span: Option<Span>,
+    pub expected: Option<String>,
+    pub found: Option<String>,
+}
+
+impl ParseError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            span: None,
+            expected: None,
+            found: None,
+        }
+    }
+
+    pub fn with_span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
+
+    pub fn with_context(mut self, expected: impl Into<String>, found: impl Into<String>) -> Self {
+        self.expected = Some(expected.into());
+        self.found = Some(found.into());
+        self
+    }
 }
 
 impl From<String> for ParseError {
     fn from(s: String) -> Self {
-        Self { message: s }
+        Self::new(s)
     }
 }
 
 impl From<&str> for ParseError {
     fn from(s: &str) -> Self {
-        Self {
-            message: s.to_string(),
-        }
+        Self::new(s)
+    }
+}
+
+impl From<LexError> for ParseError {
+    fn from(e: LexError) -> Self {
+        let span = e.span();
+        Self::new(e.message).with_span(span)
     }
 }
 
@@ -40,7 +73,7 @@ type Result<T> = std::result::Result<T, ParseError>;
 impl Parser {
     pub fn new(input: &str) -> Result<Self> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer.tokenize().map_err(ParseError::from)?;
+        let tokens = lexer.tokenize_spanned()?;
         Ok(Self {
             tokens,
             pos: 0,
@@ -51,15 +84,41 @@ impl Parser {
             extends: Vec::new(),
             assumes: Vec::new(),
             instances: Vec::new(),
+            fairness: Vec::new(),
+            liveness_properties: Vec::new(),
         })
     }
 
     fn peek(&self) -> &Token {
-        self.tokens.get(self.pos).unwrap_or(&Token::Eof)
+        self.tokens
+            .get(self.pos)
+            .map(|t| &t.value)
+            .unwrap_or(&Token::Eof)
     }
 
     fn peek_n(&self, n: usize) -> &Token {
-        self.tokens.get(self.pos + n).unwrap_or(&Token::Eof)
+        self.tokens
+            .get(self.pos + n)
+            .map(|t| &t.value)
+            .unwrap_or(&Token::Eof)
+    }
+
+    fn current_span(&self) -> Span {
+        self.tokens
+            .get(self.pos)
+            .map(|t| t.span)
+            .unwrap_or(Span::empty())
+    }
+
+    fn prev_span(&self) -> Span {
+        if self.pos > 0 {
+            self.tokens
+                .get(self.pos - 1)
+                .map(|t| t.span)
+                .unwrap_or(Span::empty())
+        } else {
+            Span::empty()
+        }
     }
 
     fn is_module_prefix(s: &str) -> bool {
@@ -91,18 +150,24 @@ impl Parser {
     }
 
     fn expect(&mut self, expected: Token) -> Result<()> {
+        let span = self.current_span();
         let tok = self.advance();
         if tok == expected {
             Ok(())
         } else {
-            Err(format!("expected {:?}, got {:?}", expected, tok).into())
+            Err(ParseError::new(format!("expected {:?}, found {:?}", expected, tok))
+                .with_span(span)
+                .with_context(format!("{:?}", expected), format!("{:?}", tok)))
         }
     }
 
     fn expect_ident(&mut self) -> Result<Arc<str>> {
+        let span = self.current_span();
         match self.advance() {
             Token::Ident(s) => Ok(s),
-            other => Err(format!("expected identifier, got {:?}", other).into()),
+            other => Err(ParseError::new(format!("expected identifier, found {:?}", other))
+                .with_span(span)
+                .with_context("identifier", format!("{:?}", other))),
         }
     }
 
@@ -290,7 +355,14 @@ impl Parser {
                     self.expect(Token::EqEq)?;
 
                     if name.as_ref() == "Spec" {
-                        self.skip_to_next_definition();
+                        match self.parse_expr() {
+                            Ok(spec_expr) => {
+                                self.extract_fairness_and_liveness(&spec_expr);
+                            }
+                            Err(_) => {
+                                self.skip_to_next_definition();
+                            }
+                        }
                         continue;
                     }
 
@@ -337,7 +409,10 @@ impl Parser {
                     invariant_names.push(None);
                 }
                 _ => {
-                    return Err(format!("unexpected token: {:?}", self.peek()).into());
+                    let span = self.current_span();
+                    let tok = self.peek().clone();
+                    return Err(ParseError::new(format!("unexpected token: {:?}", tok))
+                        .with_span(span));
                 }
             }
         }
@@ -361,7 +436,51 @@ impl Parser {
             next,
             invariants,
             invariant_names,
+            fairness: self.fairness.clone(),
+            liveness_properties: self.liveness_properties.clone(),
         })
+    }
+
+    fn extract_fairness_and_liveness(&mut self, expr: &Expr) {
+        match expr {
+            Expr::WeakFairness(var, action) => {
+                self.fairness.push(FairnessConstraint::Weak(
+                    Expr::Var(var.clone()),
+                    (**action).clone(),
+                ));
+            }
+            Expr::StrongFairness(var, action) => {
+                self.fairness.push(FairnessConstraint::Strong(
+                    Expr::Var(var.clone()),
+                    (**action).clone(),
+                ));
+            }
+            Expr::Eventually(inner) => {
+                self.liveness_properties.push((**inner).clone());
+            }
+            Expr::LeadsTo(p, q) => {
+                self.liveness_properties.push(Expr::LeadsTo(p.clone(), q.clone()));
+            }
+            Expr::And(l, r) => {
+                self.extract_fairness_and_liveness(l);
+                self.extract_fairness_and_liveness(r);
+            }
+            Expr::Or(l, r) => {
+                self.extract_fairness_and_liveness(l);
+                self.extract_fairness_and_liveness(r);
+            }
+            Expr::Always(inner) => {
+                if let Expr::Eventually(p) = inner.as_ref() {
+                    self.liveness_properties.push((**p).clone());
+                } else {
+                    self.extract_fairness_and_liveness(inner);
+                }
+            }
+            Expr::BoxAction(inner, _) => {
+                self.extract_fairness_and_liveness(inner);
+            }
+            _ => {}
+        }
     }
 
     fn parse_var_list(&mut self) -> Result<Vec<Arc<str>>> {
@@ -375,6 +494,7 @@ impl Parser {
     }
 
     fn parse_param(&mut self) -> Result<Arc<str>> {
+        let span = self.current_span();
         match self.peek() {
             Token::Ident(name) => {
                 let name = name.clone();
@@ -394,7 +514,9 @@ impl Parser {
                 self.advance();
                 Ok("_".into())
             }
-            other => Err(format!("expected identifier or _, got {:?}", other).into()),
+            other => Err(ParseError::new(format!("expected identifier or `_`, found {:?}", other))
+                .with_span(span)
+                .with_context("identifier or `_`", format!("{:?}", other))),
         }
     }
 
@@ -427,23 +549,35 @@ impl Parser {
         Ok(left)
     }
 
-    fn skip_label(&mut self) {
-        if matches!(self.peek(), Token::Ident(_)) && *self.peek_n(1) == Token::LabelSep {
+    fn consume_label(&mut self) -> Option<Arc<str>> {
+        if let Token::Ident(name) = self.peek().clone()
+            && *self.peek_n(1) == Token::LabelSep
+        {
             self.advance();
             self.advance();
+            return Some(name);
+        }
+        None
+    }
+
+    fn wrap_with_label(expr: Expr, label: Option<Arc<str>>) -> Expr {
+        match label {
+            Some(name) => Expr::LabeledAction(name, Box::new(expr)),
+            None => expr,
         }
     }
 
     fn parse_or(&mut self) -> Result<Expr> {
         if *self.peek() == Token::Or {
             self.advance();
-            self.skip_label();
+            self.consume_label();
         }
         let mut left = self.parse_and()?;
         while *self.peek() == Token::Or {
             self.advance();
-            self.skip_label();
+            let label = self.consume_label();
             let right = self.parse_and()?;
+            let right = Self::wrap_with_label(right, label);
             left = Expr::Or(Box::new(left), Box::new(right));
         }
         Ok(left)
@@ -452,15 +586,16 @@ impl Parser {
     fn parse_and(&mut self) -> Result<Expr> {
         if *self.peek() == Token::And {
             self.advance();
-            self.skip_label();
+            self.consume_label();
         }
         let mut left = self.parse_comparison()?;
         loop {
             match self.peek() {
                 Token::And => {
                     self.advance();
-                    self.skip_label();
+                    let label = self.consume_label();
                     let right = self.parse_comparison()?;
+                    let right = Self::wrap_with_label(right, label);
                     left = Expr::And(Box::new(left), Box::new(right));
                 }
                 Token::ActionCompose => {
@@ -1032,7 +1167,8 @@ impl Parser {
                     if let Expr::Var(name) = expr {
                         expr = Expr::Prime(name);
                     } else {
-                        return Err("prime can only be applied to variable".into());
+                        return Err(ParseError::new("prime can only be applied to variable")
+                            .with_span(self.prev_span()));
                     }
                 }
                 Token::LBracket => {
@@ -1076,6 +1212,7 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Result<Expr> {
+        let span = self.current_span();
         match self.peek().clone() {
             Token::Int(n) => {
                 self.advance();
@@ -1118,20 +1255,19 @@ impl Parser {
                 if *self.peek() == Token::Bang {
                     self.advance();
                     let op_name = self.expect_ident()?;
-                    let qualified_name: Arc<str> = format!("{}!{}", name, op_name).into();
+                    let mut args = Vec::new();
                     if *self.peek() == Token::LParen {
                         self.advance();
-                        while *self.peek() != Token::RParen && *self.peek() != Token::Eof {
-                            self.parse_expr()?;
-                            if *self.peek() == Token::Comma {
+                        if *self.peek() != Token::RParen {
+                            args.push(self.parse_expr()?);
+                            while *self.peek() == Token::Comma {
                                 self.advance();
-                            } else {
-                                break;
+                                args.push(self.parse_expr()?);
                             }
                         }
                         self.expect(Token::RParen)?;
                     }
-                    return Ok(Expr::Var(qualified_name));
+                    return Ok(Expr::QualifiedCall(name, op_name, args));
                 }
                 if *self.peek() == Token::LParen {
                     let is_recursive = self.recursive_names.contains(&name);
@@ -1216,7 +1352,9 @@ impl Parser {
                 }
                 Ok(result)
             }
-            other => Err(format!("unexpected token in expression: {:?}", other).into()),
+            other => Err(ParseError::new(format!("unexpected token in expression: {:?}", other))
+                .with_span(span)
+                .with_context("expression", format!("{:?}", other))),
         }
     }
 
@@ -1258,13 +1396,19 @@ impl Parser {
                 {
                     return Ok(Expr::SetMap(var, domain, Box::new(first)));
                 }
-                Err("expected {x \\in S : P} or {e : x \\in S} in set comprehension".into())
+                Err(ParseError::new("expected {x \\in S : P} or {e : x \\in S} in set comprehension")
+                    .with_span(self.current_span()))
             }
             Token::RBrace => {
                 self.advance();
                 Ok(Expr::SetEnum(vec![first]))
             }
-            _ => Err(format!("unexpected token in set: {:?}", self.peek()).into()),
+            _ => {
+                let span = self.current_span();
+                let tok = self.peek().clone();
+                Err(ParseError::new(format!("unexpected token in set: {:?}", tok))
+                    .with_span(span))
+            }
         }
     }
 
@@ -1423,7 +1567,9 @@ impl Parser {
             let empty_domain = Expr::SetEnum(vec![]);
             Ok(Expr::Choose(var, Box::new(empty_domain), Box::new(body)))
         } else {
-            Err("expected \\in or : after CHOOSE variable".into())
+            Err(ParseError::new("expected `\\in` or `:` after CHOOSE variable")
+                .with_span(self.current_span())
+                .with_context("`\\in` or `:`", format!("{:?}", self.peek())))
         }
     }
 
@@ -1518,12 +1664,15 @@ impl Parser {
     }
 
     fn expect_case_arrow(&mut self) -> Result<()> {
+        let span = self.current_span();
         match self.peek() {
             Token::RightArrow | Token::MapsTo => {
                 self.advance();
                 Ok(())
             }
-            t => Err(format!("expected -> or |-> in CASE, got {:?}", t).into()),
+            t => Err(ParseError::new(format!("expected `->` or `|->` in CASE, found {:?}", t))
+                .with_span(span)
+                .with_context("`->` or `|->`", format!("{:?}", t))),
         }
     }
 
@@ -1574,7 +1723,7 @@ impl Parser {
             if let Token::Ident(_) = self.peek()
                 && self.pos + 1 < self.tokens.len()
                     && matches!(
-                        self.tokens[self.pos + 1],
+                        self.tokens[self.pos + 1].value,
                         Token::EqEq | Token::LBracket | Token::LParen
                     )
                 {
@@ -1664,7 +1813,9 @@ impl Parser {
             }
         }
         if keys.is_empty() {
-            return Err("expected . or [ after ! in EXCEPT".into());
+            return Err(ParseError::new("expected `.` or `[` after `!` in EXCEPT")
+                .with_span(self.current_span())
+                .with_context("`.` or `[`", format!("{:?}", self.peek())));
         }
         self.expect(Token::Eq)?;
         let val = self.parse_expr()?;

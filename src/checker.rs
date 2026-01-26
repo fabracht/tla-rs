@@ -11,10 +11,13 @@ use std::time::Instant;
 
 use indexmap::IndexSet;
 
-use crate::ast::{Env, Spec, State, Value};
-use crate::eval::{eval, init_states, next_states, update_checker_stats, CheckerStats as EvalCheckerStats, EvalError};
+use crate::ast::{Env, Expr, Spec, State, Value};
+use crate::eval::{eval, eval_with_context, init_states, next_states, update_checker_stats, CheckerStats as EvalCheckerStats, Definitions, EvalContext, EvalError};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::export::export_dot;
+use crate::graph::StateGraph;
+use crate::liveness::{self, LivenessViolation};
+use crate::scc::compute_sccs;
 use crate::stdlib;
 use crate::symmetry::SymmetryConfig;
 
@@ -26,6 +29,7 @@ pub struct CheckerConfig {
     #[cfg(not(target_arch = "wasm32"))]
     pub export_dot_path: Option<PathBuf>,
     pub allow_deadlock: bool,
+    pub check_liveness: bool,
 }
 
 impl Default for CheckerConfig {
@@ -37,6 +41,7 @@ impl Default for CheckerConfig {
             #[cfg(not(target_arch = "wasm32"))]
             export_dot_path: None,
             allow_deadlock: false,
+            check_liveness: false,
         }
     }
 }
@@ -65,6 +70,7 @@ pub struct CheckStats {
 pub enum CheckResult {
     Ok(CheckStats),
     InvariantViolation(Counterexample, CheckStats),
+    LivenessViolation(LivenessViolation, CheckStats),
     Deadlock(Vec<State>, CheckStats),
     InitError(EvalError),
     NextError(EvalError, Vec<State>),
@@ -250,8 +256,14 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             env.insert(k.clone(), v.clone());
         }
 
+        let ctx = EvalContext {
+            state_vars: spec.vars.clone(),
+            constants: domains.clone(),
+            current_state: current.clone(),
+        };
+
         for (idx, invariant) in spec.invariants.iter().enumerate() {
-            match eval(invariant, &env, &spec.definitions) {
+            match eval_with_context(invariant, &env, &spec.definitions, &ctx) {
                 Ok(Value::Bool(true)) => {}
                 Ok(Value::Bool(false)) => {
                     let trace = reconstruct_trace(current_idx, &states, &parent);
@@ -317,7 +329,108 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
     stats.elapsed_secs = elapsed_secs();
     do_export(&states, &parent, None);
+
+    if config.check_liveness && (!spec.fairness.is_empty() || !spec.liveness_properties.is_empty()) {
+        eprintln!("  Running liveness checking...");
+        match check_liveness_properties(spec, &states, &parent, &domains, &symmetry, config) {
+            Ok(None) => {}
+            Ok(Some(violation)) => {
+                return CheckResult::LivenessViolation(violation, stats);
+            }
+            Err(e) => {
+                return CheckResult::InvariantError(e, vec![]);
+            }
+        }
+    }
+
     CheckResult::Ok(stats)
+}
+
+fn check_liveness_properties(
+    spec: &Spec,
+    states: &IndexSet<State>,
+    parent: &[Option<usize>],
+    domains: &Env,
+    symmetry: &SymmetryConfig,
+    _config: &CheckerConfig,
+) -> Result<Option<LivenessViolation>, EvalError> {
+    let mut graph = StateGraph::new();
+
+    for (idx, state) in states.iter().enumerate() {
+        graph.add_state(state.clone(), parent[idx]);
+    }
+
+    eprintln!("  Building forward edges for {} states...", states.len());
+    for (state_idx, state) in states.iter().enumerate() {
+        let successors = next_states(&spec.next, state, &spec.vars, domains, &spec.definitions)?;
+        for successor in successors {
+            let canonical = symmetry.canonicalize(&successor);
+            if let Some(succ_idx) = states.get_index_of(&canonical) {
+                graph.add_edge(state_idx, succ_idx, None);
+            }
+        }
+    }
+
+    eprintln!("  Computing strongly connected components...");
+    let sccs = compute_sccs(&graph);
+    let nontrivial_count = sccs.iter().filter(|scc| !scc.is_trivial).count();
+    eprintln!("  Found {} SCCs ({} non-trivial)", sccs.len(), nontrivial_count);
+
+    if !spec.fairness.is_empty() {
+        let defs: Definitions = spec.definitions.clone();
+        if let Some(scc_idx) = liveness::find_violating_scc(
+            &graph,
+            &sccs,
+            &spec.fairness,
+            &spec.vars,
+            domains,
+            &defs,
+        )? {
+            let violation = liveness::build_counterexample(
+                &graph,
+                &sccs[scc_idx],
+                &spec.fairness,
+                &spec.vars,
+                domains,
+                &defs,
+            )?;
+            return Ok(Some(violation));
+        }
+    }
+
+    for property in &spec.liveness_properties {
+        let defs: Definitions = spec.definitions.clone();
+        for scc in &sccs {
+            if !liveness::check_fairness_in_scc(&graph, scc, &spec.fairness, &spec.vars, domains, &defs)? {
+                continue;
+            }
+
+            let property_satisfied = match property {
+                Expr::LeadsTo(p, q) => {
+                    liveness::check_leads_to(&graph, scc, p, q, domains, &defs)?
+                }
+                _ => {
+                    liveness::check_eventually(&graph, scc, property, domains, &defs)?
+                }
+            };
+
+            if !property_satisfied {
+                let prop_desc = match property {
+                    Expr::LeadsTo(_, _) => format!("{:?}", property),
+                    _ => format!("<>{:?}", property),
+                };
+                let violation = LivenessViolation {
+                    prefix: graph.reconstruct_trace(scc.states[0]),
+                    cycle: scc.states.iter().filter_map(|&idx| graph.get_state(idx).cloned()).collect(),
+                    property: prop_desc,
+                    fairness_info: vec![],
+                };
+                return Ok(Some(violation));
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 fn state_to_env(state: &State) -> Env {
@@ -380,6 +493,24 @@ pub fn format_value(val: &Value) -> String {
             let elems: Vec<_> = t.iter().map(format_value).collect();
             format!("<<{}>>", elems.join(", "))
         }
+    }
+}
+
+pub fn format_eval_error(err: &EvalError) -> String {
+    match err {
+        EvalError::UndefinedVar { name, suggestion } => {
+            let mut msg = format!("undefined variable `{}`", name);
+            if let Some(s) = suggestion {
+                msg.push_str(&format!("\n  help: did you mean `{}`?", s));
+            }
+            msg
+        }
+        EvalError::TypeMismatch { expected, got } => {
+            format!("type mismatch: expected {}, got {}", expected, format_value(got))
+        }
+        EvalError::DivisionByZero => "division by zero".to_string(),
+        EvalError::EmptyChoose => "CHOOSE from empty set".to_string(),
+        EvalError::DomainError(msg) => msg.clone(),
     }
 }
 
@@ -458,6 +589,8 @@ mod tests {
             ),
             invariants: vec![le(var_expr("count"), lit_int(3))],
             invariant_names: vec![None],
+            fairness: vec![],
+            liveness_properties: vec![],
         };
 
         let domains = Env::new();
@@ -490,6 +623,8 @@ mod tests {
             ),
             invariants: vec![le(var_expr("count"), lit_int(3))],
             invariant_names: vec![None],
+            fairness: vec![],
+            liveness_properties: vec![],
         };
 
         let domains = Env::new();
@@ -541,6 +676,8 @@ mod tests {
                 le(var_expr("hi"), lit_int(1)),
             ],
             invariant_names: vec![None, None],
+            fairness: vec![],
+            liveness_properties: vec![],
         };
 
         let domains = Env::new();
@@ -573,6 +710,8 @@ mod tests {
             ),
             invariants: vec![lit_bool(true)],
             invariant_names: vec![None],
+            fairness: vec![],
+            liveness_properties: vec![],
         };
 
         let domains = Env::new();
@@ -605,6 +744,8 @@ mod tests {
             ),
             invariants: vec![lit_bool(true)],
             invariant_names: vec![None],
+            fairness: vec![],
+            liveness_properties: vec![],
         };
 
         let result = check(&spec, &Env::new(), &CheckerConfig::default());

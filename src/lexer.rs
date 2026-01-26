@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use crate::span::{Span, Spanned};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Ident(Arc<str>),
@@ -694,6 +696,503 @@ impl<'a> Lexer<'a> {
             tokens.push(tok);
         }
         Ok(tokens)
+    }
+
+    pub fn next_token_spanned(&mut self) -> Result<Spanned<Token>, LexError> {
+        self.skip_whitespace_and_comments();
+
+        let start = self.pos as u32;
+
+        if self.module_ended || self.pos >= self.input.len() {
+            return Ok(Spanned::new(Token::Eof, Span::new(start, start)));
+        }
+
+        let token = self.next_token_inner()?;
+        let end = self.pos as u32;
+
+        Ok(Spanned::new(token, Span::new(start, end)))
+    }
+
+    fn next_token_inner(&mut self) -> Result<Token, LexError> {
+        if self.consume("<=>") {
+            return Ok(Token::Equiv);
+        }
+        if self.consume("<>") {
+            return Ok(Token::Eventually);
+        }
+        if self.consume("[]") {
+            return Ok(Token::Always);
+        }
+        if self.consume("~>") {
+            return Ok(Token::LeadsTo);
+        }
+        if self.starts_with("<") && self.input[self.pos + 1..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+        {
+            self.advance();
+            while self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+                self.advance();
+            }
+            if self.peek_char() == Some('>') {
+                self.advance();
+            }
+            while self.peek_char().is_some_and(|c| c.is_alphanumeric() || c == '.') {
+                self.advance();
+            }
+            return Ok(Token::ProofStep);
+        }
+        if self.consume("<<") {
+            return Ok(Token::LAngle);
+        }
+        if self.consume(">>") {
+            return Ok(Token::RAngle);
+        }
+        if self.consume("..") {
+            return Ok(Token::DotDot);
+        }
+        if self.consume("|->") {
+            return Ok(Token::MapsTo);
+        }
+        if self.consume("::") {
+            return Ok(Token::LabelSep);
+        }
+        if self.consume(":>") {
+            return Ok(Token::ColonGt);
+        }
+        if self.consume("@@") {
+            return Ok(Token::AtAt);
+        }
+        if self.consume("@") {
+            return Ok(Token::At);
+        }
+        if self.consume("==") {
+            return Ok(Token::EqEq);
+        }
+        if self.consume("#") || self.consume("/=") || self.consume("\\#") || self.consume("≠") {
+            return Ok(Token::Neq);
+        }
+        if self.consume("<=") || self.consume("=<") || self.consume("\\leq") || self.consume("≤") {
+            return Ok(Token::Le);
+        }
+        if self.consume(">=") || self.consume("\\geq") || self.consume("≥") {
+            return Ok(Token::Ge);
+        }
+        if self.consume("/\\") || self.consume("\\land") || self.consume("∧") {
+            return Ok(Token::And);
+        }
+        if self.consume("\\/") || self.consume("\\lor") || self.consume("∨") {
+            return Ok(Token::Or);
+        }
+        if self.consume("=>") || self.consume("⟹") || self.consume("⇒") {
+            return Ok(Token::Implies);
+        }
+        if self.consume("\\notin") || self.consume("∉") {
+            return Ok(Token::NotIn);
+        }
+        if self.consume("\\in") || self.consume("∈") {
+            return Ok(Token::In);
+        }
+        if self.consume("\\union") || self.consume("\\cup") || self.consume("∪") {
+            return Ok(Token::Union);
+        }
+        if self.consume("\\intersect") || self.consume("\\cap") || self.consume("∩") {
+            return Ok(Token::Intersect);
+        }
+        if self.consume("\\subseteq") || self.consume("⊆") {
+            return Ok(Token::Subseteq);
+        }
+        if self.consume("\\subset") || self.consume("⊂") {
+            return Ok(Token::ProperSubset);
+        }
+        if self.consume("\\supseteq") || self.consume("⊇") {
+            return Ok(Token::Supseteq);
+        }
+        if self.consume("\\supset") || self.consume("⊃") {
+            return Ok(Token::ProperSupset);
+        }
+        if self.consume("\\times") || self.consume("\\X") || self.consume("×") {
+            return Ok(Token::Times);
+        }
+        if self.consume("\\oplus") || self.consume("(+)") || self.consume("⊕") {
+            return Ok(Token::BagAdd);
+        }
+        if self.consume("\\ominus") || self.consume("(-)") || self.consume("⊖") {
+            return Ok(Token::BagSub);
+        }
+        if self.consume("\\sqsubseteq") || self.consume("⊑") {
+            return Ok(Token::SqSubseteq);
+        }
+        if self.consume("\\div") {
+            return Ok(Token::Div);
+        }
+        if self.consume("\\cdot") || self.consume("⋅") {
+            return Ok(Token::ActionCompose);
+        }
+        if self.starts_with("\\b") {
+            let rest = &self.input[self.pos + 2..];
+            if let Some(c) = rest.chars().next()
+                && (c == '0' || c == '1')
+            {
+                self.pos += 2;
+                let start = self.pos;
+                while self.peek_char().is_some_and(|c| c == '0' || c == '1') {
+                    self.advance();
+                }
+                let n = i64::from_str_radix(&self.input[start..self.pos], 2)
+                    .map_err(|_| LexError::new("invalid binary integer", self.pos))?;
+                return Ok(Token::Int(n));
+            }
+        }
+        if self.starts_with("\\o") {
+            let rest = &self.input[self.pos + 2..];
+            if let Some(c) = rest.chars().next()
+                && c.is_ascii_digit()
+                && c < '8'
+            {
+                self.pos += 2;
+                let start = self.pos;
+                while self.peek_char().is_some_and(|c| c.is_ascii_digit() && c < '8') {
+                    self.advance();
+                }
+                let n = i64::from_str_radix(&self.input[start..self.pos], 8)
+                    .map_err(|_| LexError::new("invalid octal integer", self.pos))?;
+                return Ok(Token::Int(n));
+            }
+        }
+        if self.starts_with("\\h") || self.starts_with("\\H") {
+            let rest = &self.input[self.pos + 2..];
+            if let Some(c) = rest.chars().next()
+                && c.is_ascii_hexdigit()
+            {
+                self.pos += 2;
+                let start = self.pos;
+                while self.peek_char().is_some_and(|c| c.is_ascii_hexdigit()) {
+                    self.advance();
+                }
+                let n = i64::from_str_radix(&self.input[start..self.pos], 16)
+                    .map_err(|_| LexError::new("invalid hexadecimal integer", self.pos))?;
+                return Ok(Token::Int(n));
+            }
+        }
+        if self.consume("\\E") || self.consume("\\exists") || self.consume("∃") {
+            return Ok(Token::Exists);
+        }
+        if self.consume("\\A") || self.consume("\\forall") || self.consume("∀") {
+            return Ok(Token::Forall);
+        }
+        if self.consume("~") || self.consume("\\lnot") || self.consume("\\neg") || self.consume("¬") {
+            return Ok(Token::Not);
+        }
+        if self.starts_with("\\o")
+            && !self.input[self.pos + 2..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphanumeric())
+        {
+            self.pos += 2;
+            return Ok(Token::Concat);
+        }
+        if self.starts_with("\\") && self.input[self.pos + 1..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic())
+        {
+            self.advance();
+            let start = self.pos;
+            while self
+                .peek_char()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_')
+            {
+                self.advance();
+            }
+            let name: Arc<str> = self.input[start..self.pos].into();
+            return Ok(Token::CustomOp(name));
+        }
+        if self.consume("\\") {
+            return Ok(Token::SetMinus);
+        }
+        if self.consume("<-") {
+            return Ok(Token::LeftArrow);
+        }
+        if self.consume("->") {
+            return Ok(Token::RightArrow);
+        }
+
+        let c = self.peek_char().ok_or_else(|| LexError::new("unexpected end of input", self.pos))?;
+
+        if c == '(' {
+            self.advance();
+            return Ok(Token::LParen);
+        }
+        if c == ')' {
+            self.advance();
+            return Ok(Token::RParen);
+        }
+        if c == '{' {
+            self.advance();
+            return Ok(Token::LBrace);
+        }
+        if c == '}' {
+            self.advance();
+            return Ok(Token::RBrace);
+        }
+        if c == '[' {
+            self.advance();
+            return Ok(Token::LBracket);
+        }
+        if c == ']' {
+            self.advance();
+            return Ok(Token::RBracket);
+        }
+        if c == ',' {
+            self.advance();
+            return Ok(Token::Comma);
+        }
+        if c == ':' {
+            self.advance();
+            return Ok(Token::Colon);
+        }
+        if c == '.' {
+            self.advance();
+            return Ok(Token::Dot);
+        }
+        if c == '\'' {
+            self.advance();
+            return Ok(Token::Prime);
+        }
+        if c == '_' {
+            self.advance();
+            return Ok(Token::Underscore);
+        }
+        if c == ';' {
+            self.advance();
+            return Ok(Token::Semicolon);
+        }
+        if c == '$' {
+            self.advance();
+            return Ok(Token::Dollar);
+        }
+        if c == '|' {
+            self.advance();
+            return Ok(Token::Pipe);
+        }
+        if self.consume("^+") {
+            return Ok(Token::TransitiveClosure);
+        }
+        if self.consume("^*") {
+            return Ok(Token::ReflexiveTransitiveClosure);
+        }
+        if c == '^' {
+            self.advance();
+            return Ok(Token::Caret);
+        }
+        if c == '&' {
+            self.advance();
+            return Ok(Token::Ampersand);
+        }
+        if c == '=' {
+            self.advance();
+            return Ok(Token::Eq);
+        }
+        if c == '<' {
+            self.advance();
+            return Ok(Token::Lt);
+        }
+        if c == '>' {
+            self.advance();
+            return Ok(Token::Gt);
+        }
+        if c == '+' {
+            self.advance();
+            return Ok(Token::Plus);
+        }
+        if c == '-' {
+            self.advance();
+            return Ok(Token::Minus);
+        }
+        if c == '*' {
+            self.advance();
+            return Ok(Token::Star);
+        }
+        if c == '%' {
+            self.advance();
+            return Ok(Token::Mod);
+        }
+        if c == '/' {
+            self.advance();
+            return Ok(Token::Div);
+        }
+        if c == '!' {
+            self.advance();
+            return Ok(Token::Bang);
+        }
+
+        if c == '"' {
+            self.advance();
+            let start = self.pos;
+            while self.peek_char().is_some_and(|c| c != '"') {
+                self.advance();
+            }
+            let s: Arc<str> = self.input[start..self.pos].into();
+            self.advance();
+            return Ok(Token::Str(s));
+        }
+
+        if c.is_ascii_digit() {
+            let start = self.pos;
+            while self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+                self.advance();
+            }
+            let n: i64 = self.input[start..self.pos]
+                .parse()
+                .map_err(|_| LexError::new("invalid integer", start))?;
+            return Ok(Token::Int(n));
+        }
+
+        if c.is_alphabetic() || c == '_' {
+            let start = self.pos;
+            while self
+                .peek_char()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_')
+            {
+                self.advance();
+            }
+            let ident = &self.input[start..self.pos];
+            let tok = match ident {
+                "TRUE" => Token::True,
+                "FALSE" => Token::False,
+                "MODULE" => {
+                    self.seen_module = true;
+                    Token::Module
+                }
+                "EXTENDS" => Token::Extends,
+                "VARIABLES" | "VARIABLE" => Token::Variables,
+                "CONSTANTS" | "CONSTANT" => Token::Constants,
+                "ASSUME" | "ASSUMPTION" | "AXIOM" => Token::Assume,
+                "THEOREM" => Token::Theorem,
+                "Invariant" => Token::Invariant,
+                "IF" => Token::If,
+                "THEN" => Token::Then,
+                "ELSE" => Token::Else,
+                "CASE" => Token::Case,
+                "OTHER" => Token::Other,
+                "LET" => Token::Let,
+                "IN" => Token::Def,
+                "EXCEPT" => Token::Except,
+                "DOMAIN" => Token::Domain,
+                "SUBSET" => Token::Subset,
+                "UNION" => Token::BigUnion,
+                "Cardinality" => Token::Cardinality,
+                "IsFiniteSet" => Token::IsFiniteSet,
+                "UNCHANGED" => Token::Unchanged,
+                "CHOOSE" => Token::Choose,
+                "RECURSIVE" => Token::Recursive,
+                "LAMBDA" => Token::Lambda,
+                "INSTANCE" => Token::Instance,
+                "LOCAL" => Token::Local,
+                "WITH" => Token::With,
+                "Len" => Token::Len,
+                "Head" => Token::Head,
+                "Tail" => Token::Tail,
+                "Append" => Token::Append,
+                "SubSeq" => Token::SubSeq,
+                "SelectSeq" => Token::SelectSeq,
+                "Seq" => Token::Seq,
+                "Print" => Token::Print,
+                "Assert" => Token::Assert,
+                "JavaTime" => Token::JavaTime,
+                "SystemTime" => Token::SystemTime,
+                "Permutations" => Token::Permutations,
+                "SortSeq" => Token::SortSeq,
+                "PrintT" => Token::PrintT,
+                "ToString" => Token::TLCToString,
+                "RandomElement" => Token::RandomElement,
+                "TLCGet" => Token::TLCGet,
+                "TLCSet" => Token::TLCSet,
+                "Any" => Token::Any,
+                "TLCEval" => Token::TLCEval,
+                "IsABag" => Token::IsABag,
+                "BagToSet" => Token::BagToSet,
+                "SetToBag" => Token::SetToBag,
+                "BagIn" => Token::BagIn,
+                "EmptyBag" => Token::EmptyBag,
+                "BagUnion" => Token::BagUnion,
+                "SubBag" => Token::SubBag,
+                "BagOfAll" => Token::BagOfAll,
+                "BagCardinality" => Token::BagCardinality,
+                "CopiesIn" => Token::CopiesIn,
+                "BY" => Token::By,
+                "DEF" => Token::ProofDef,
+                "QED" => Token::Qed,
+                "LEMMA" => Token::Lemma,
+                "ENABLED" => Token::Enabled,
+                "DEFINE" => Token::Let,
+                "PICK" => Token::Choose,
+                "WITNESS" => Token::By,
+                "OBVIOUS" => Token::By,
+                "OMITTED" => Token::By,
+                "NEW" => Token::By,
+                "PROVE" => Token::By,
+                "SUFFICES" => Token::By,
+                "COROLLARY" => Token::Lemma,
+                "HAVE" => Token::By,
+                "TAKE" => Token::By,
+                "USE" => Token::By,
+                "HIDE" => Token::By,
+                "DEFS" => Token::ProofDef,
+                "ONLY" => Token::By,
+                _ => Token::Ident(ident.into()),
+            };
+            return Ok(tok);
+        }
+
+        Err(LexError::new(format!("unexpected character: {}", c), self.pos))
+    }
+
+    pub fn tokenize_spanned(&mut self) -> Result<Vec<Spanned<Token>>, LexError> {
+        let mut tokens = Vec::new();
+        loop {
+            let tok = self.next_token_spanned()?;
+            let is_eof = tok.value == Token::Eof;
+            tokens.push(tok);
+            if is_eof {
+                break;
+            }
+        }
+        Ok(tokens)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LexError {
+    pub message: String,
+    pub offset: usize,
+}
+
+impl LexError {
+    pub fn new(message: impl Into<String>, offset: usize) -> Self {
+        Self {
+            message: message.into(),
+            offset,
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        Span::new(self.offset as u32, (self.offset + 1) as u32)
+    }
+}
+
+impl std::fmt::Display for LexError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl From<LexError> for String {
+    fn from(e: LexError) -> String {
+        e.message
     }
 }
 
