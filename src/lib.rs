@@ -8,6 +8,7 @@ pub mod lexer;
 pub mod liveness;
 pub mod modules;
 pub mod parser;
+pub mod scenario;
 pub mod scc;
 pub mod source;
 pub mod span;

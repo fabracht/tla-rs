@@ -375,7 +375,11 @@ impl Parser {
 
                     let expr = match self.parse_expr() {
                         Ok(e) => e,
-                        Err(_) => {
+                        Err(e) => {
+                            eprintln!("  Warning: failed to parse operator '{}': {}", name, e.message);
+                            if let Some(span) = e.span {
+                                eprintln!("    at offset {}..{}", span.start, span.end);
+                            }
                             self.skip_to_next_definition();
                             continue;
                         }
@@ -634,12 +638,32 @@ impl Parser {
     }
 
     fn parse_single_or(&mut self) -> Result<Expr> {
-        let left = self.parse_single_and()?;
+        let mut left = self.parse_single_and()?;
+        while *self.peek() == Token::Or {
+            self.advance();
+            let right = self.parse_single_and()?;
+            left = Expr::Or(Box::new(left), Box::new(right));
+        }
         Ok(left)
     }
 
     fn parse_single_and(&mut self) -> Result<Expr> {
-        let left = self.parse_comparison()?;
+        let mut left = self.parse_comparison()?;
+        loop {
+            match self.peek() {
+                Token::And => {
+                    self.advance();
+                    let right = self.parse_comparison()?;
+                    left = Expr::And(Box::new(left), Box::new(right));
+                }
+                Token::ActionCompose => {
+                    self.advance();
+                    let right = self.parse_comparison()?;
+                    left = Expr::ActionCompose(Box::new(left), Box::new(right));
+                }
+                _ => break,
+            }
+        }
         Ok(left)
     }
 
@@ -1332,22 +1356,22 @@ impl Parser {
             }
             Token::And => {
                 self.advance();
-                let first = self.parse_unary()?;
+                let first = self.parse_comparison()?;
                 let mut result = first;
                 while *self.peek() == Token::And {
                     self.advance();
-                    let next = self.parse_unary()?;
+                    let next = self.parse_comparison()?;
                     result = Expr::And(Box::new(result), Box::new(next));
                 }
                 Ok(result)
             }
             Token::Or => {
                 self.advance();
-                let first = self.parse_unary()?;
+                let first = self.parse_comparison()?;
                 let mut result = first;
                 while *self.peek() == Token::Or {
                     self.advance();
-                    let next = self.parse_unary()?;
+                    let next = self.parse_comparison()?;
                     result = Expr::Or(Box::new(result), Box::new(next));
                 }
                 Ok(result)
@@ -1885,6 +1909,37 @@ mod tests {
     fn parse_if_then_else() {
         let expr = parse_expr("IF x > 0 THEN x ELSE 0").unwrap();
         assert!(matches!(expr, Expr::If(_, _, _)));
+    }
+
+    #[test]
+    fn parse_if_with_conjunction_list() {
+        let expr = parse_expr("IF x < 5 THEN /\\ x' = x + 1 /\\ y' = y ELSE /\\ x' = x /\\ y' = y + 1").unwrap();
+        if let Expr::If(_, then_br, else_br) = expr {
+            assert!(matches!(*then_br, Expr::And(_, _)));
+            assert!(matches!(*else_br, Expr::And(_, _)));
+        } else {
+            panic!("expected If");
+        }
+    }
+
+    #[test]
+    fn parse_if_condition_with_or() {
+        let expr = parse_expr("IF x > 5 \\/ y > 5 THEN 1 ELSE 0").unwrap();
+        if let Expr::If(cond, _, _) = expr {
+            assert!(matches!(*cond, Expr::Or(_, _)));
+        } else {
+            panic!("expected If");
+        }
+    }
+
+    #[test]
+    fn parse_if_condition_with_and() {
+        let expr = parse_expr("IF x > 0 /\\ y > 0 THEN 1 ELSE 0").unwrap();
+        if let Expr::If(cond, _, _) = expr {
+            assert!(matches!(*cond, Expr::And(_, _)));
+        } else {
+            panic!("expected If");
+        }
     }
 
     #[test]

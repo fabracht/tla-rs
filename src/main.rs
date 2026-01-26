@@ -10,6 +10,7 @@ use tlc_executor::ast::{Env, Value};
 use tlc_executor::checker::{check, format_eval_error, format_trace, format_trace_with_diffs, CheckResult, CheckerConfig};
 use tlc_executor::diagnostic::Diagnostic;
 use tlc_executor::parser::parse;
+use tlc_executor::scenario::{execute_scenario, format_scenario_result, parse_scenario};
 use tlc_executor::Source;
 
 fn split_top_level(s: &str, delim: char) -> Vec<String> {
@@ -87,6 +88,7 @@ fn main() -> ExitCode {
     let mut config = CheckerConfig::new();
     let mut spec_path = None;
     let mut constants: Vec<(Arc<str>, Value)> = Vec::new();
+    let mut scenario_input: Option<String> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -160,6 +162,25 @@ fn main() -> ExitCode {
             "--check-liveness" => {
                 config.check_liveness = true;
             }
+            "--scenario" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--scenario requires a scenario string or @filename");
+                    return ExitCode::FAILURE;
+                }
+                let arg = &args[i];
+                if let Some(filename) = arg.strip_prefix('@') {
+                    match fs::read_to_string(filename) {
+                        Ok(content) => scenario_input = Some(content),
+                        Err(e) => {
+                            eprintln!("failed to read scenario file {}: {}", filename, e);
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                } else {
+                    scenario_input = Some(arg.clone());
+                }
+            }
             "--help" | "-h" => {
                 println!("tlc-executor - TLA+ model checker");
                 println!();
@@ -175,7 +196,20 @@ fn main() -> ExitCode {
                 println!("  --export-dot FILE          Export state graph to DOT format");
                 println!("  --allow-deadlock           Allow states with no successors");
                 println!("  --check-liveness           Check liveness and fairness properties");
+                println!("  --scenario TEXT            Explore a specific scenario (or @file)");
                 println!("  --help, -h                 Show this help");
+                println!();
+                println!("Scenario format:");
+                println!("  step: <TLA+ expression>    Match transition where expression is TRUE");
+                println!();
+                println!("  Variables: unprimed = current state, primed = next state");
+                println!();
+                println!("  Examples:");
+                println!("    step: x' > x                    # x increases");
+                println!("    step: \"s1\" \\in active'          # s1 becomes active");
+                println!("    step: pc'[\"p1\"] = \"critical\"    # p1 enters critical section");
+                println!("    step: count' = count + 1        # count increments by 1");
+                println!("    step: x' # x                    # x changes (any value)");
                 return ExitCode::SUCCESS;
             }
             arg if arg.starts_with('-') => {
@@ -224,6 +258,45 @@ fn main() -> ExitCode {
         }
     };
 
+    let mut domains = Env::new();
+    for (name, val) in constants {
+        domains.insert(name, val);
+    }
+
+    if let Some(scenario_text) = scenario_input {
+        println!("Scenario exploration: {}", spec_path);
+        println!();
+
+        let scenario = match parse_scenario(&scenario_text) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error parsing scenario: {}", e);
+                return ExitCode::FAILURE;
+            }
+        };
+
+        println!("Scenario steps: {}", scenario.steps.len());
+        for (i, step) in scenario.steps.iter().enumerate() {
+            println!("  {}. {:?}", i + 1, step);
+        }
+        println!();
+
+        match execute_scenario(&spec, &scenario, &domains) {
+            Ok(result) => {
+                let vars_of_interest: Vec<&str> = spec.vars.iter().map(|s| s.as_ref()).collect();
+                println!("{}", format_scenario_result(&result, &vars_of_interest));
+                if result.failure.is_some() {
+                    return ExitCode::FAILURE;
+                }
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                eprintln!("error executing scenario: {}", format_eval_error(&e));
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
     println!("Checking spec: {}", spec_path);
     if !spec.extends.is_empty() {
         println!("  Extends: {}", spec.extends.iter().map(|s| s.as_ref()).collect::<Vec<_>>().join(", "));
@@ -235,10 +308,6 @@ fn main() -> ExitCode {
     println!("  Invariants: {}", spec.invariants.len());
     println!();
 
-    let mut domains = Env::new();
-    for (name, val) in constants {
-        domains.insert(name, val);
-    }
     let result = check(&spec, &domains, &config);
 
     match result {
