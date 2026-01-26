@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::{State, Value};
@@ -23,16 +24,16 @@ impl SymmetryConfig {
         self.symmetric_sets.is_empty()
     }
 
-    pub fn canonicalize(&self, state: &State) -> State {
+    pub fn canonicalize<'a>(&self, state: &'a State) -> Cow<'a, State> {
         if self.symmetric_sets.is_empty() {
-            return state.clone();
+            return Cow::Borrowed(state);
         }
 
         let mut result = state.clone();
         for sym_set in &self.symmetric_sets {
             result = self.canonicalize_for_set(&result, sym_set);
         }
-        result
+        Cow::Owned(result)
     }
 
     fn canonicalize_for_set(&self, state: &State, sym_set: &BTreeSet<Value>) -> State {
@@ -182,7 +183,7 @@ mod tests {
         state.vars.insert(Arc::from("x"), Value::Int(42));
 
         let canonical = config.canonicalize(&state);
-        assert_eq!(canonical, state);
+        assert_eq!(*canonical, state);
     }
 
     #[test]
@@ -194,7 +195,7 @@ mod tests {
         state.vars.insert(Arc::from("x"), str_val("a"));
 
         let canonical = config.canonicalize(&state);
-        assert_eq!(canonical, state);
+        assert_eq!(*canonical, state);
     }
 
     #[test]

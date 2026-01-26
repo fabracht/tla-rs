@@ -30,6 +30,7 @@ pub struct CheckerConfig {
     pub export_dot_path: Option<PathBuf>,
     pub allow_deadlock: bool,
     pub check_liveness: bool,
+    pub quiet: bool,
 }
 
 impl Default for CheckerConfig {
@@ -42,6 +43,7 @@ impl Default for CheckerConfig {
             export_dot_path: None,
             allow_deadlock: false,
             check_liveness: false,
+            quiet: false,
         }
     }
 }
@@ -127,7 +129,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             symmetry.add_symmetric_set(elements.clone());
         }
     }
-    if !symmetry.is_empty() {
+    if !symmetry.is_empty() && !config.quiet {
         eprintln!(
             "  Symmetry reduction enabled for: {}",
             config.symmetric_constants.iter().map(|s| s.as_ref()).collect::<Vec<_>>().join(", ")
@@ -143,12 +145,16 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         generated: 0,
     });
 
-    eprintln!("  Computing initial states...");
+    if !config.quiet {
+        eprintln!("  Computing initial states...");
+    }
     let initial = match init_states(&spec.init, &spec.vars, &domains, &spec.definitions) {
         Ok(states) => states,
         Err(e) => return CheckResult::InitError(e),
     };
-    eprintln!("  Found {} initial states", initial.len());
+    if !config.quiet {
+        eprintln!("  Found {} initial states", initial.len());
+    }
 
     if initial.is_empty() {
         return CheckResult::NoInitialStates;
@@ -175,8 +181,10 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         elapsed_secs: 0.0,
     };
 
+    let base_env: Env = domains.clone();
+
     for state in initial {
-        let canonical = symmetry.canonicalize(&state);
+        let canonical = symmetry.canonicalize(&state).into_owned();
         let (idx, is_new) = states.insert_full(canonical);
         if is_new {
             parent.push(None);
@@ -227,7 +235,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             generated: stats.transitions as i64,
         });
 
-        if stats.states_explored.is_multiple_of(1000) {
+        if !config.quiet && stats.states_explored.is_multiple_of(1000) {
             let elapsed = elapsed_secs();
             let rate = stats.states_explored as f64 / elapsed.max(0.001);
             let remaining = config.max_states.saturating_sub(stats.states_explored);
@@ -251,8 +259,8 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         }
 
         let current = states.get_index(current_idx).unwrap();
-        let mut env = state_to_env(current);
-        for (k, v) in &domains {
+        let mut env = base_env.clone();
+        for (k, v) in &current.vars {
             env.insert(k.clone(), v.clone());
         }
 
@@ -305,7 +313,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 return CheckResult::NextError(e, trace);
             }
         };
-        if stats.states_explored <= 5 {
+        if !config.quiet && stats.states_explored <= 5 {
             eprintln!("  State {} has {} successors", stats.states_explored, successors.len());
         }
 
@@ -318,7 +326,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
         for successor in successors {
             stats.transitions += 1;
-            let canonical = symmetry.canonicalize(&successor);
+            let canonical = symmetry.canonicalize(&successor).into_owned();
             let (succ_idx, is_new) = states.insert_full(canonical);
             if is_new {
                 parent.push(Some(current_idx));
@@ -331,7 +339,9 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     do_export(&states, &parent, None);
 
     if config.check_liveness && (!spec.fairness.is_empty() || !spec.liveness_properties.is_empty()) {
-        eprintln!("  Running liveness checking...");
+        if !config.quiet {
+            eprintln!("  Running liveness checking...");
+        }
         match check_liveness_properties(spec, &states, &parent, &domains, &symmetry, config) {
             Ok(None) => {}
             Ok(Some(violation)) => {
@@ -352,7 +362,7 @@ fn check_liveness_properties(
     parent: &[Option<usize>],
     domains: &Env,
     symmetry: &SymmetryConfig,
-    _config: &CheckerConfig,
+    config: &CheckerConfig,
 ) -> Result<Option<LivenessViolation>, EvalError> {
     let mut graph = StateGraph::new();
 
@@ -360,21 +370,27 @@ fn check_liveness_properties(
         graph.add_state(state.clone(), parent[idx]);
     }
 
-    eprintln!("  Building forward edges for {} states...", states.len());
+    if !config.quiet {
+        eprintln!("  Building forward edges for {} states...", states.len());
+    }
     for (state_idx, state) in states.iter().enumerate() {
         let successors = next_states(&spec.next, state, &spec.vars, domains, &spec.definitions)?;
         for successor in successors {
             let canonical = symmetry.canonicalize(&successor);
-            if let Some(succ_idx) = states.get_index_of(&canonical) {
+            if let Some(succ_idx) = states.get_index_of(canonical.as_ref()) {
                 graph.add_edge(state_idx, succ_idx, None);
             }
         }
     }
 
-    eprintln!("  Computing strongly connected components...");
+    if !config.quiet {
+        eprintln!("  Computing strongly connected components...");
+    }
     let sccs = compute_sccs(&graph);
     let nontrivial_count = sccs.iter().filter(|scc| !scc.is_trivial).count();
-    eprintln!("  Found {} SCCs ({} non-trivial)", sccs.len(), nontrivial_count);
+    if !config.quiet {
+        eprintln!("  Found {} SCCs ({} non-trivial)", sccs.len(), nontrivial_count);
+    }
 
     if !spec.fairness.is_empty() {
         let defs: Definitions = spec.definitions.clone();
@@ -431,10 +447,6 @@ fn check_liveness_properties(
     }
 
     Ok(None)
-}
-
-fn state_to_env(state: &State) -> Env {
-    state.vars.clone()
 }
 
 pub fn format_trace(trace: &[State], vars: &[Arc<str>]) -> String {
@@ -594,8 +606,10 @@ mod tests {
         };
 
         let domains = Env::new();
-        let mut config = CheckerConfig::default();
-        config.allow_deadlock = true;
+        let config = CheckerConfig {
+            allow_deadlock: true,
+            ..CheckerConfig::default()
+        };
         let result = check(&spec, &domains, &config);
 
         match result {
@@ -715,8 +729,10 @@ mod tests {
         };
 
         let domains = Env::new();
-        let mut config = CheckerConfig::default();
-        config.allow_deadlock = true;
+        let config = CheckerConfig {
+            allow_deadlock: true,
+            ..CheckerConfig::default()
+        };
         let result = check(&spec, &domains, &config);
 
         match result {

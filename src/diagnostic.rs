@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn find_similar_names() {
-        let names = vec!["count", "counter", "total", "value"];
+        let names = ["count", "counter", "total", "value"];
         let result = find_similar("coutn", names.iter().copied(), 2);
         assert_eq!(result, Some("count"));
     }

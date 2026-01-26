@@ -32,3 +32,10 @@ indexmap = "2.13.0"
 wasm-bindgen = { version = "0.2", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "model_checking"
+harness = false

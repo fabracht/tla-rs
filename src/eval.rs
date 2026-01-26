@@ -538,10 +538,10 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         Expr::SetFilter(var, domain, predicate) => {
             let domain_vals = eval_set(domain, env, defs)?;
             let mut result = BTreeSet::new();
+            let mut scoped_env = env.clone();
             for val in domain_vals {
-                let mut new_env = env.clone();
-                new_env.insert(var.clone(), val.clone());
-                if eval_bool(predicate, &new_env, defs)? {
+                scoped_env.insert(var.clone(), val.clone());
+                if eval_bool(predicate, &scoped_env, defs)? {
                     result.insert(val);
                 }
             }
@@ -551,10 +551,10 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         Expr::SetMap(var, domain, body) => {
             let domain_vals = eval_set(domain, env, defs)?;
             let mut result = BTreeSet::new();
+            let mut scoped_env = env.clone();
             for val in domain_vals {
-                let mut new_env = env.clone();
-                new_env.insert(var.clone(), val);
-                result.insert(eval(body, &new_env, defs)?);
+                scoped_env.insert(var.clone(), val);
+                result.insert(eval(body, &scoped_env, defs)?);
             }
             Ok(Value::Set(result))
         }
@@ -654,10 +654,10 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
 
         Expr::Exists(var, domain, body) => {
             let dom = eval_set(domain, env, defs)?;
+            let mut scoped_env = env.clone();
             for val in dom {
-                let mut local = env.clone();
-                local.insert(var.clone(), val);
-                if eval_bool(body, &local, defs)? {
+                scoped_env.insert(var.clone(), val);
+                if eval_bool(body, &scoped_env, defs)? {
                     return Ok(Value::Bool(true));
                 }
             }
@@ -666,10 +666,10 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
 
         Expr::Forall(var, domain, body) => {
             let dom = eval_set(domain, env, defs)?;
+            let mut scoped_env = env.clone();
             for val in dom {
-                let mut local = env.clone();
-                local.insert(var.clone(), val);
-                if !eval_bool(body, &local, defs)? {
+                scoped_env.insert(var.clone(), val);
+                if !eval_bool(body, &scoped_env, defs)? {
                     return Ok(Value::Bool(false));
                 }
             }
@@ -678,10 +678,10 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
 
         Expr::Choose(var, domain, body) => {
             let dom = eval_set(domain, env, defs)?;
+            let mut scoped_env = env.clone();
             for val in &dom {
-                let mut local = env.clone();
-                local.insert(var.clone(), val.clone());
-                if eval_bool(body, &local, defs)? {
+                scoped_env.insert(var.clone(), val.clone());
+                if eval_bool(body, &scoped_env, defs)? {
                     return Ok(val.clone());
                 }
             }
@@ -1563,10 +1563,10 @@ pub fn eval_with_context(
         }
         Expr::Forall(var, domain, body) => {
             let dom = eval_set(domain, env, defs)?;
+            let mut scoped_env = env.clone();
             for val in dom {
-                let mut local = env.clone();
-                local.insert(var.clone(), val);
-                if !eval_bool_with_context(body, &local, defs, ctx)? {
+                scoped_env.insert(var.clone(), val);
+                if !eval_bool_with_context(body, &scoped_env, defs, ctx)? {
                     return Ok(Value::Bool(false));
                 }
             }
@@ -1574,10 +1574,10 @@ pub fn eval_with_context(
         }
         Expr::Exists(var, domain, body) => {
             let dom = eval_set(domain, env, defs)?;
+            let mut scoped_env = env.clone();
             for val in dom {
-                let mut local = env.clone();
-                local.insert(var.clone(), val);
-                if eval_bool_with_context(body, &local, defs, ctx)? {
+                scoped_env.insert(var.clone(), val);
+                if eval_bool_with_context(body, &scoped_env, defs, ctx)? {
                     return Ok(Value::Bool(true));
                 }
             }
@@ -1771,13 +1771,74 @@ pub fn next_states(
     constants: &Env,
     defs: &Definitions,
 ) -> Result<Vec<State>> {
-    let mut results = Vec::new();
     let mut base_env = state_to_env(current);
     for (k, v) in constants {
         base_env.insert(k.clone(), v.clone());
     }
+
+    if let Expr::Or(_, _) = next {
+        let disjuncts = collect_disjuncts(next);
+        let mut all_results = indexmap::IndexSet::new();
+        for disjunct in &disjuncts {
+            if let Expr::Exists(_, _, _) = disjunct {
+                let expanded_envs = expand_exists_disjuncts(disjunct, &base_env, defs)?;
+                let action_body = get_action_body(disjunct);
+                for action_env in expanded_envs {
+                    let mut results = Vec::new();
+                    enumerate_next(action_body, &action_env, vars, 0, defs, &mut results)?;
+                    for state in results {
+                        all_results.insert(state);
+                    }
+                }
+            } else {
+                let mut results = Vec::new();
+                enumerate_next(disjunct, &base_env, vars, 0, defs, &mut results)?;
+                for state in results {
+                    all_results.insert(state);
+                }
+            }
+        }
+        return Ok(all_results.into_iter().collect());
+    }
+
+    let mut results = Vec::new();
     enumerate_next(next, &base_env, vars, 0, defs, &mut results)?;
     Ok(results)
+}
+
+fn collect_disjuncts(expr: &Expr) -> Vec<&Expr> {
+    match expr {
+        Expr::Or(l, r) => {
+            let mut result = collect_disjuncts(l);
+            result.extend(collect_disjuncts(r));
+            result
+        }
+        _ => vec![expr],
+    }
+}
+
+fn expand_exists_disjuncts(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Vec<Env>> {
+    match expr {
+        Expr::Exists(var, domain, body) => {
+            let dom = eval_set(domain, env, defs)?;
+            let mut all_envs = Vec::new();
+            for val in dom {
+                let mut new_env = env.clone();
+                new_env.insert(var.clone(), val);
+                let nested_envs = expand_exists_disjuncts(body, &new_env, defs)?;
+                all_envs.extend(nested_envs);
+            }
+            Ok(all_envs)
+        }
+        _ => Ok(vec![env.clone()]),
+    }
+}
+
+fn get_action_body(expr: &Expr) -> &Expr {
+    match expr {
+        Expr::Exists(_, _, body) => get_action_body(body),
+        _ => expr,
+    }
 }
 
 pub fn is_action_enabled(
@@ -1809,10 +1870,10 @@ fn check_enabled(
     let primed: Arc<str> = format!("{}'", var).into();
     let candidates = infer_candidates(action, env, var, defs)?;
 
+    let mut scoped_env = env.clone();
     for candidate in candidates {
-        let mut local = env.clone();
-        local.insert(primed.clone(), candidate);
-        if check_enabled(action, &local, vars, var_idx + 1, defs)? {
+        scoped_env.insert(primed.clone(), candidate);
+        if check_enabled(action, &scoped_env, vars, var_idx + 1, defs)? {
             return Ok(true);
         }
     }
@@ -1855,10 +1916,10 @@ fn enumerate_next(
 
     let candidates = infer_candidates(next, env, var, defs)?;
 
+    let mut scoped_env = env.clone();
     for candidate in candidates {
-        let mut local = env.clone();
-        local.insert(primed.clone(), candidate);
-        enumerate_next(next, &local, vars, var_idx + 1, defs, results)?;
+        scoped_env.insert(primed.clone(), candidate);
+        enumerate_next(next, &scoped_env, vars, var_idx + 1, defs, results)?;
     }
 
     Ok(())
@@ -1914,10 +1975,10 @@ fn collect_candidates(
 
         Expr::Exists(bound, domain, body) | Expr::Forall(bound, domain, body) => {
             if let Ok(dom) = eval_set(domain, env, defs) {
+                let mut scoped_env = env.clone();
                 for val in dom {
-                    let mut local = env.clone();
-                    local.insert(bound.clone(), val);
-                    collect_candidates(body, &local, var, defs, candidates)?;
+                    scoped_env.insert(bound.clone(), val);
+                    collect_candidates(body, &scoped_env, var, defs, candidates)?;
                 }
             }
         }
@@ -2007,10 +2068,10 @@ fn enumerate_init(
         _ => infer_init_candidates(init, env, var, defs)?,
     };
 
+    let mut scoped_env = env.clone();
     for candidate in candidates {
-        let mut local = env.clone();
-        local.insert(var.clone(), candidate);
-        enumerate_init(init, &local, vars, var_idx + 1, domains, defs, results)?;
+        scoped_env.insert(var.clone(), candidate);
+        enumerate_init(init, &scoped_env, vars, var_idx + 1, domains, defs, results)?;
     }
 
     Ok(())
