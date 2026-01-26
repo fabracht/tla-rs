@@ -35,6 +35,7 @@ tlc-executor <spec.tla> [options]
 | `--symmetry, -s CONST` | Enable symmetry reduction for a constant |
 | `--max-states N` | Maximum states to explore (default: 1000000) |
 | `--max-depth N` | Maximum trace depth (default: 100) |
+| `--quick, -q` | Quick exploration (limit: 10,000 states) |
 | `--export-dot FILE` | Export state graph to DOT format |
 | `--allow-deadlock` | Allow states with no successors |
 | `--check-liveness` | Check liveness and fairness properties |
@@ -201,10 +202,19 @@ Use --allow-deadlock to suppress this error.
 ```
 
 ### Progress Reporting
-For large state spaces, progress is reported every 1000 states:
+Progress is reported early and frequently to provide feedback:
 ```
-Progress: 10000 states (52341/s), queue: 1247, depth: 15, limit ETA: 18.9s
+  Exploring states...
+  Progress: 10 states explored, queue: 23
+  Progress: 100 states explored, queue: 156
+  Progress: 1000 states (52341/s), queue: 1247, depth: 15, limit ETA: 18.9s
 ```
+
+For quick exploration without waiting for full verification:
+```bash
+tlc-executor spec.tla --quick
+```
+This limits exploration to 10,000 states and exits with success if no violations are found.
 
 ### Error Messages
 Parse errors show the source location:
@@ -238,7 +248,6 @@ Error states are highlighted in red in the generated graph.
 
 - `Nat` and `Int` are bounded (-100 to 100 by default)
 - Limited temporal properties (liveness with `--check-liveness`, but not full TLA+ temporal logic)
-- No INSTANCE with parameter substitution
 - Recursive operators must be declared with RECURSIVE
 
 ## License
