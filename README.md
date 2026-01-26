@@ -37,6 +37,8 @@ tlc-executor <spec.tla> [options]
 | `--max-depth N` | Maximum trace depth (default: 100) |
 | `--export-dot FILE` | Export state graph to DOT format |
 | `--allow-deadlock` | Allow states with no successors |
+| `--check-liveness` | Check liveness and fairness properties |
+| `--scenario TEXT` | Explore a specific scenario (or @file) |
 
 ### Constant Value Formats
 
@@ -67,6 +69,32 @@ Export state graph for visualization:
 tlc-executor spec.tla --export-dot graph.dot
 dot -Tpng graph.dot -o graph.png
 ```
+
+### Scenario Exploration
+
+Explore specific execution paths using TLA+ expressions to match transitions:
+
+```bash
+tlc-executor spec.tla --scenario "step: count' = count + 1
+step: count' = count + 1
+step: count' = count + 1"
+```
+
+Or load from a file:
+```bash
+tlc-executor spec.tla --scenario @scenario.txt
+```
+
+Scenario file format:
+```
+# Comments start with #
+step: x' > x                    # x increases
+step: "s1" \in active'          # s1 becomes active
+step: pc'["p1"] = "critical"    # p1 enters critical section
+step: count' = count + 1        # count increments by 1
+```
+
+Each `step:` line specifies a TLA+ expression that must be TRUE for the transition. Unprimed variables refer to the current state, primed variables refer to the next state.
 
 ## Supported TLA+ Subset
 
@@ -209,8 +237,7 @@ Error states are highlighted in red in the generated graph.
 ## Limitations
 
 - `Nat` and `Int` are bounded (-100 to 100 by default)
-- No temporal properties (only invariants)
-- No fairness constraints
+- Limited temporal properties (liveness with `--check-liveness`, but not full TLA+ temporal logic)
 - No INSTANCE with parameter substitution
 - Recursive operators must be declared with RECURSIVE
 
