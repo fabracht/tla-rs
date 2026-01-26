@@ -13,6 +13,24 @@ tlc-executor performs explicit-state model checking of TLA+ specifications, expl
 - **Progress reporting** with exploration rate and ETA
 - **Helpful error messages** with source locations and suggestions
 
+## When to Use
+
+TLA+ model checking is most valuable for:
+
+- **Distributed protocol bugs** where message ordering and interleaving matter
+- **Concurrency issues** that are hard to reproduce deterministically
+- **Verifying invariants** across many possible execution paths
+- **Design validation** before implementing complex state machines
+- **Documenting protocols** in a precise, executable format
+
+You probably don't need it for:
+
+- **Straightforward logic errors** (wrong data structure operation, off-by-one)
+- **Bugs with obvious root causes** from reading the code or logs
+- **Issues confirmable with runtime tests** or instrumentation
+
+If you have metrics showing "processed 139984 of 140000 events" and the fix is changing `map.remove()` to `map.contains()`, just fix it. Save TLA+ for when you're unsure if your fix handles all the edge cases, or when the bug involves subtle timing between concurrent processes.
+
 ## Installation
 
 ```bash
