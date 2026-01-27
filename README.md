@@ -268,6 +268,19 @@ Error states are highlighted in red in the generated graph.
 - Limited temporal properties (liveness with `--check-liveness`, but not full TLA+ temporal logic)
 - Recursive operators must be declared with RECURSIVE
 
+## Design Notes
+
+### Why No Parallel Mode
+
+Parallel state exploration was implemented and removed after benchmarking showed it provided no benefit. The implementation used level-by-level BFS with parallel state evaluation and concurrent deduplication.
+
+**Why it doesn't help:**
+- State deduplication and parent pointer maintenance must remain sequential
+- Per-state evaluation is fast; most time is spent on state graph management
+- Level synchronization overhead exceeds parallelization gains
+
+Benchmarks showed parallel mode was 1.5-2x slower than sequential across all tested specs.
+
 ## License
 
 MIT

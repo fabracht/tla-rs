@@ -22,6 +22,8 @@ thread_local! {
     static TLC_STATE: RefCell<BTreeMap<i64, Value>> = const { RefCell::new(BTreeMap::new()) };
     static CHECKER_STATS: RefCell<CheckerStats> = const { RefCell::new(CheckerStats::new()) };
     static RESOLVED_INSTANCES: RefCell<ResolvedInstances> = const { RefCell::new(BTreeMap::new()) };
+    static POWERSET_CACHE: RefCell<BTreeMap<BTreeSet<Value>, BTreeSet<Value>>> = const { RefCell::new(BTreeMap::new()) };
+    static OPERATOR_CACHE: RefCell<BTreeMap<(Arc<str>, Vec<Value>), Value>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 #[derive(Debug, Clone, Default)]
@@ -69,6 +71,11 @@ pub fn set_resolved_instances(instances: ResolvedInstances) {
 
 pub fn clear_resolved_instances() {
     RESOLVED_INSTANCES.with(|inst| inst.borrow_mut().clear());
+}
+
+pub fn clear_eval_caches() {
+    POWERSET_CACHE.with(|cache| cache.borrow_mut().clear());
+    OPERATOR_CACHE.with(|cache| cache.borrow_mut().clear());
 }
 
 #[derive(Debug, Clone)]
@@ -212,7 +219,22 @@ fn eval_with_memo(
                         "key {} not in function domain",
                         format_value(&av)
                     ))),
-                _ => Err(EvalError::type_mismatch_ctx("Fn", fval, "function application")),
+                Value::Tuple(tv) => {
+                    if let Value::Int(idx) = av {
+                        let i = idx as usize;
+                        if i >= 1 && i <= tv.len() {
+                            Ok(tv[i - 1].clone())
+                        } else {
+                            Err(EvalError::domain_error(format!(
+                                "sequence index {} out of bounds (sequence has {} elements)",
+                                idx, tv.len()
+                            )))
+                        }
+                    } else {
+                        Err(EvalError::TypeMismatch { expected: "Int", got: av, context: Some("sequence index"), span: None })
+                    }
+                }
+                other => Err(EvalError::type_mismatch_ctx("Fn or Sequence", other, "function application")),
             }
         }
 
@@ -608,6 +630,14 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::SetFilter(var, domain, predicate) => {
+            if let Expr::Powerset(inner) = domain.as_ref()
+                && let Some(constraint) = detect_cardinality_constraint(predicate, var, env, defs)
+            {
+                let base_set = eval_set(inner, env, defs)?;
+                let elements: Vec<_> = base_set.into_iter().collect();
+                return Ok(Value::Set(generate_subsets_with_constraint(&elements, constraint)));
+            }
+
             let domain_vals = eval_set(domain, env, defs)?;
             let mut result = BTreeSet::new();
             let mut scoped_env = env.clone();
@@ -675,7 +705,12 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
 
         Expr::Powerset(e) => {
             let s = eval_set(e, env, defs)?;
-            let elements: Vec<_> = s.into_iter().collect();
+
+            if let Some(cached) = POWERSET_CACHE.with(|cache| cache.borrow().get(&s).cloned()) {
+                return Ok(Value::Set(cached));
+            }
+
+            let elements: Vec<_> = s.iter().cloned().collect();
             let n = elements.len();
             if n > 20 {
                 return Err(EvalError::domain_error(format!(
@@ -693,6 +728,9 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 }
                 result.insert(Value::Set(subset));
             }
+
+            POWERSET_CACHE.with(|cache| cache.borrow_mut().insert(s, result.clone()));
+
             Ok(Value::Set(result))
         }
 
@@ -904,12 +942,26 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                         args.len()
                     )));
                 }
+
+                let mut arg_vals = Vec::with_capacity(args.len());
+                for arg_expr in args {
+                    arg_vals.push(eval(arg_expr, env, defs)?);
+                }
+
+                let cache_key = (name.clone(), arg_vals.clone());
+                if let Some(cached) = OPERATOR_CACHE.with(|c| c.borrow().get(&cache_key).cloned()) {
+                    return Ok(cached);
+                }
+
                 let mut local = env.clone();
-                for (param, arg_expr) in params.iter().zip(args) {
-                    let arg_val = eval(arg_expr, env, defs)?;
+                for (param, arg_val) in params.iter().zip(arg_vals) {
                     local.insert(param.clone(), arg_val);
                 }
-                eval(body, &local, defs)
+                let result = eval(body, &local, defs)?;
+
+                OPERATOR_CACHE.with(|c| c.borrow_mut().insert(cache_key, result.clone()));
+
+                Ok(result)
             } else {
                 Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
             }
@@ -988,9 +1040,18 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Domain(f) => {
-            let fv = eval_fn(f, env, defs)?;
-            let dom: BTreeSet<Value> = fv.keys().cloned().collect();
-            Ok(Value::Set(dom))
+            let fv = eval(f, env, defs)?;
+            match fv {
+                Value::Fn(fmap) => {
+                    let dom: BTreeSet<Value> = fmap.keys().cloned().collect();
+                    Ok(Value::Set(dom))
+                }
+                Value::Tuple(seq) => {
+                    let dom: BTreeSet<Value> = (1..=seq.len()).map(|i| Value::Int(i as i64)).collect();
+                    Ok(Value::Set(dom))
+                }
+                other => Err(EvalError::type_mismatch_ctx("Fn or Sequence", other, "DOMAIN")),
+            }
         }
 
         Expr::FunctionSet(domain, codomain) => {
@@ -2006,6 +2067,126 @@ fn env_to_next_state(env: &Env, vars: &[Arc<str>]) -> State {
     state
 }
 
+fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
+    match expr {
+        Expr::Prime(_) | Expr::Unchanged(_) => true,
+        Expr::Var(_) | Expr::Lit(_) | Expr::OldValue | Expr::Any | Expr::EmptyBag
+        | Expr::JavaTime | Expr::SystemTime => false,
+        Expr::Not(e) | Expr::Neg(e) | Expr::Cardinality(e) | Expr::IsFiniteSet(e)
+        | Expr::Powerset(e) | Expr::BigUnion(e) | Expr::Domain(e) | Expr::Len(e)
+        | Expr::Head(e) | Expr::Tail(e) | Expr::TransitiveClosure(e)
+        | Expr::ReflexiveTransitiveClosure(e) | Expr::SeqSet(e) | Expr::PrintT(e)
+        | Expr::Permutations(e) | Expr::TLCToString(e) | Expr::RandomElement(e)
+        | Expr::TLCGet(e) | Expr::TLCEval(e) | Expr::IsABag(e) | Expr::BagToSet(e)
+        | Expr::SetToBag(e) | Expr::BagUnion(e) | Expr::SubBag(e) | Expr::BagCardinality(e)
+        | Expr::Always(e) | Expr::Eventually(e) | Expr::EnabledOp(e) => {
+            contains_prime_ref(e, defs)
+        }
+        Expr::And(l, r)
+        | Expr::Or(l, r)
+        | Expr::Implies(l, r)
+        | Expr::Equiv(l, r)
+        | Expr::Eq(l, r)
+        | Expr::Neq(l, r)
+        | Expr::Lt(l, r)
+        | Expr::Le(l, r)
+        | Expr::Gt(l, r)
+        | Expr::Ge(l, r)
+        | Expr::Add(l, r)
+        | Expr::Sub(l, r)
+        | Expr::Mul(l, r)
+        | Expr::Div(l, r)
+        | Expr::Mod(l, r)
+        | Expr::Exp(l, r)
+        | Expr::BitwiseAnd(l, r)
+        | Expr::ActionCompose(l, r)
+        | Expr::In(l, r)
+        | Expr::NotIn(l, r)
+        | Expr::Union(l, r)
+        | Expr::Intersect(l, r)
+        | Expr::SetMinus(l, r)
+        | Expr::Cartesian(l, r)
+        | Expr::Subset(l, r)
+        | Expr::ProperSubset(l, r)
+        | Expr::Concat(l, r)
+        | Expr::Append(l, r)
+        | Expr::SetRange(l, r)
+        | Expr::FnApp(l, r)
+        | Expr::FnMerge(l, r)
+        | Expr::SingleFn(l, r)
+        | Expr::FunctionSet(l, r)
+        | Expr::Print(l, r)
+        | Expr::Assert(l, r)
+        | Expr::TLCSet(l, r)
+        | Expr::SortSeq(l, r)
+        | Expr::SelectSeq(l, r)
+        | Expr::BagIn(l, r)
+        | Expr::BagAdd(l, r)
+        | Expr::BagSub(l, r)
+        | Expr::BagOfAll(l, r)
+        | Expr::CopiesIn(l, r)
+        | Expr::SqSubseteq(l, r)
+        | Expr::LeadsTo(l, r) => contains_prime_ref(l, defs) || contains_prime_ref(r, defs),
+        Expr::If(c, t, e) | Expr::SubSeq(c, t, e) => {
+            contains_prime_ref(c, defs) || contains_prime_ref(t, defs) || contains_prime_ref(e, defs)
+        }
+        Expr::Forall(_, d, b) | Expr::Exists(_, d, b) | Expr::Choose(_, d, b)
+        | Expr::FnDef(_, d, b) | Expr::SetFilter(_, d, b) | Expr::SetMap(_, d, b)
+        | Expr::CustomOp(_, d, b) => {
+            contains_prime_ref(d, defs) || contains_prime_ref(b, defs)
+        }
+        Expr::SetEnum(elems) | Expr::TupleLit(elems) => {
+            elems.iter().any(|e| contains_prime_ref(e, defs))
+        }
+        Expr::RecordLit(fields) | Expr::RecordSet(fields) => {
+            fields.iter().any(|(_, e)| contains_prime_ref(e, defs))
+        }
+        Expr::RecordAccess(r, _) | Expr::TupleAccess(r, _) => contains_prime_ref(r, defs),
+        Expr::Except(b, u) => {
+            contains_prime_ref(b, defs)
+                || u.iter()
+                    .any(|(path, val)| path.iter().any(|p| contains_prime_ref(p, defs)) || contains_prime_ref(val, defs))
+        }
+        Expr::FnCall(name, args) | Expr::QualifiedCall(_, name, args) => {
+            if let Some((_, body)) = defs.get(name) {
+                contains_prime_ref(body, defs)
+            } else {
+                args.iter().any(|a| contains_prime_ref(a, defs))
+            }
+        }
+        Expr::Lambda(_, body) => contains_prime_ref(body, defs),
+        Expr::Let(_, binding, body) => {
+            contains_prime_ref(binding, defs) || contains_prime_ref(body, defs)
+        }
+        Expr::Case(branches) => branches
+            .iter()
+            .any(|(c, r)| contains_prime_ref(c, defs) || contains_prime_ref(r, defs)),
+        Expr::LabeledAction(_, a) => contains_prime_ref(a, defs),
+        Expr::WeakFairness(_, e) | Expr::StrongFairness(_, e)
+        | Expr::BoxAction(e, _) | Expr::DiamondAction(e, _) => contains_prime_ref(e, defs),
+    }
+}
+
+fn collect_conjuncts(expr: &Expr) -> Vec<&Expr> {
+    match expr {
+        Expr::And(l, r) => {
+            let mut result = collect_conjuncts(l);
+            result.extend(collect_conjuncts(r));
+            result
+        }
+        _ => vec![expr],
+    }
+}
+
+fn evaluate_guards(expr: &Expr, env: &Env, defs: &Definitions) -> Result<bool> {
+    for conjunct in collect_conjuncts(expr) {
+        if !contains_prime_ref(conjunct, defs) && !eval_bool(conjunct, env, defs)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 fn enumerate_next(
     next: &Expr,
     env: &Env,
@@ -2014,6 +2195,10 @@ fn enumerate_next(
     defs: &Definitions,
     results: &mut Vec<State>,
 ) -> Result<()> {
+    if var_idx == 0 && !evaluate_guards(next, env, defs)? {
+        return Ok(());
+    }
+
     if var_idx >= vars.len() {
         if eval_bool(next, env, defs)? {
             results.push(env_to_next_state(env, vars));
@@ -2079,12 +2264,18 @@ fn collect_candidates(
         }
 
         Expr::And(l, r) | Expr::Or(l, r) | Expr::Implies(l, r) | Expr::Equiv(l, r) => {
-            collect_candidates(l, env, var, defs, candidates)?;
-            collect_candidates(r, env, var, defs, candidates)?;
+            if contains_prime_ref(l, defs) {
+                collect_candidates(l, env, var, defs, candidates)?;
+            }
+            if contains_prime_ref(r, defs) {
+                collect_candidates(r, env, var, defs, candidates)?;
+            }
         }
 
         Expr::Exists(bound, domain, body) | Expr::Forall(bound, domain, body) => {
-            if let Ok(dom) = eval_set(domain, env, defs) {
+            if contains_prime_ref(body, defs)
+                && let Ok(dom) = eval_set(domain, env, defs)
+            {
                 let mut scoped_env = env.clone();
                 for val in dom {
                     scoped_env.insert(bound.clone(), val);
@@ -2122,6 +2313,7 @@ fn collect_candidates(
         Expr::FnCall(name, args) => {
             if let Some((params, body)) = defs.get(name)
                 && params.len() == args.len()
+                && contains_prime_ref(body, defs)
             {
                 let mut local = env.clone();
                 for (param, arg) in params.iter().zip(args.iter()) {
@@ -2266,4 +2458,143 @@ fn enumerate_subbags(
         }
         enumerate_subbags(elements, idx + 1, next, results);
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CardinalityConstraint {
+    GreaterThan(usize),
+    GreaterThanOrEq(usize),
+    Equals(usize),
+    LessThan(usize),
+    LessThanOrEq(usize),
+}
+
+fn detect_cardinality_constraint(
+    predicate: &Expr,
+    var: &Arc<str>,
+    env: &Env,
+    defs: &Definitions,
+) -> Option<CardinalityConstraint> {
+    fn is_cardinality_of_var(expr: &Expr, var: &Arc<str>) -> bool {
+        matches!(expr, Expr::Cardinality(inner) if matches!(inner.as_ref(), Expr::Var(v) if v == var))
+    }
+
+    fn try_eval_int(expr: &Expr, env: &Env, defs: &Definitions) -> Option<i64> {
+        match eval(expr, env, defs) {
+            Ok(Value::Int(n)) => Some(n),
+            _ => None,
+        }
+    }
+
+    match predicate {
+        Expr::Gt(l, r) => {
+            if is_cardinality_of_var(l, var) {
+                try_eval_int(r, env, defs).map(|n| CardinalityConstraint::GreaterThan(n as usize))
+            } else if is_cardinality_of_var(r, var) {
+                try_eval_int(l, env, defs).map(|n| CardinalityConstraint::LessThan(n as usize))
+            } else if let Expr::Mul(card, two) = l.as_ref()
+                && is_cardinality_of_var(card, var)
+                && let (Some(mult), Some(rhs)) = (try_eval_int(two, env, defs), try_eval_int(r, env, defs))
+                && mult == 2
+            {
+                Some(CardinalityConstraint::GreaterThan((rhs / 2) as usize))
+            } else {
+                None
+            }
+        }
+        Expr::Ge(l, r) => {
+            if is_cardinality_of_var(l, var) {
+                try_eval_int(r, env, defs).map(|n| CardinalityConstraint::GreaterThanOrEq(n as usize))
+            } else if is_cardinality_of_var(r, var) {
+                try_eval_int(l, env, defs).map(|n| CardinalityConstraint::LessThanOrEq(n as usize))
+            } else {
+                None
+            }
+        }
+        Expr::Lt(l, r) => {
+            if is_cardinality_of_var(l, var) {
+                try_eval_int(r, env, defs).map(|n| CardinalityConstraint::LessThan(n as usize))
+            } else if is_cardinality_of_var(r, var) {
+                try_eval_int(l, env, defs).map(|n| CardinalityConstraint::GreaterThan(n as usize))
+            } else {
+                None
+            }
+        }
+        Expr::Le(l, r) => {
+            if is_cardinality_of_var(l, var) {
+                try_eval_int(r, env, defs).map(|n| CardinalityConstraint::LessThanOrEq(n as usize))
+            } else if is_cardinality_of_var(r, var) {
+                try_eval_int(l, env, defs).map(|n| CardinalityConstraint::GreaterThanOrEq(n as usize))
+            } else {
+                None
+            }
+        }
+        Expr::Eq(l, r) => {
+            if is_cardinality_of_var(l, var) {
+                try_eval_int(r, env, defs).map(|n| CardinalityConstraint::Equals(n as usize))
+            } else if is_cardinality_of_var(r, var) {
+                try_eval_int(l, env, defs).map(|n| CardinalityConstraint::Equals(n as usize))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn k_combinations<T: Clone>(elements: &[T], k: usize) -> Vec<Vec<T>> {
+    let n = elements.len();
+    if k > n {
+        return vec![];
+    }
+    if k == 0 {
+        return vec![vec![]];
+    }
+    if k == n {
+        return vec![elements.to_vec()];
+    }
+
+    let mut result = Vec::new();
+    let mut indices: Vec<usize> = (0..k).collect();
+
+    loop {
+        result.push(indices.iter().map(|&i| elements[i].clone()).collect());
+
+        let mut i = k as i32 - 1;
+        while i >= 0 && indices[i as usize] == n - k + i as usize {
+            i -= 1;
+        }
+        if i < 0 {
+            break;
+        }
+
+        indices[i as usize] += 1;
+        for j in (i as usize + 1)..k {
+            indices[j] = indices[j - 1] + 1;
+        }
+    }
+    result
+}
+
+fn generate_subsets_with_constraint(
+    elements: &[Value],
+    constraint: CardinalityConstraint,
+) -> BTreeSet<Value> {
+    let n = elements.len();
+    let (min_k, max_k) = match constraint {
+        CardinalityConstraint::GreaterThan(k) => (k + 1, n),
+        CardinalityConstraint::GreaterThanOrEq(k) => (k, n),
+        CardinalityConstraint::Equals(k) => (k, k),
+        CardinalityConstraint::LessThan(k) => (0, k.saturating_sub(1)),
+        CardinalityConstraint::LessThanOrEq(k) => (0, k),
+    };
+
+    let mut result = BTreeSet::new();
+    for k in min_k..=max_k.min(n) {
+        for combo in k_combinations(elements, k) {
+            let subset: BTreeSet<Value> = combo.into_iter().collect();
+            result.insert(Value::Set(subset));
+        }
+    }
+    result
 }

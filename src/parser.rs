@@ -667,6 +667,36 @@ impl Parser {
         Ok(left)
     }
 
+    fn parse_quantifier_body(&mut self) -> Result<Expr> {
+        let mut left = self.parse_quantifier_or()?;
+        loop {
+            match self.peek() {
+                Token::Implies => {
+                    self.advance();
+                    let right = self.parse_quantifier_or()?;
+                    left = Expr::Implies(Box::new(left), Box::new(right));
+                }
+                Token::Equiv => {
+                    self.advance();
+                    let right = self.parse_quantifier_or()?;
+                    left = Expr::Equiv(Box::new(left), Box::new(right));
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_quantifier_or(&mut self) -> Result<Expr> {
+        let mut left = self.parse_comparison()?;
+        while *self.peek() == Token::Or {
+            self.advance();
+            let right = self.parse_comparison()?;
+            left = Expr::Or(Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
     fn parse_comparison(&mut self) -> Result<Expr> {
         let left = self.parse_range()?;
         match self.peek() {
@@ -1635,7 +1665,7 @@ impl Parser {
         }
 
         self.expect(Token::Colon)?;
-        let body = self.parse_expr()?;
+        let body = self.parse_quantifier_body()?;
 
         let mut result = body;
         for (var, domain) in bindings.into_iter().rev() {
