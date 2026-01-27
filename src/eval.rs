@@ -2000,6 +2000,10 @@ pub fn next_states(
     result
 }
 
+fn make_primed_names(vars: &[Arc<str>]) -> Vec<Arc<str>> {
+    vars.iter().map(|v| Arc::from(format!("{}'", v))).collect()
+}
+
 fn next_states_impl(
     next: &Expr,
     current: &State,
@@ -2012,19 +2016,21 @@ fn next_states_impl(
         base_env.insert(k.clone(), v.clone());
     }
 
+    let primed_vars = make_primed_names(vars);
+
     if let Expr::Or(_, _) = next {
         let disjuncts = collect_disjuncts(next);
         let mut all_results = indexmap::IndexSet::new();
         for disjunct in &disjuncts {
             if let Expr::Exists(_, _, _) = disjunct {
                 let mut results = Vec::new();
-                expand_and_enumerate(disjunct, &mut base_env, vars, defs, &mut results)?;
+                expand_and_enumerate(disjunct, &mut base_env, vars, &primed_vars, defs, &mut results)?;
                 for state in results {
                     all_results.insert(state);
                 }
             } else {
                 let mut results = Vec::new();
-                enumerate_next(disjunct, &mut base_env, vars, 0, defs, &mut results)?;
+                enumerate_next(disjunct, &mut base_env, vars, &primed_vars, 0, defs, &mut results)?;
                 for state in results {
                     all_results.insert(state);
                 }
@@ -2034,7 +2040,7 @@ fn next_states_impl(
     }
 
     let mut results = Vec::new();
-    enumerate_next(next, &mut base_env, vars, 0, defs, &mut results)?;
+    enumerate_next(next, &mut base_env, vars, &primed_vars, 0, defs, &mut results)?;
     Ok(results)
 }
 
@@ -2053,6 +2059,7 @@ fn expand_and_enumerate(
     expr: &Expr,
     env: &mut Env,
     vars: &[Arc<str>],
+    primed_vars: &[Arc<str>],
     defs: &Definitions,
     results: &mut Vec<State>,
 ) -> Result<()> {
@@ -2062,12 +2069,12 @@ fn expand_and_enumerate(
             let var = var.clone();
             for val in dom {
                 env.insert(var.clone(), val);
-                expand_and_enumerate(body, env, vars, defs, results)?;
+                expand_and_enumerate(body, env, vars, primed_vars, defs, results)?;
             }
             env.remove(&var);
             Ok(())
         }
-        _ => enumerate_next(expr, env, vars, 0, defs, results),
+        _ => enumerate_next(expr, env, vars, primed_vars, 0, defs, results),
     }
 }
 
@@ -2082,13 +2089,15 @@ pub fn is_action_enabled(
     for (k, v) in constants {
         base_env.insert(k.clone(), v.clone());
     }
-    check_enabled(action, &mut base_env, vars, 0, defs)
+    let primed_vars = make_primed_names(vars);
+    check_enabled(action, &mut base_env, vars, &primed_vars, 0, defs)
 }
 
 fn check_enabled(
     action: &Expr,
     env: &mut Env,
     vars: &[Arc<str>],
+    primed_vars: &[Arc<str>],
     var_idx: usize,
     defs: &Definitions,
 ) -> Result<bool> {
@@ -2097,17 +2106,17 @@ fn check_enabled(
     }
 
     let var = &vars[var_idx];
-    let primed: Arc<str> = format!("{}'", var).into();
+    let primed = &primed_vars[var_idx];
     let candidates = infer_candidates(action, env, var, defs)?;
 
     for candidate in candidates {
         env.insert(primed.clone(), candidate);
-        if check_enabled(action, env, vars, var_idx + 1, defs)? {
-            env.remove(&primed);
+        if check_enabled(action, env, vars, primed_vars, var_idx + 1, defs)? {
+            env.remove(primed);
             return Ok(true);
         }
     }
-    env.remove(&primed);
+    env.remove(primed);
 
     Ok(false)
 }
@@ -2116,11 +2125,10 @@ fn state_to_env(state: &State) -> Env {
     state.vars.clone()
 }
 
-fn env_to_next_state(env: &Env, vars: &[Arc<str>]) -> State {
+fn env_to_next_state(env: &Env, vars: &[Arc<str>], primed_vars: &[Arc<str>]) -> State {
     let mut state = State::new();
-    for var in vars {
-        let primed: Arc<str> = format!("{}'", var).into();
-        if let Some(val) = env.get(&primed) {
+    for (i, var) in vars.iter().enumerate() {
+        if let Some(val) = env.get(&primed_vars[i]) {
             state.vars.insert(var.clone(), val.clone());
         }
     }
@@ -2251,6 +2259,7 @@ fn enumerate_next(
     next: &Expr,
     env: &mut Env,
     vars: &[Arc<str>],
+    primed_vars: &[Arc<str>],
     var_idx: usize,
     defs: &Definitions,
     results: &mut Vec<State>,
@@ -2258,7 +2267,7 @@ fn enumerate_next(
     #[cfg(feature = "profiling")]
     let _start = Instant::now();
 
-    let result = enumerate_next_impl(next, env, vars, var_idx, defs, results);
+    let result = enumerate_next_impl(next, env, vars, primed_vars, var_idx, defs, results);
 
     #[cfg(feature = "profiling")]
     PROFILING_STATS.with(|s| {
@@ -2274,6 +2283,7 @@ fn enumerate_next_impl(
     next: &Expr,
     env: &mut Env,
     vars: &[Arc<str>],
+    primed_vars: &[Arc<str>],
     var_idx: usize,
     defs: &Definitions,
     results: &mut Vec<State>,
@@ -2284,21 +2294,21 @@ fn enumerate_next_impl(
 
     if var_idx >= vars.len() {
         if eval_bool(next, env, defs)? {
-            results.push(env_to_next_state(env, vars));
+            results.push(env_to_next_state(env, vars, primed_vars));
         }
         return Ok(());
     }
 
     let var = &vars[var_idx];
-    let primed: Arc<str> = format!("{}'", var).into();
+    let primed = &primed_vars[var_idx];
 
     let candidates = infer_candidates(next, env, var, defs)?;
 
     for candidate in candidates {
         env.insert(primed.clone(), candidate);
-        enumerate_next_impl(next, env, vars, var_idx + 1, defs, results)?;
+        enumerate_next_impl(next, env, vars, primed_vars, var_idx + 1, defs, results)?;
     }
-    env.remove(&primed);
+    env.remove(primed);
 
     Ok(())
 }
