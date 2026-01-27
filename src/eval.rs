@@ -22,8 +22,6 @@ thread_local! {
     static TLC_STATE: RefCell<BTreeMap<i64, Value>> = const { RefCell::new(BTreeMap::new()) };
     static CHECKER_STATS: RefCell<CheckerStats> = const { RefCell::new(CheckerStats::new()) };
     static RESOLVED_INSTANCES: RefCell<ResolvedInstances> = const { RefCell::new(BTreeMap::new()) };
-    static POWERSET_CACHE: RefCell<BTreeMap<BTreeSet<Value>, BTreeSet<Value>>> = const { RefCell::new(BTreeMap::new()) };
-    static OPERATOR_CACHE: RefCell<BTreeMap<(Arc<str>, Vec<Value>), Value>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 #[derive(Debug, Clone, Default)]
@@ -71,11 +69,6 @@ pub fn set_resolved_instances(instances: ResolvedInstances) {
 
 pub fn clear_resolved_instances() {
     RESOLVED_INSTANCES.with(|inst| inst.borrow_mut().clear());
-}
-
-pub fn clear_eval_caches() {
-    POWERSET_CACHE.with(|cache| cache.borrow_mut().clear());
-    OPERATOR_CACHE.with(|cache| cache.borrow_mut().clear());
 }
 
 #[derive(Debug, Clone)]
@@ -705,12 +698,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
 
         Expr::Powerset(e) => {
             let s = eval_set(e, env, defs)?;
-
-            if let Some(cached) = POWERSET_CACHE.with(|cache| cache.borrow().get(&s).cloned()) {
-                return Ok(Value::Set(cached));
-            }
-
-            let elements: Vec<_> = s.iter().cloned().collect();
+            let elements: Vec<_> = s.into_iter().collect();
             let n = elements.len();
             if n > 20 {
                 return Err(EvalError::domain_error(format!(
@@ -728,9 +716,6 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 }
                 result.insert(Value::Set(subset));
             }
-
-            POWERSET_CACHE.with(|cache| cache.borrow_mut().insert(s, result.clone()));
-
             Ok(Value::Set(result))
         }
 
@@ -942,26 +927,11 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                         args.len()
                     )));
                 }
-
-                let mut arg_vals = Vec::with_capacity(args.len());
-                for arg_expr in args {
-                    arg_vals.push(eval(arg_expr, env, defs)?);
-                }
-
-                let cache_key = (name.clone(), arg_vals.clone());
-                if let Some(cached) = OPERATOR_CACHE.with(|c| c.borrow().get(&cache_key).cloned()) {
-                    return Ok(cached);
-                }
-
                 let mut local = env.clone();
-                for (param, arg_val) in params.iter().zip(arg_vals) {
-                    local.insert(param.clone(), arg_val);
+                for (param, arg_expr) in params.iter().zip(args) {
+                    local.insert(param.clone(), eval(arg_expr, env, defs)?);
                 }
-                let result = eval(body, &local, defs)?;
-
-                OPERATOR_CACHE.with(|c| c.borrow_mut().insert(cache_key, result.clone()));
-
-                Ok(result)
+                eval(body, &local, defs)
             } else {
                 Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
             }

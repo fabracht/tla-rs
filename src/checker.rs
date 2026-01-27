@@ -12,7 +12,7 @@ use std::time::Instant;
 use indexmap::IndexSet;
 
 use crate::ast::{Env, Expr, Spec, State, Value};
-use crate::eval::{eval, eval_with_context, init_states, next_states, update_checker_stats, set_resolved_instances, clear_eval_caches, CheckerStats as EvalCheckerStats, Definitions, EvalContext, EvalError};
+use crate::eval::{eval, eval_with_context, init_states, next_states, update_checker_stats, set_resolved_instances, CheckerStats as EvalCheckerStats, Definitions, EvalContext, EvalError};
 use crate::modules::{resolve_instances, ModuleRegistry};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::export::export_dot;
@@ -115,8 +115,6 @@ pub enum CheckResult {
 }
 
 pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult {
-    clear_eval_caches();
-
     let user_constants = domains.clone();
     let mut domains = Env::new();
     stdlib::load_builtins(&mut domains);
