@@ -19,5 +19,7 @@ pub mod wasm;
 
 pub use diagnostic::{Diagnostic, Severity};
 pub use eval::{reset_tlc_state, set_checker_level, set_random_seed, update_checker_stats, CheckerStats, ResolvedInstances};
+#[cfg(feature = "profiling")]
+pub use eval::{get_profiling_stats, report_profiling_stats, reset_profiling_stats, ProfilingStats};
 pub use source::Source;
 pub use span::{Span, Spanned};

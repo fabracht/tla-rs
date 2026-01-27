@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+#[cfg(feature = "profiling")]
+use std::time::Instant;
 
 use crate::ast::{Env, Expr, State, Value};
 use crate::checker::format_value;
@@ -17,11 +19,44 @@ pub struct EvalContext {
     pub current_state: State,
 }
 
+#[cfg(feature = "profiling")]
+#[derive(Debug, Clone, Default)]
+pub struct ProfilingStats {
+    pub eval_calls: u64,
+    pub next_states_time_ns: u128,
+    pub next_states_calls: u64,
+    pub enumerate_next_time_ns: u128,
+    pub enumerate_next_calls: u64,
+    pub infer_candidates_time_ns: u128,
+    pub infer_candidates_calls: u64,
+    pub init_states_time_ns: u128,
+    pub init_states_calls: u64,
+}
+
+#[cfg(feature = "profiling")]
+impl ProfilingStats {
+    pub const fn new() -> Self {
+        Self {
+            eval_calls: 0,
+            next_states_time_ns: 0,
+            next_states_calls: 0,
+            enumerate_next_time_ns: 0,
+            enumerate_next_calls: 0,
+            infer_candidates_time_ns: 0,
+            infer_candidates_calls: 0,
+            init_states_time_ns: 0,
+            init_states_calls: 0,
+        }
+    }
+}
+
 thread_local! {
     static RNG: RefCell<fastrand::Rng> = RefCell::new(fastrand::Rng::with_seed(0));
     static TLC_STATE: RefCell<BTreeMap<i64, Value>> = const { RefCell::new(BTreeMap::new()) };
     static CHECKER_STATS: RefCell<CheckerStats> = const { RefCell::new(CheckerStats::new()) };
     static RESOLVED_INSTANCES: RefCell<ResolvedInstances> = const { RefCell::new(BTreeMap::new()) };
+    #[cfg(feature = "profiling")]
+    static PROFILING_STATS: RefCell<ProfilingStats> = const { RefCell::new(ProfilingStats::new()) };
 }
 
 #[derive(Debug, Clone, Default)]
@@ -69,6 +104,41 @@ pub fn set_resolved_instances(instances: ResolvedInstances) {
 
 pub fn clear_resolved_instances() {
     RESOLVED_INSTANCES.with(|inst| inst.borrow_mut().clear());
+}
+
+#[cfg(feature = "profiling")]
+pub fn reset_profiling_stats() {
+    PROFILING_STATS.with(|s| *s.borrow_mut() = ProfilingStats::new());
+}
+
+#[cfg(feature = "profiling")]
+pub fn get_profiling_stats() -> ProfilingStats {
+    PROFILING_STATS.with(|s| s.borrow().clone())
+}
+
+#[cfg(feature = "profiling")]
+pub fn report_profiling_stats() {
+    let stats = get_profiling_stats();
+    let next_states_ms = stats.next_states_time_ns / 1_000_000;
+    let enumerate_ms = stats.enumerate_next_time_ns / 1_000_000;
+    let infer_ms = stats.infer_candidates_time_ns / 1_000_000;
+    let init_ms = stats.init_states_time_ns / 1_000_000;
+
+    eprintln!("=== Profiling Stats ===");
+    eprintln!("eval:             {:>12} calls", stats.eval_calls);
+    eprintln!("init_states:      {:>8}ms ({} calls, {:.2}µs/call)",
+        init_ms, stats.init_states_calls,
+        if stats.init_states_calls > 0 { stats.init_states_time_ns as f64 / stats.init_states_calls as f64 / 1000.0 } else { 0.0 });
+    eprintln!("next_states:      {:>8}ms ({} calls, {:.2}µs/call)",
+        next_states_ms, stats.next_states_calls,
+        if stats.next_states_calls > 0 { stats.next_states_time_ns as f64 / stats.next_states_calls as f64 / 1000.0 } else { 0.0 });
+    eprintln!("enumerate_next:   {:>8}ms ({} calls, {:.2}µs/call)",
+        enumerate_ms, stats.enumerate_next_calls,
+        if stats.enumerate_next_calls > 0 { stats.enumerate_next_time_ns as f64 / stats.enumerate_next_calls as f64 / 1000.0 } else { 0.0 });
+    eprintln!("infer_candidates: {:>8}ms ({} calls, {:.2}µs/call)",
+        infer_ms, stats.infer_candidates_calls,
+        if stats.infer_candidates_calls > 0 { stats.infer_candidates_time_ns as f64 / stats.infer_candidates_calls as f64 / 1000.0 } else { 0.0 });
+    eprintln!("=======================");
 }
 
 #[derive(Debug, Clone)]
@@ -303,6 +373,9 @@ fn eval_with_memo(
 }
 
 pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
+    #[cfg(feature = "profiling")]
+    PROFILING_STATS.with(|s| s.borrow_mut().eval_calls += 1);
+
     match expr {
         Expr::Lit(v) => Ok(v.clone()),
 
@@ -1912,6 +1985,28 @@ pub fn next_states(
     constants: &Env,
     defs: &Definitions,
 ) -> Result<Vec<State>> {
+    #[cfg(feature = "profiling")]
+    let _start = Instant::now();
+
+    let result = next_states_impl(next, current, vars, constants, defs);
+
+    #[cfg(feature = "profiling")]
+    PROFILING_STATS.with(|s| {
+        let mut stats = s.borrow_mut();
+        stats.next_states_time_ns += _start.elapsed().as_nanos();
+        stats.next_states_calls += 1;
+    });
+
+    result
+}
+
+fn next_states_impl(
+    next: &Expr,
+    current: &State,
+    vars: &[Arc<str>],
+    constants: &Env,
+    defs: &Definitions,
+) -> Result<Vec<State>> {
     let mut base_env = state_to_env(current);
     for (k, v) in constants {
         base_env.insert(k.clone(), v.clone());
@@ -2165,6 +2260,29 @@ fn enumerate_next(
     defs: &Definitions,
     results: &mut Vec<State>,
 ) -> Result<()> {
+    #[cfg(feature = "profiling")]
+    let _start = Instant::now();
+
+    let result = enumerate_next_impl(next, env, vars, var_idx, defs, results);
+
+    #[cfg(feature = "profiling")]
+    PROFILING_STATS.with(|s| {
+        let mut stats = s.borrow_mut();
+        stats.enumerate_next_time_ns += _start.elapsed().as_nanos();
+        stats.enumerate_next_calls += 1;
+    });
+
+    result
+}
+
+fn enumerate_next_impl(
+    next: &Expr,
+    env: &Env,
+    vars: &[Arc<str>],
+    var_idx: usize,
+    defs: &Definitions,
+    results: &mut Vec<State>,
+) -> Result<()> {
     if var_idx == 0 && !evaluate_guards(next, env, defs)? {
         return Ok(());
     }
@@ -2184,13 +2302,16 @@ fn enumerate_next(
     let mut scoped_env = env.clone();
     for candidate in candidates {
         scoped_env.insert(primed.clone(), candidate);
-        enumerate_next(next, &scoped_env, vars, var_idx + 1, defs, results)?;
+        enumerate_next_impl(next, &scoped_env, vars, var_idx + 1, defs, results)?;
     }
 
     Ok(())
 }
 
 fn infer_candidates(next: &Expr, env: &Env, var: &Arc<str>, defs: &Definitions) -> Result<Vec<Value>> {
+    #[cfg(feature = "profiling")]
+    let _start = Instant::now();
+
     let mut candidates = BTreeSet::new();
     collect_candidates(next, env, var, defs, &mut candidates)?;
 
@@ -2199,7 +2320,16 @@ fn infer_candidates(next: &Expr, env: &Env, var: &Arc<str>, defs: &Definitions) 
             candidates.insert(current.clone());
         }
 
-    Ok(candidates.into_iter().collect())
+    let result = candidates.into_iter().collect();
+
+    #[cfg(feature = "profiling")]
+    PROFILING_STATS.with(|s| {
+        let mut stats = s.borrow_mut();
+        stats.infer_candidates_time_ns += _start.elapsed().as_nanos();
+        stats.infer_candidates_calls += 1;
+    });
+
+    Ok(result)
 }
 
 fn collect_candidates(
@@ -2305,9 +2435,20 @@ fn collect_candidates(
 }
 
 pub fn init_states(init: &Expr, vars: &[Arc<str>], domains: &Env, defs: &Definitions) -> Result<Vec<State>> {
+    #[cfg(feature = "profiling")]
+    let _start = Instant::now();
+
     let mut results = Vec::new();
     let initial_env = domains.clone();
     enumerate_init(init, &initial_env, vars, 0, domains, defs, &mut results)?;
+
+    #[cfg(feature = "profiling")]
+    PROFILING_STATS.with(|s| {
+        let mut stats = s.borrow_mut();
+        stats.init_states_time_ns += _start.elapsed().as_nanos();
+        stats.init_states_calls += 1;
+    });
+
     Ok(results)
 }
 

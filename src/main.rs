@@ -1,3 +1,7 @@
+#[cfg(feature = "dhat")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
@@ -83,6 +87,9 @@ fn is_likely_subcommand(arg: &str) -> bool {
 }
 
 fn main() -> ExitCode {
+    #[cfg(feature = "dhat")]
+    let _profiler = dhat::Profiler::new_heap();
+
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
@@ -421,6 +428,12 @@ fn main() -> ExitCode {
 
     config.spec_path = Some(PathBuf::from(&spec_path));
     let result = check(&spec, &domains, &config);
+
+    #[cfg(feature = "profiling")]
+    {
+        println!();
+        tlc_executor::report_profiling_stats();
+    }
 
     if config.json_output {
         println!("{}", check_result_to_json(&result, &spec));
