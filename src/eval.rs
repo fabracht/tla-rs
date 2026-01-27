@@ -2017,18 +2017,14 @@ fn next_states_impl(
         let mut all_results = indexmap::IndexSet::new();
         for disjunct in &disjuncts {
             if let Expr::Exists(_, _, _) = disjunct {
-                let expanded_envs = expand_exists_disjuncts(disjunct, &base_env, defs)?;
-                let action_body = get_action_body(disjunct);
-                for action_env in expanded_envs {
-                    let mut results = Vec::new();
-                    enumerate_next(action_body, &action_env, vars, 0, defs, &mut results)?;
-                    for state in results {
-                        all_results.insert(state);
-                    }
+                let mut results = Vec::new();
+                expand_and_enumerate(disjunct, &mut base_env, vars, defs, &mut results)?;
+                for state in results {
+                    all_results.insert(state);
                 }
             } else {
                 let mut results = Vec::new();
-                enumerate_next(disjunct, &base_env, vars, 0, defs, &mut results)?;
+                enumerate_next(disjunct, &mut base_env, vars, 0, defs, &mut results)?;
                 for state in results {
                     all_results.insert(state);
                 }
@@ -2038,7 +2034,7 @@ fn next_states_impl(
     }
 
     let mut results = Vec::new();
-    enumerate_next(next, &base_env, vars, 0, defs, &mut results)?;
+    enumerate_next(next, &mut base_env, vars, 0, defs, &mut results)?;
     Ok(results)
 }
 
@@ -2053,27 +2049,25 @@ fn collect_disjuncts(expr: &Expr) -> Vec<&Expr> {
     }
 }
 
-fn expand_exists_disjuncts(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Vec<Env>> {
+fn expand_and_enumerate(
+    expr: &Expr,
+    env: &mut Env,
+    vars: &[Arc<str>],
+    defs: &Definitions,
+    results: &mut Vec<State>,
+) -> Result<()> {
     match expr {
         Expr::Exists(var, domain, body) => {
             let dom = eval_set(domain, env, defs)?;
-            let mut all_envs = Vec::new();
+            let var = var.clone();
             for val in dom {
-                let mut new_env = env.clone();
-                new_env.insert(var.clone(), val);
-                let nested_envs = expand_exists_disjuncts(body, &new_env, defs)?;
-                all_envs.extend(nested_envs);
+                env.insert(var.clone(), val);
+                expand_and_enumerate(body, env, vars, defs, results)?;
             }
-            Ok(all_envs)
+            env.remove(&var);
+            Ok(())
         }
-        _ => Ok(vec![env.clone()]),
-    }
-}
-
-fn get_action_body(expr: &Expr) -> &Expr {
-    match expr {
-        Expr::Exists(_, _, body) => get_action_body(body),
-        _ => expr,
+        _ => enumerate_next(expr, env, vars, 0, defs, results),
     }
 }
 
@@ -2088,12 +2082,12 @@ pub fn is_action_enabled(
     for (k, v) in constants {
         base_env.insert(k.clone(), v.clone());
     }
-    check_enabled(action, &base_env, vars, 0, defs)
+    check_enabled(action, &mut base_env, vars, 0, defs)
 }
 
 fn check_enabled(
     action: &Expr,
-    env: &Env,
+    env: &mut Env,
     vars: &[Arc<str>],
     var_idx: usize,
     defs: &Definitions,
@@ -2106,13 +2100,14 @@ fn check_enabled(
     let primed: Arc<str> = format!("{}'", var).into();
     let candidates = infer_candidates(action, env, var, defs)?;
 
-    let mut scoped_env = env.clone();
     for candidate in candidates {
-        scoped_env.insert(primed.clone(), candidate);
-        if check_enabled(action, &scoped_env, vars, var_idx + 1, defs)? {
+        env.insert(primed.clone(), candidate);
+        if check_enabled(action, env, vars, var_idx + 1, defs)? {
+            env.remove(&primed);
             return Ok(true);
         }
     }
+    env.remove(&primed);
 
     Ok(false)
 }
@@ -2254,7 +2249,7 @@ fn evaluate_guards(expr: &Expr, env: &Env, defs: &Definitions) -> Result<bool> {
 
 fn enumerate_next(
     next: &Expr,
-    env: &Env,
+    env: &mut Env,
     vars: &[Arc<str>],
     var_idx: usize,
     defs: &Definitions,
@@ -2277,7 +2272,7 @@ fn enumerate_next(
 
 fn enumerate_next_impl(
     next: &Expr,
-    env: &Env,
+    env: &mut Env,
     vars: &[Arc<str>],
     var_idx: usize,
     defs: &Definitions,
@@ -2299,16 +2294,16 @@ fn enumerate_next_impl(
 
     let candidates = infer_candidates(next, env, var, defs)?;
 
-    let mut scoped_env = env.clone();
     for candidate in candidates {
-        scoped_env.insert(primed.clone(), candidate);
-        enumerate_next_impl(next, &scoped_env, vars, var_idx + 1, defs, results)?;
+        env.insert(primed.clone(), candidate);
+        enumerate_next_impl(next, env, vars, var_idx + 1, defs, results)?;
     }
+    env.remove(&primed);
 
     Ok(())
 }
 
-fn infer_candidates(next: &Expr, env: &Env, var: &Arc<str>, defs: &Definitions) -> Result<Vec<Value>> {
+fn infer_candidates(next: &Expr, env: &mut Env, var: &Arc<str>, defs: &Definitions) -> Result<Vec<Value>> {
     #[cfg(feature = "profiling")]
     let _start = Instant::now();
 
@@ -2334,7 +2329,7 @@ fn infer_candidates(next: &Expr, env: &Env, var: &Arc<str>, defs: &Definitions) 
 
 fn collect_candidates(
     expr: &Expr,
-    env: &Env,
+    env: &mut Env,
     var: &Arc<str>,
     defs: &Definitions,
     candidates: &mut BTreeSet<Value>,
@@ -2376,11 +2371,16 @@ fn collect_candidates(
             if contains_prime_ref(body, defs)
                 && let Ok(dom) = eval_set(domain, env, defs)
             {
-                let mut scoped_env = env.clone();
+                let bound = bound.clone();
+                let prev = env.get(&bound).cloned();
                 for val in dom {
-                    scoped_env.insert(bound.clone(), val);
-                    collect_candidates(body, &scoped_env, var, defs, candidates)?;
+                    env.insert(bound.clone(), val);
+                    collect_candidates(body, env, var, defs, candidates)?;
                 }
+                match prev {
+                    Some(v) => env.insert(bound, v),
+                    None => env.remove(&bound),
+                };
             }
         }
 
@@ -2397,9 +2397,13 @@ fn collect_candidates(
 
         Expr::Let(bound, binding, body) => {
             if let Ok(val) = eval(binding, env, defs) {
-                let mut local = env.clone();
-                local.insert(bound.clone(), val);
-                collect_candidates(body, &local, var, defs, candidates)?;
+                let bound = bound.clone();
+                let prev = env.insert(bound.clone(), val);
+                collect_candidates(body, env, var, defs, candidates)?;
+                match prev {
+                    Some(v) => env.insert(bound, v),
+                    None => env.remove(&bound),
+                };
             }
         }
 
@@ -2415,13 +2419,21 @@ fn collect_candidates(
                 && params.len() == args.len()
                 && contains_prime_ref(body, defs)
             {
-                let mut local = env.clone();
+                let params: Vec<Arc<str>> = params.clone();
+                let mut saved: Vec<(Arc<str>, Option<Value>)> = Vec::new();
                 for (param, arg) in params.iter().zip(args.iter()) {
                     if let Ok(val) = eval(arg, env, defs) {
-                        local.insert(param.clone(), val);
+                        let prev = env.insert(param.clone(), val);
+                        saved.push((param.clone(), prev));
                     }
                 }
-                collect_candidates(body, &local, var, defs, candidates)?;
+                collect_candidates(body, env, var, defs, candidates)?;
+                for (param, prev) in saved {
+                    match prev {
+                        Some(v) => env.insert(param, v),
+                        None => env.remove(&param),
+                    };
+                }
             }
         }
 
@@ -2439,8 +2451,8 @@ pub fn init_states(init: &Expr, vars: &[Arc<str>], domains: &Env, defs: &Definit
     let _start = Instant::now();
 
     let mut results = Vec::new();
-    let initial_env = domains.clone();
-    enumerate_init(init, &initial_env, vars, 0, domains, defs, &mut results)?;
+    let mut initial_env = domains.clone();
+    enumerate_init(init, &mut initial_env, vars, 0, domains, defs, &mut results)?;
 
     #[cfg(feature = "profiling")]
     PROFILING_STATS.with(|s| {
@@ -2454,7 +2466,7 @@ pub fn init_states(init: &Expr, vars: &[Arc<str>], domains: &Env, defs: &Definit
 
 fn enumerate_init(
     init: &Expr,
-    env: &Env,
+    env: &mut Env,
     vars: &[Arc<str>],
     var_idx: usize,
     domains: &Env,
@@ -2481,11 +2493,12 @@ fn enumerate_init(
         _ => infer_init_candidates(init, env, var, defs)?,
     };
 
-    let mut scoped_env = env.clone();
+    let var = var.clone();
     for candidate in candidates {
-        scoped_env.insert(var.clone(), candidate);
-        enumerate_init(init, &scoped_env, vars, var_idx + 1, domains, defs, results)?;
+        env.insert(var.clone(), candidate);
+        enumerate_init(init, env, vars, var_idx + 1, domains, defs, results)?;
     }
+    env.remove(&var);
 
     Ok(())
 }
