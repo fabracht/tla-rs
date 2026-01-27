@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::ast::{Env, Expr, Spec, State, Value};
 use crate::checker::format_value;
-use crate::eval::{next_states, Definitions, EvalError};
+use crate::eval::{make_primed_names, next_states, Definitions, EvalError};
 use crate::parser::parse_expr;
 
 #[derive(Debug, Clone)]
@@ -78,6 +78,7 @@ pub fn execute_scenario(
 
     let mut current_state = init_states.into_iter().next().unwrap();
     let mut results: Vec<(ScenarioStep, State, Vec<String>)> = Vec::new();
+    let primed_vars = make_primed_names(&spec.vars);
 
     results.push((
         ScenarioStep::Condition(Expr::Lit(Value::Bool(true))),
@@ -90,7 +91,7 @@ pub fn execute_scenario(
             env.insert(var.clone(), val.clone());
         }
 
-        let successors = next_states(&spec.next, &current_state, &spec.vars, &env, &defs)?;
+        let successors = next_states(&spec.next, &current_state, &spec.vars, &primed_vars, &mut env, &defs)?;
 
         let matching = find_matching_transition(&successors, step, &current_state, &defs)?;
 

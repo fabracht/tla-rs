@@ -12,7 +12,7 @@ use std::time::Instant;
 use indexmap::IndexSet;
 
 use crate::ast::{Env, Expr, Spec, State, Value};
-use crate::eval::{eval, eval_with_context, init_states, next_states, update_checker_stats, set_resolved_instances, CheckerStats as EvalCheckerStats, Definitions, EvalContext, EvalError};
+use crate::eval::{eval, eval_with_context, init_states, make_primed_names, next_states, update_checker_stats, set_resolved_instances, CheckerStats as EvalCheckerStats, Definitions, EvalContext, EvalError};
 use crate::modules::{resolve_instances, ModuleRegistry};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::export::export_dot;
@@ -247,6 +247,8 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     };
 
     let base_env: Env = domains.clone();
+    let primed_vars = make_primed_names(&spec.vars);
+    let mut reusable_env = base_env.clone();
 
     for state in initial {
         let canonical = symmetry.canonicalize(&state).into_owned();
@@ -386,7 +388,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         }
 
         let current = states.get_index(current_idx).unwrap();
-        let successors = match next_states(&spec.next, current, &spec.vars, &domains, &spec.definitions) {
+        let successors = match next_states(&spec.next, current, &spec.vars, &primed_vars, &mut reusable_env, &spec.definitions) {
             Ok(s) => s,
             Err(e) => {
                 let trace = reconstruct_trace(current_idx, &states, &parent);
@@ -454,8 +456,10 @@ fn check_liveness_properties(
     if !config.quiet {
         eprintln!("  Building forward edges for {} states...", states.len());
     }
+    let primed_vars = make_primed_names(&spec.vars);
+    let mut reusable_env = domains.clone();
     for (state_idx, state) in states.iter().enumerate() {
-        let successors = next_states(&spec.next, state, &spec.vars, domains, &spec.definitions)?;
+        let successors = next_states(&spec.next, state, &spec.vars, &primed_vars, &mut reusable_env, &spec.definitions)?;
         for successor in successors {
             let canonical = symmetry.canonicalize(&successor);
             if let Some(succ_idx) = states.get_index_of(canonical.as_ref()) {

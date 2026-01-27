@@ -1978,17 +1978,30 @@ fn update_nested(f: &mut BTreeMap<Value, Value>, keys: &[Value], val: Value) -> 
     }
 }
 
+pub fn make_primed_names(vars: &[Arc<str>]) -> Vec<Arc<str>> {
+    vars.iter().map(|v| Arc::from(format!("{}'", v))).collect()
+}
+
 pub fn next_states(
     next: &Expr,
     current: &State,
     vars: &[Arc<str>],
-    constants: &Env,
+    primed_vars: &[Arc<str>],
+    env: &mut Env,
     defs: &Definitions,
 ) -> Result<Vec<State>> {
     #[cfg(feature = "profiling")]
     let _start = Instant::now();
 
-    let result = next_states_impl(next, current, vars, constants, defs);
+    for (k, v) in &current.vars {
+        env.insert(k.clone(), v.clone());
+    }
+
+    let result = next_states_impl(next, env, vars, primed_vars, defs);
+
+    for k in current.vars.keys() {
+        env.remove(k);
+    }
 
     #[cfg(feature = "profiling")]
     PROFILING_STATS.with(|s| {
@@ -2000,37 +2013,26 @@ pub fn next_states(
     result
 }
 
-fn make_primed_names(vars: &[Arc<str>]) -> Vec<Arc<str>> {
-    vars.iter().map(|v| Arc::from(format!("{}'", v))).collect()
-}
-
 fn next_states_impl(
     next: &Expr,
-    current: &State,
+    base_env: &mut Env,
     vars: &[Arc<str>],
-    constants: &Env,
+    primed_vars: &[Arc<str>],
     defs: &Definitions,
 ) -> Result<Vec<State>> {
-    let mut base_env = state_to_env(current);
-    for (k, v) in constants {
-        base_env.insert(k.clone(), v.clone());
-    }
-
-    let primed_vars = make_primed_names(vars);
-
     if let Expr::Or(_, _) = next {
         let disjuncts = collect_disjuncts(next);
         let mut all_results = indexmap::IndexSet::new();
         for disjunct in &disjuncts {
             if let Expr::Exists(_, _, _) = disjunct {
                 let mut results = Vec::new();
-                expand_and_enumerate(disjunct, &mut base_env, vars, &primed_vars, defs, &mut results)?;
+                expand_and_enumerate(disjunct, base_env, vars, primed_vars, defs, &mut results)?;
                 for state in results {
                     all_results.insert(state);
                 }
             } else {
                 let mut results = Vec::new();
-                enumerate_next(disjunct, &mut base_env, vars, &primed_vars, 0, defs, &mut results)?;
+                enumerate_next(disjunct, base_env, vars, primed_vars, 0, defs, &mut results)?;
                 for state in results {
                     all_results.insert(state);
                 }
@@ -2040,7 +2042,7 @@ fn next_states_impl(
     }
 
     let mut results = Vec::new();
-    enumerate_next(next, &mut base_env, vars, &primed_vars, 0, defs, &mut results)?;
+    enumerate_next(next, base_env, vars, primed_vars, 0, defs, &mut results)?;
     Ok(results)
 }
 
