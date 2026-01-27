@@ -61,6 +61,8 @@ PlaceQueen == \E queens \in todo :
       ELSE /\ todo' = (todo \ {queens}) \union exts
            /\ sols' = sols
 
+Next == PlaceQueen
+
 vars == <<todo,sols>>
 Spec == Init /\ [][PlaceQueen]_vars /\ WF_vars(PlaceQueen)
 

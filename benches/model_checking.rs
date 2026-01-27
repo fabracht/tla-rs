@@ -356,12 +356,82 @@ fn bench_state_indexset(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_twophase(c: &mut Criterion) {
+    let spec_text = include_str!("../test_cases/official/TwoPhase.tla");
+    let spec = parse(spec_text).expect("failed to parse TwoPhase.tla");
+
+    let mut group = c.benchmark_group("twophase");
+
+    for rm_count in [3, 4, 5] {
+        let rm_set: BTreeSet<Value> = (1..=rm_count)
+            .map(|i| Value::Str(Arc::from(format!("rm{}", i))))
+            .collect();
+
+        let mut env = Env::new();
+        env.insert(Arc::from("RM"), Value::Set(rm_set));
+
+        group.bench_with_input(BenchmarkId::new("rm_count", rm_count), &env, |b, env| {
+            b.iter(|| {
+                let config = CheckerConfig {
+                    allow_deadlock: true,
+                    ..quiet_config()
+                };
+                check(&spec, env, &config)
+            });
+        });
+    }
+
+    group.finish();
+}
+
+fn bench_enabled(c: &mut Criterion) {
+    let spec_text = include_str!("../test_cases/benchmark/enabled_bench.tla");
+    let spec = parse(spec_text).expect("failed to parse enabled_bench.tla");
+
+    let env = Env::new();
+    let mut group = c.benchmark_group("enabled");
+
+    group.bench_function("enabled_bench", |b| {
+        b.iter(|| {
+            let config = quiet_config();
+            check(&spec, &env, &config)
+        });
+    });
+
+    group.finish();
+}
+
+fn bench_queens(c: &mut Criterion) {
+    let spec_text = include_str!("../test_cases/official/Queens.tla");
+    let spec = parse(spec_text).expect("failed to parse Queens.tla");
+
+    let mut env = Env::new();
+    env.insert(Arc::from("N"), Value::Int(4));
+
+    let mut group = c.benchmark_group("queens");
+
+    group.bench_function("n4", |b| {
+        b.iter(|| {
+            let config = CheckerConfig {
+                allow_deadlock: true,
+                ..quiet_config()
+            };
+            check(&spec, &env, &config)
+        });
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_large_counter,
     bench_symmetric_procs,
     bench_diehard,
     bench_tcommit,
+    bench_twophase,
+    bench_enabled,
+    bench_queens,
     bench_eval_operations,
     bench_symmetry_canonicalize,
     bench_btreeset_operations,
