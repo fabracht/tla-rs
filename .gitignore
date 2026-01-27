@@ -3,6 +3,8 @@ Cargo.lock
 *.profraw
 *.profdata
 profile*.json.gz
+dhat-heap.json
+profile.json
 .DS_Store
 CLAUDE.md
 .claude/
