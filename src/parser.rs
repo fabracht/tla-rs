@@ -587,24 +587,41 @@ impl Parser {
         Ok(left)
     }
 
+    fn parse_and_conjunct(&mut self) -> Result<Expr> {
+        let left = self.parse_comparison()?;
+        match self.peek() {
+            Token::Implies => {
+                self.advance();
+                let right = self.parse_comparison()?;
+                Ok(Expr::Implies(Box::new(left), Box::new(right)))
+            }
+            Token::Equiv => {
+                self.advance();
+                let right = self.parse_comparison()?;
+                Ok(Expr::Equiv(Box::new(left), Box::new(right)))
+            }
+            _ => Ok(left),
+        }
+    }
+
     fn parse_and(&mut self) -> Result<Expr> {
         if *self.peek() == Token::And {
             self.advance();
             self.consume_label();
         }
-        let mut left = self.parse_comparison()?;
+        let mut left = self.parse_and_conjunct()?;
         loop {
             match self.peek() {
                 Token::And => {
                     self.advance();
                     let label = self.consume_label();
-                    let right = self.parse_comparison()?;
+                    let right = self.parse_and_conjunct()?;
                     let right = Self::wrap_with_label(right, label);
                     left = Expr::And(Box::new(left), Box::new(right));
                 }
                 Token::ActionCompose => {
                     self.advance();
-                    let right = self.parse_comparison()?;
+                    let right = self.parse_and_conjunct()?;
                     left = Expr::ActionCompose(Box::new(left), Box::new(right));
                 }
                 _ => break,

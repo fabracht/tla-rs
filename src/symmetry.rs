@@ -54,7 +54,7 @@ impl SymmetryConfig {
         let mut seen = BTreeSet::new();
         let mut ordering = Vec::new();
 
-        for value in state.vars.values() {
+        for value in &state.values {
             self.collect_elements_in_order(value, sym_set, &mut seen, &mut ordering);
         }
 
@@ -109,11 +109,10 @@ impl SymmetryConfig {
     }
 
     fn apply_mapping(&self, state: &State, mapping: &BTreeMap<Value, Value>) -> State {
-        let mut new_vars = BTreeMap::new();
-        for (var, value) in &state.vars {
-            new_vars.insert(var.clone(), self.apply_mapping_to_value(value, mapping));
-        }
-        State { vars: new_vars }
+        let values = state.values.iter()
+            .map(|value| self.apply_mapping_to_value(value, mapping))
+            .collect();
+        State { values }
     }
 
     fn apply_mapping_to_value(&self, value: &Value, mapping: &BTreeMap<Value, Value>) -> Value {
@@ -179,8 +178,7 @@ mod tests {
     #[test]
     fn empty_symmetry_returns_same_state() {
         let config = SymmetryConfig::new();
-        let mut state = State::new();
-        state.vars.insert(Arc::from("x"), Value::Int(42));
+        let state = State { values: vec![Value::Int(42)] };
 
         let canonical = config.canonicalize(&state);
         assert_eq!(*canonical, state);
@@ -191,8 +189,7 @@ mod tests {
         let mut config = SymmetryConfig::new();
         config.add_symmetric_set(BTreeSet::from([str_val("a")]));
 
-        let mut state = State::new();
-        state.vars.insert(Arc::from("x"), str_val("a"));
+        let state = State { values: vec![str_val("a")] };
 
         let canonical = config.canonicalize(&state);
         assert_eq!(*canonical, state);
@@ -203,16 +200,15 @@ mod tests {
         let mut config = SymmetryConfig::new();
         config.add_symmetric_set(BTreeSet::from([str_val("p1"), str_val("p2"), str_val("p3")]));
 
-        let mut state = State::new();
         let mut votes = BTreeMap::new();
         votes.insert(str_val("p2"), Value::Int(1));
         votes.insert(str_val("p1"), Value::Int(0));
         votes.insert(str_val("p3"), Value::Int(0));
-        state.vars.insert(Arc::from("votes"), Value::Fn(votes));
+        let state = State { values: vec![Value::Fn(votes)] };
 
         let canonical = config.canonicalize(&state);
 
-        if let Some(Value::Fn(cvotes)) = canonical.vars.get("votes") {
+        if let Some(Value::Fn(cvotes)) = canonical.values.first() {
             assert_eq!(cvotes.get(&str_val("p1")), Some(&Value::Int(1)));
             assert_eq!(cvotes.get(&str_val("p2")), Some(&Value::Int(0)));
             assert_eq!(cvotes.get(&str_val("p3")), Some(&Value::Int(0)));
@@ -226,11 +222,8 @@ mod tests {
         let mut config = SymmetryConfig::new();
         config.add_symmetric_set(BTreeSet::from([str_val("a"), str_val("b")]));
 
-        let mut state1 = State::new();
-        state1.vars.insert(Arc::from("leader"), str_val("a"));
-
-        let mut state2 = State::new();
-        state2.vars.insert(Arc::from("leader"), str_val("b"));
+        let state1 = State { values: vec![str_val("a")] };
+        let state2 = State { values: vec![str_val("b")] };
 
         let c1 = config.canonicalize(&state1);
         let c2 = config.canonicalize(&state2);
@@ -243,15 +236,12 @@ mod tests {
         let mut config = SymmetryConfig::new();
         config.add_symmetric_set(BTreeSet::from([str_val("x"), str_val("y")]));
 
-        let mut state = State::new();
         let inner_set = BTreeSet::from([str_val("y")]);
-        state
-            .vars
-            .insert(Arc::from("chosen"), Value::Set(inner_set));
+        let state = State { values: vec![Value::Set(inner_set)] };
 
         let canonical = config.canonicalize(&state);
 
-        if let Some(Value::Set(s)) = canonical.vars.get("chosen") {
+        if let Some(Value::Set(s)) = canonical.values.first() {
             assert!(s.contains(&str_val("x")));
             assert!(!s.contains(&str_val("y")));
         } else {

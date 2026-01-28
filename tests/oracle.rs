@@ -460,3 +460,117 @@ fn test_official_hanoi() {
         result
     );
 }
+
+fn make_str_set(values: &[&str]) -> Value {
+    let set: BTreeSet<Value> = values
+        .iter()
+        .map(|s| Value::Str(Arc::from(*s)))
+        .collect();
+    Value::Set(set)
+}
+
+fn make_int_set(values: &[i64]) -> Value {
+    let set: BTreeSet<Value> = values.iter().map(|&n| Value::Int(n)).collect();
+    Value::Set(set)
+}
+
+#[test]
+fn test_mqdb_core() {
+    let path = Path::new("test_cases/mqdb/MQDBCore.tla");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let spec = parse(&input).expect("failed to parse spec");
+
+    let mut domains = Env::new();
+    domains.insert(Arc::from("Ids"), make_str_set(&["id1"]));
+    domains.insert(Arc::from("Values"), make_str_set(&["v1"]));
+    domains.insert(Arc::from("MaxRetries"), Value::Int(2));
+    domains.insert(Arc::from("MaxSeq"), Value::Int(3));
+
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        max_states: 5000,
+        ..Default::default()
+    };
+    let result = check(&spec, &domains, &config);
+
+    assert!(
+        matches!(result, CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_)),
+        "MQDBCore.tla should pass or reach max states, got: {result:?}",
+    );
+}
+
+#[test]
+fn test_mqdb_constraints() {
+    let path = Path::new("test_cases/mqdb/MQDBConstraints.tla");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let spec = parse(&input).expect("failed to parse spec");
+
+    let mut domains = Env::new();
+    domains.insert(Arc::from("Ids"), make_str_set(&["id1", "id2"]));
+    domains.insert(Arc::from("Fields"), make_str_set(&["ref"]));
+    domains.insert(Arc::from("FieldValues"), make_str_set(&["id1", "id2"]));
+
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        max_states: 50000,
+        ..Default::default()
+    };
+    let result = check(&spec, &domains, &config);
+
+    assert!(
+        matches!(result, CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_)),
+        "MQDBConstraints.tla should pass or reach max states, got: {result:?}",
+    );
+}
+
+#[test]
+fn test_mqdb_consumer_group() {
+    let path = Path::new("test_cases/mqdb/MQDBConsumerGroup.tla");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let spec = parse(&input).expect("failed to parse spec");
+
+    let mut domains = Env::new();
+    domains.insert(Arc::from("Consumers"), make_str_set(&["c1", "c2"]));
+    domains.insert(Arc::from("Groups"), make_str_set(&["g1"]));
+    domains.insert(Arc::from("Partitions"), make_int_set(&[0, 1]));
+
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        max_states: 5000,
+        ..Default::default()
+    };
+    let result = check(&spec, &domains, &config);
+
+    assert!(
+        matches!(result, CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_)),
+        "MQDBConsumerGroup.tla should pass or reach max states, got: {result:?}",
+    );
+}
+
+#[test]
+fn test_mqdb_cluster() {
+    let path = Path::new("test_cases/mqdb/MQDBCluster.tla");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let spec = parse(&input).expect("failed to parse spec");
+
+    let mut domains = Env::new();
+    domains.insert(Arc::from("Nodes"), make_str_set(&["n1", "n2"]));
+    domains.insert(Arc::from("Partitions"), make_int_set(&[0]));
+    domains.insert(Arc::from("MaxSeq"), Value::Int(1));
+
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        max_states: 500,
+        max_depth: 200,
+        ..Default::default()
+    };
+    let result = check(&spec, &domains, &config);
+
+    assert!(
+        matches!(
+            result,
+            CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_) | CheckResult::MaxDepthExceeded(_)
+        ),
+        "MQDBCluster.tla should pass or reach limits, got: {result:?}",
+    );
+}

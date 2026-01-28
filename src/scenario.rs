@@ -87,13 +87,15 @@ pub fn execute_scenario(
     ));
 
     for (step_idx, step) in scenario.steps.iter().enumerate() {
-        for (var, val) in &current_state.vars {
-            env.insert(var.clone(), val.clone());
+        for (i, var) in spec.vars.iter().enumerate() {
+            if let Some(val) = current_state.values.get(i) {
+                env.insert(var.clone(), val.clone());
+            }
         }
 
         let successors = next_states(&spec.next, &current_state, &spec.vars, &primed_vars, &mut env, &defs)?;
 
-        let matching = find_matching_transition(&successors, step, &current_state, &defs)?;
+        let matching = find_matching_transition(&successors, step, &current_state, &defs, &spec.vars)?;
 
         match matching {
             Some((next_state, changes)) => {
@@ -101,7 +103,7 @@ pub fn execute_scenario(
                 results.push((step.clone(), next_state, changes));
             }
             None => {
-                let available = describe_available_actions(&successors, &current_state);
+                let available = describe_available_actions(&successors, &current_state, &spec.vars);
                 return Ok(ScenarioResult {
                     states: results,
                     failure: Some(ScenarioFailure {
@@ -129,14 +131,16 @@ fn build_definitions(spec: &Spec) -> Definitions {
     defs
 }
 
-fn build_scenario_env(current: &State, next: &State, constants: &Env) -> Env {
+fn build_scenario_env(current: &State, next: &State, constants: &Env, vars: &[Arc<str>]) -> Env {
     let mut env = constants.clone();
-    for (var, val) in &current.vars {
-        env.insert(var.clone(), val.clone());
-    }
-    for (var, val) in &next.vars {
-        let primed_name: Arc<str> = format!("{}'", var).into();
-        env.insert(primed_name, val.clone());
+    for (i, var) in vars.iter().enumerate() {
+        if let Some(val) = current.values.get(i) {
+            env.insert(var.clone(), val.clone());
+        }
+        if let Some(val) = next.values.get(i) {
+            let primed_name: Arc<str> = format!("{}'", var).into();
+            env.insert(primed_name, val.clone());
+        }
     }
     env
 }
@@ -146,10 +150,11 @@ fn find_matching_transition(
     step: &ScenarioStep,
     current: &State,
     defs: &Definitions,
+    vars: &[Arc<str>],
 ) -> Result<Option<(State, Vec<String>)>, EvalError> {
     for succ in successors {
-        if matches_step(current, succ, step, defs)? {
-            let changes = compute_changes(current, succ);
+        if matches_step(current, succ, step, defs, vars)? {
+            let changes = compute_changes(current, succ, vars);
             return Ok(Some((succ.clone(), changes)));
         }
     }
@@ -161,11 +166,12 @@ fn matches_step(
     next: &State,
     step: &ScenarioStep,
     defs: &Definitions,
+    vars: &[Arc<str>],
 ) -> Result<bool, EvalError> {
     match step {
         ScenarioStep::Condition(expr) => {
-            let env = build_scenario_env(current, next, &Env::new());
-            match crate::eval::eval(expr, &env, defs) {
+            let mut env = build_scenario_env(current, next, &Env::new(), vars);
+            match crate::eval::eval(expr, &mut env, defs) {
                 Ok(Value::Bool(b)) => Ok(b),
                 Ok(other) => Err(EvalError::TypeMismatch { expected: "Bool", got: other, context: Some("scenario condition"),  span: None }),
                 Err(e) => Err(e),
@@ -174,21 +180,23 @@ fn matches_step(
     }
 }
 
-fn compute_changes(current: &State, next: &State) -> Vec<String> {
+fn compute_changes(current: &State, next: &State, vars: &[Arc<str>]) -> Vec<String> {
     let mut changes = Vec::new();
 
-    for (key, next_val) in &next.vars {
-        match current.get(key) {
-            Some(curr_val) if curr_val != next_val => {
+    for (i, var) in vars.iter().enumerate() {
+        let next_val = next.values.get(i);
+        let curr_val = current.values.get(i);
+        match (curr_val, next_val) {
+            (Some(cv), Some(nv)) if cv != nv => {
                 changes.push(format!(
                     "{}: {} → {}",
-                    key,
-                    format_value_compact(curr_val),
-                    format_value_compact(next_val)
+                    var,
+                    format_value_compact(cv),
+                    format_value_compact(nv)
                 ));
             }
-            None => {
-                changes.push(format!("{}: (new) {}", key, format_value_compact(next_val)));
+            (None, Some(nv)) => {
+                changes.push(format!("{}: (new) {}", var, format_value_compact(nv)));
             }
             _ => {}
         }
@@ -247,11 +255,11 @@ fn format_value_compact(v: &Value) -> String {
     }
 }
 
-fn describe_available_actions(successors: &[State], current: &State) -> Vec<String> {
+fn describe_available_actions(successors: &[State], current: &State, vars: &[Arc<str>]) -> Vec<String> {
     let mut actions = Vec::new();
 
     for succ in successors {
-        let changes = compute_changes(current, succ);
+        let changes = compute_changes(current, succ, vars);
         if !changes.is_empty() {
             let summary = if changes.len() > 2 {
                 format!(
@@ -290,7 +298,7 @@ fn format_expr(expr: &Expr) -> String {
     }
 }
 
-pub fn format_scenario_result(result: &ScenarioResult, vars_of_interest: &[&str]) -> String {
+pub fn format_scenario_result(result: &ScenarioResult, vars_of_interest: &[&str], spec_vars: &[Arc<str>]) -> String {
     let mut output = String::new();
 
     for (idx, (step, state, changes)) in result.states.iter().enumerate() {
@@ -316,9 +324,10 @@ pub fn format_scenario_result(result: &ScenarioResult, vars_of_interest: &[&str]
         if !vars_of_interest.is_empty() {
             output.push_str("State:\n");
             for var in vars_of_interest {
-                if let Some(val) = state.get(var) {
-                    output.push_str(&format!("  {} = {}\n", var, format_value(val)));
-                }
+                if let Some(vi) = spec_vars.iter().position(|v| v.as_ref() == *var)
+                    && let Some(val) = state.values.get(vi) {
+                        output.push_str(&format!("  {} = {}\n", var, format_value(val)));
+                    }
             }
         }
     }

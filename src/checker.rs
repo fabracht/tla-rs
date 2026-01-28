@@ -166,7 +166,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     }
 
     for (idx, assume) in spec.assumes.iter().enumerate() {
-        match eval(assume, &domains, &spec.definitions) {
+        match eval(assume, &mut domains, &spec.definitions) {
             Ok(Value::Bool(true)) => {}
             Ok(Value::Bool(false)) => return CheckResult::AssumeViolation(idx),
             Ok(_) => {
@@ -346,8 +346,10 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
         let current = states.get_index(current_idx).unwrap();
         let mut env = base_env.clone();
-        for (k, v) in &current.vars {
-            env.insert(k.clone(), v.clone());
+        for (i, var) in spec.vars.iter().enumerate() {
+            if let Some(val) = current.values.get(i) {
+                env.insert(var.clone(), val.clone());
+            }
         }
 
         let ctx = EvalContext {
@@ -357,7 +359,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         };
 
         for (idx, invariant) in spec.invariants.iter().enumerate() {
-            match eval_with_context(invariant, &env, &spec.definitions, &ctx) {
+            match eval_with_context(invariant, &mut env, &spec.definitions, &ctx) {
                 Ok(Value::Bool(true)) => {}
                 Ok(Value::Bool(false)) => {
                     let trace = reconstruct_trace(current_idx, &states, &parent);
@@ -508,10 +510,10 @@ fn check_liveness_properties(
 
             let property_satisfied = match property {
                 Expr::LeadsTo(p, q) => {
-                    liveness::check_leads_to(&graph, scc, p, q, domains, &defs)?
+                    liveness::check_leads_to(&graph, scc, p, q, domains, &defs, &spec.vars)?
                 }
                 _ => {
-                    liveness::check_eventually(&graph, scc, property, domains, &defs)?
+                    liveness::check_eventually(&graph, scc, property, domains, &defs, &spec.vars)?
                 }
             };
 
@@ -538,8 +540,8 @@ pub fn format_trace(trace: &[State], vars: &[Arc<str>]) -> String {
     let mut out = String::new();
     for (i, state) in trace.iter().enumerate() {
         out.push_str(&format!("State {}\n", i));
-        for var in vars {
-            if let Some(val) = state.vars.get(var) {
+        for (vi, var) in vars.iter().enumerate() {
+            if let Some(val) = state.values.get(vi) {
                 out.push_str(&format!("  {} = {}\n", var, format_value(val)));
             }
         }
@@ -562,14 +564,15 @@ pub fn format_trace_with_diffs(trace: &[State], vars: &[Arc<str>]) -> String {
 
         let changed_vars: Vec<&str> = vars
             .iter()
-            .filter(|var| {
-                if let (Some(p), Some(curr)) = (prev.and_then(|p| p.vars.get(*var)), state.vars.get(*var)) {
+            .enumerate()
+            .filter(|(vi, _)| {
+                if let (Some(p), Some(curr)) = (prev.and_then(|p| p.values.get(*vi)), state.values.get(*vi)) {
                     p != curr
                 } else {
                     false
                 }
             })
-            .map(|s| s.as_ref())
+            .map(|(_, s)| s.as_ref())
             .collect();
 
         if i == last_idx && total_states > 1 {
@@ -584,12 +587,12 @@ pub fn format_trace_with_diffs(trace: &[State], vars: &[Arc<str>]) -> String {
             out.push_str(&format!("  (changed: {})\n", changed_vars.join(", ")));
         }
 
-        for var in vars {
-            if let Some(val) = state.vars.get(var) {
-                let changed = prev.is_some_and(|p| p.vars.get(var) != Some(val));
+        for (vi, var) in vars.iter().enumerate() {
+            if let Some(val) = state.values.get(vi) {
+                let changed = prev.is_some_and(|p| p.values.get(vi) != Some(val));
                 let marker = if changed { " *" } else { "" };
                 let prev_val_str = if changed {
-                    prev.and_then(|p| p.vars.get(var))
+                    prev.and_then(|p| p.values.get(vi))
                         .map(|v| format!("  (was: {})", format_value(v)))
                         .unwrap_or_default()
                 } else {
@@ -742,8 +745,9 @@ pub fn value_to_json(val: &Value) -> String {
 pub fn state_to_json(state: &State, vars: &[Arc<str>]) -> String {
     let fields: Vec<_> = vars
         .iter()
-        .filter_map(|var| {
-            state.vars.get(var).map(|val| format!("\"{}\": {}", var, value_to_json(val)))
+        .enumerate()
+        .filter_map(|(i, var)| {
+            state.values.get(i).map(|val| format!("\"{}\": {}", var, value_to_json(val)))
         })
         .collect();
     format!("{{{}}}", fields.join(", "))
@@ -986,7 +990,7 @@ mod tests {
                 assert_eq!(cex.violated_invariant, 0);
                 assert_eq!(cex.trace.len(), 5);
                 let final_state = cex.trace.last().unwrap();
-                assert_eq!(final_state.vars.get(&var("count")), Some(&Value::Int(4)));
+                assert_eq!(final_state.values.get(0), Some(&Value::Int(4)));
             }
             other => panic!("expected InvariantViolation, got {:?}", other),
         }
@@ -1038,7 +1042,7 @@ mod tests {
             CheckResult::InvariantViolation(cex, _stats) => {
                 assert_eq!(cex.violated_invariant, 1);
                 let final_state = cex.trace.last().unwrap();
-                assert_eq!(final_state.vars.get(&var("hi")), Some(&Value::Int(2)));
+                assert_eq!(final_state.values.get(1), Some(&Value::Int(2)));
             }
             other => panic!("expected InvariantViolation, got {:?}", other),
         }
@@ -1105,7 +1109,7 @@ mod tests {
             CheckResult::Deadlock(trace, _) => {
                 assert_eq!(trace.len(), 3);
                 let final_state = trace.last().unwrap();
-                assert_eq!(final_state.vars.get(&var("x")), Some(&Value::Int(2)));
+                assert_eq!(final_state.values.get(0), Some(&Value::Int(2)));
             }
             other => panic!("expected Deadlock, got {:?}", other),
         }
@@ -1113,9 +1117,9 @@ mod tests {
 
     #[test]
     fn format_trace_output() {
-        let mut state = State::new();
-        state.vars.insert(var("x"), Value::Int(42));
-        state.vars.insert(var("y"), Value::Set([Value::Int(1), Value::Int(2)].into()));
+        let state = State {
+            values: vec![Value::Int(42), Value::Set([Value::Int(1), Value::Int(2)].into())],
+        };
 
         let trace = vec![state];
         let vars = vec![var("x"), var("y")];

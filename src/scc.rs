@@ -104,12 +104,9 @@ mod tests {
     use super::*;
     use crate::ast::{State, Value};
     use crate::graph::StateGraph;
-    use std::sync::Arc;
 
     fn state_with_x(n: i64) -> State {
-        let mut s = State::new();
-        s.vars.insert(Arc::from("x"), Value::Int(n));
-        s
+        State { values: vec![Value::Int(n)] }
     }
 
     #[test]

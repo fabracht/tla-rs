@@ -124,18 +124,21 @@ fn action_matches(
     constants: &Env,
     defs: &Definitions,
 ) -> Result<bool> {
-    let mut env = current.vars.clone();
-    for (k, v) in constants {
-        env.insert(k.clone(), v.clone());
-    }
-    for var in vars {
+    let mut env = Env::new();
+    for (i, var) in vars.iter().enumerate() {
+        if let Some(val) = current.values.get(i) {
+            env.insert(var.clone(), val.clone());
+        }
         let primed: Arc<str> = format!("{}'", var).into();
-        if let Some(val) = next.vars.get(var) {
+        if let Some(val) = next.values.get(i) {
             env.insert(primed, val.clone());
         }
     }
+    for (k, v) in constants {
+        env.insert(k.clone(), v.clone());
+    }
 
-    match eval(action, &env, defs) {
+    match eval(action, &mut env, defs) {
         Ok(Value::Bool(b)) => Ok(b),
         Ok(_) => Err(EvalError::TypeMismatch { expected: "Bool", got: Value::Bool(false), context: Some("fairness action"),  span: None }),
         Err(e) => Err(e),
@@ -148,6 +151,7 @@ pub fn check_eventually(
     property: &Expr,
     constants: &Env,
     defs: &Definitions,
+    vars: &[Arc<str>],
 ) -> Result<bool> {
     if scc.is_trivial {
         return Ok(true);
@@ -155,11 +159,11 @@ pub fn check_eventually(
 
     for &state_idx in &scc.states {
         if let Some(state) = graph.get_state(state_idx) {
-            let mut env = state.vars.clone();
+            let mut env = crate::eval::state_to_env(state, vars);
             for (k, v) in constants {
                 env.insert(k.clone(), v.clone());
             }
-            match eval(property, &env, defs) {
+            match eval(property, &mut env, defs) {
                 Ok(Value::Bool(true)) => return Ok(true),
                 Ok(Value::Bool(false)) => continue,
                 Ok(_) => {
@@ -180,6 +184,7 @@ pub fn check_leads_to(
     q: &Expr,
     constants: &Env,
     defs: &Definitions,
+    vars: &[Arc<str>],
 ) -> Result<bool> {
     if scc.is_trivial {
         return Ok(true);
@@ -190,12 +195,12 @@ pub fn check_leads_to(
 
     for &state_idx in &scc.states {
         if let Some(state) = graph.get_state(state_idx) {
-            let mut env = state.vars.clone();
+            let mut env = crate::eval::state_to_env(state, vars);
             for (k, v) in constants {
                 env.insert(k.clone(), v.clone());
             }
 
-            match eval(p, &env, defs) {
+            match eval(p, &mut env, defs) {
                 Ok(Value::Bool(true)) => p_holds_somewhere = true,
                 Ok(Value::Bool(false)) => {}
                 Ok(_) => {
@@ -204,7 +209,7 @@ pub fn check_leads_to(
                 Err(e) => return Err(e),
             }
 
-            match eval(q, &env, defs) {
+            match eval(q, &mut env, defs) {
                 Ok(Value::Bool(true)) => q_holds_somewhere = true,
                 Ok(Value::Bool(false)) => {}
                 Ok(_) => {
@@ -287,9 +292,7 @@ mod tests {
     use crate::scc::compute_sccs;
 
     fn state_with_x(n: i64) -> State {
-        let mut s = State::new();
-        s.vars.insert(Arc::from("x"), Value::Int(n));
-        s
+        State { values: vec![Value::Int(n)] }
     }
 
     #[test]

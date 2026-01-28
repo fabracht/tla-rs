@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
@@ -161,12 +161,13 @@ fn create_test_set(size: usize) -> BTreeSet<Value> {
 }
 
 fn create_test_state(var_count: usize, set_size: usize) -> State {
-    let mut vars = BTreeMap::new();
-    for i in 0..var_count {
-        let set: BTreeSet<Value> = (0..set_size).map(|j| Value::Int(j as i64)).collect();
-        vars.insert(Arc::from(format!("var{}", i)), Value::Set(set));
-    }
-    State { vars }
+    let values: Vec<Value> = (0..var_count)
+        .map(|_| {
+            let set: BTreeSet<Value> = (0..set_size).map(|j| Value::Int(j as i64)).collect();
+            Value::Set(set)
+        })
+        .collect();
+    State { values }
 }
 
 fn bench_eval_operations(c: &mut Criterion) {
@@ -183,7 +184,7 @@ fn bench_eval_operations(c: &mut Criterion) {
             BenchmarkId::new("powerset", size),
             &powerset_expr,
             |b, expr| {
-                b.iter(|| eval(black_box(expr), &env, &defs))
+                b.iter(|| eval(black_box(expr), &mut env.clone(), &defs))
             },
         );
     }
@@ -248,12 +249,13 @@ fn bench_symmetry_canonicalize(c: &mut Criterion) {
     sym_config.add_symmetric_set(sym_set.clone());
 
     for var_count in [3, 5, 10] {
-        let mut vars = BTreeMap::new();
-        for i in 0..var_count {
-            let subset: BTreeSet<Value> = sym_set.iter().take((i % 5) + 1).cloned().collect();
-            vars.insert(Arc::from(format!("var{}", i)), Value::Set(subset));
-        }
-        let state = State { vars };
+        let values: Vec<Value> = (0..var_count)
+            .map(|i| {
+                let subset: BTreeSet<Value> = sym_set.iter().take((i % 5) + 1).cloned().collect();
+                Value::Set(subset)
+            })
+            .collect();
+        let state = State { values };
 
         group.bench_with_input(
             BenchmarkId::new("canonicalize", var_count),
@@ -317,10 +319,7 @@ fn bench_state_indexset(c: &mut Criterion) {
     for state_count in [100, 1000, 5000] {
         let states: Vec<State> = (0..state_count)
             .map(|i| {
-                let mut vars = BTreeMap::new();
-                vars.insert(Arc::from("x"), Value::Int(i as i64));
-                vars.insert(Arc::from("y"), Value::Int((i * 2) as i64));
-                State { vars }
+                State { values: vec![Value::Int(i as i64), Value::Int((i * 2) as i64)] }
             })
             .collect();
 

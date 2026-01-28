@@ -39,7 +39,8 @@ pub fn export_dot<W: Write>(
 
 fn format_state_label(state: &State, vars: &[Arc<str>]) -> String {
     vars.iter()
-        .filter_map(|v| state.vars.get(v).map(|val| format!("{}={}", v, format_value_escaped(val))))
+        .enumerate()
+        .filter_map(|(i, v)| state.values.get(i).map(|val| format!("{}={}", v, format_value_escaped(val))))
         .collect::<Vec<_>>()
         .join("\\n")
 }

@@ -223,19 +223,23 @@ fn eval_fn_def_recursive(
     param: &Arc<str>,
     domain: &[Value],
     body: &Expr,
-    env: &Env,
+    env: &mut Env,
     defs: &Definitions,
 ) -> Result<BTreeMap<Value, Value>> {
     let memo: RefCell<BTreeMap<Value, Value>> = RefCell::new(BTreeMap::new());
 
+    let prev = env.remove(param);
     for val in domain.iter() {
         if memo.borrow().contains_key(val) {
             continue;
         }
-        let mut local = env.clone();
-        local.insert(param.clone(), val.clone());
-        let result = eval_with_memo(body, &local, defs, fn_name, param, domain, &memo)?;
+        env.insert(param.clone(), val.clone());
+        let result = eval_with_memo(body, env, defs, fn_name, param, domain, &memo)?;
         memo.borrow_mut().insert(val.clone(), result);
+    }
+    match prev {
+        Some(old) => { env.insert(param.clone(), old); }
+        None => { env.remove(param); }
     }
 
     Ok(memo.into_inner())
@@ -244,7 +248,7 @@ fn eval_fn_def_recursive(
 #[allow(clippy::only_used_in_recursion)]
 fn eval_with_memo(
     expr: &Expr,
-    env: &Env,
+    env: &mut Env,
     defs: &Definitions,
     fn_name: &Arc<str>,
     fn_param: &Arc<str>,
@@ -264,10 +268,13 @@ fn eval_with_memo(
                     && params.is_empty()
                     && let Expr::FnDef(p, _, body) = fn_body
                 {
-                    let mut local = env.clone();
-                    local.insert(p.clone(), av.clone());
+                    let prev_p = env.insert(p.clone(), av.clone());
                     let result =
-                        eval_with_memo(body, &local, defs, fn_name, fn_param, fn_domain, memo)?;
+                        eval_with_memo(body, env, defs, fn_name, fn_param, fn_domain, memo)?;
+                    match prev_p {
+                        Some(old) => { env.insert(p.clone(), old); }
+                        None => { env.remove(p); }
+                    }
                     memo.borrow_mut().insert(av, result.clone());
                     return Ok(result);
                 }
@@ -372,7 +379,7 @@ fn eval_with_memo(
     }
 }
 
-pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
+pub fn eval(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
     #[cfg(feature = "profiling")]
     PROFILING_STATS.with(|s| s.borrow_mut().eval_calls += 1);
 
@@ -706,12 +713,16 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
 
             let domain_vals = eval_set(domain, env, defs)?;
             let mut result = BTreeSet::new();
-            let mut scoped_env = env.clone();
+            let prev = env.remove(var);
             for val in domain_vals {
-                scoped_env.insert(var.clone(), val.clone());
-                if eval_bool(predicate, &scoped_env, defs)? {
+                env.insert(var.clone(), val.clone());
+                if eval_bool(predicate, env, defs)? {
                     result.insert(val);
                 }
+            }
+            match prev {
+                Some(old) => { env.insert(var.clone(), old); }
+                None => { env.remove(var); }
             }
             Ok(Value::Set(result))
         }
@@ -719,10 +730,14 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
         Expr::SetMap(var, domain, body) => {
             let domain_vals = eval_set(domain, env, defs)?;
             let mut result = BTreeSet::new();
-            let mut scoped_env = env.clone();
+            let prev = env.remove(var);
             for val in domain_vals {
-                scoped_env.insert(var.clone(), val);
-                result.insert(eval(body, &scoped_env, defs)?);
+                env.insert(var.clone(), val);
+                result.insert(eval(body, env, defs)?);
+            }
+            match prev {
+                Some(old) => { env.insert(var.clone(), old); }
+                None => { env.remove(var); }
             }
             Ok(Value::Set(result))
         }
@@ -819,36 +834,58 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
 
         Expr::Exists(var, domain, body) => {
             let dom = eval_set(domain, env, defs)?;
-            let mut scoped_env = env.clone();
+            let prev = env.remove(var);
+            let mut found = false;
             for val in dom {
-                scoped_env.insert(var.clone(), val);
-                if eval_bool(body, &scoped_env, defs)? {
-                    return Ok(Value::Bool(true));
+                env.insert(var.clone(), val);
+                let b = eval_bool(body, env, defs)?;
+                if b {
+                    found = true;
+                    break;
                 }
             }
-            Ok(Value::Bool(false))
+            match prev {
+                Some(old) => { env.insert(var.clone(), old); }
+                None => { env.remove(var); }
+            }
+            Ok(Value::Bool(found))
         }
 
         Expr::Forall(var, domain, body) => {
             let dom = eval_set(domain, env, defs)?;
-            let mut scoped_env = env.clone();
+            let prev = env.remove(var);
+            let mut holds = true;
             for val in dom {
-                scoped_env.insert(var.clone(), val);
-                if !eval_bool(body, &scoped_env, defs)? {
-                    return Ok(Value::Bool(false));
+                env.insert(var.clone(), val);
+                if !eval_bool(body, env, defs)? {
+                    holds = false;
+                    break;
                 }
             }
-            Ok(Value::Bool(true))
+            match prev {
+                Some(old) => { env.insert(var.clone(), old); }
+                None => { env.remove(var); }
+            }
+            Ok(Value::Bool(holds))
         }
 
         Expr::Choose(var, domain, body) => {
             let dom = eval_set(domain, env, defs)?;
-            let mut scoped_env = env.clone();
+            let prev = env.remove(var);
+            let mut chosen = None;
             for val in &dom {
-                scoped_env.insert(var.clone(), val.clone());
-                if eval_bool(body, &scoped_env, defs)? {
-                    return Ok(val.clone());
+                env.insert(var.clone(), val.clone());
+                if eval_bool(body, env, defs)? {
+                    chosen = Some(val.clone());
+                    break;
                 }
+            }
+            match prev {
+                Some(old) => { env.insert(var.clone(), old); }
+                None => { env.remove(var); }
+            }
+            if let Some(v) = chosen {
+                return Ok(v);
             }
             if dom.is_empty()
                 && let Expr::NotIn(_, set_expr) = body.as_ref()
@@ -873,9 +910,13 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                     )));
                 }
                 let av = eval(arg, env, defs)?;
-                let mut local = env.clone();
-                local.insert(params[0].clone(), av);
-                return eval(body, &local, defs);
+                let prev = env.insert(params[0].clone(), av);
+                let result = eval(body, env, defs);
+                match prev {
+                    Some(old) => { env.insert(params[0].clone(), old); }
+                    None => { env.remove(&params[0]); }
+                }
+                return result;
             }
             let fval = eval(f, env, defs)?;
             let av = eval(arg, env, defs)?;
@@ -1000,11 +1041,22 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                         args.len()
                     )));
                 }
-                let mut local = env.clone();
-                for (param, arg_expr) in params.iter().zip(args) {
-                    local.insert(param.clone(), eval(arg_expr, env, defs)?);
+                let mut arg_vals = Vec::with_capacity(args.len());
+                for arg_expr in args {
+                    arg_vals.push(eval(arg_expr, env, defs)?);
                 }
-                eval(body, &local, defs)
+                let mut prevs = Vec::with_capacity(params.len());
+                for (param, val) in params.iter().zip(arg_vals) {
+                    prevs.push((param.clone(), env.insert(param.clone(), val)));
+                }
+                let result = eval(body, env, defs);
+                for (param, prev) in prevs {
+                    match prev {
+                        Some(old) => { env.insert(param, old); }
+                        None => { env.remove(&param); }
+                    }
+                }
+                result
             } else {
                 Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
             }
@@ -1052,9 +1104,13 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 }
 
                 let old_val = get_nested(&base, &key_vals)?;
-                let mut new_env = env.clone();
-                new_env.insert("@".into(), old_val);
-                let v = eval(val, &new_env, defs)?;
+                let at_key: Arc<str> = "@".into();
+                let prev_at = env.insert(at_key.clone(), old_val);
+                let v = eval(val, env, defs)?;
+                match prev_at {
+                    Some(old) => { env.insert(at_key, old); }
+                    None => { env.remove(&at_key); }
+                }
 
                 match &mut result {
                     Value::Record(rec) => {
@@ -1240,9 +1296,13 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                             params.len()
                         )));
                     }
-                    let mut local = env.clone();
-                    local.insert(params[0].clone(), elem.clone());
-                    eval_bool(body, &local, defs)?
+                    let prev = env.insert(params[0].clone(), elem.clone());
+                    let b = eval_bool(body, env, defs)?;
+                    match prev {
+                        Some(old) => { env.insert(params[0].clone(), old); }
+                        None => { env.remove(&params[0]); }
+                    }
+                    b
                 } else {
                     return Err(EvalError::domain_error("SelectSeq test must be a LAMBDA expression"));
                 };
@@ -1316,11 +1376,11 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 }
                 let param_a = &params[0];
                 let param_b = &params[1];
+                let mut local = env.clone();
                 result.sort_by(|a, b| {
-                    let mut local = env.clone();
                     local.insert(param_a.clone(), a.clone());
                     local.insert(param_b.clone(), b.clone());
-                    match eval_bool(body, &local, defs) {
+                    match eval_bool(body, &mut local, defs) {
                         Ok(true) => std::cmp::Ordering::Less,
                         Ok(false) => std::cmp::Ordering::Greater,
                         Err(_) => std::cmp::Ordering::Equal,
@@ -1526,15 +1586,19 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 if params.len() != 1 {
                     return Err(EvalError::domain_error("BagOfAll expects a single-argument lambda"));
                 }
+                let prev = env.remove(&params[0]);
                 for (elem, count) in bag {
                     let c = if let Value::Int(n) = count { n } else { 0 };
-                    let mut local = env.clone();
-                    local.insert(params[0].clone(), elem);
-                    let mapped = eval(body, &local, defs)?;
-                    let prev = result.get(&mapped)
+                    env.insert(params[0].clone(), elem);
+                    let mapped = eval(body, env, defs)?;
+                    let prev_count = result.get(&mapped)
                         .and_then(|v| if let Value::Int(n) = v { Some(*n) } else { None })
                         .unwrap_or(0);
-                    result.insert(mapped, Value::Int(prev + c));
+                    result.insert(mapped, Value::Int(prev_count + c));
+                }
+                match prev {
+                    Some(old) => { env.insert(params[0].clone(), old); }
+                    None => { env.remove(&params[0]); }
                 }
             } else {
                 return Err(EvalError::domain_error("BagOfAll requires a LAMBDA expression"));
@@ -1578,14 +1642,22 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                 let dom = eval_set(domain_expr, env, &local_defs)?;
                 let dom_vec: Vec<_> = dom.into_iter().collect();
                 let fn_result = eval_fn_def_recursive(var, param, &dom_vec, fn_body, env, &local_defs)?;
-                let mut local = env.clone();
-                local.insert(var.clone(), Value::Fn(fn_result));
-                eval(body, &local, &local_defs)
+                let prev = env.insert(var.clone(), Value::Fn(fn_result));
+                let result = eval(body, env, &local_defs);
+                match prev {
+                    Some(old) => { env.insert(var.clone(), old); }
+                    None => { env.remove(var); }
+                }
+                result
             } else {
                 let val = eval(binding, env, defs)?;
-                let mut local = env.clone();
-                local.insert(var.clone(), val);
-                eval(body, &local, defs)
+                let prev = env.insert(var.clone(), val);
+                let result = eval(body, env, defs);
+                match prev {
+                    Some(old) => { env.insert(var.clone(), old); }
+                    None => { env.remove(var); }
+                }
+                result
             }
         }
 
@@ -1656,13 +1728,22 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
                     )));
                 }
 
-                let mut local = env.clone();
-                for (param, arg_expr) in params.iter().zip(args) {
-                    let arg_val = eval(arg_expr, env, defs)?;
-                    local.insert(param.clone(), arg_val);
+                let mut arg_vals = Vec::with_capacity(args.len());
+                for arg_expr in args {
+                    arg_vals.push(eval(arg_expr, env, defs)?);
                 }
-
-                eval(body, &local, defs)
+                let mut prevs = Vec::with_capacity(params.len());
+                for (param, val) in params.iter().zip(arg_vals) {
+                    prevs.push((param.clone(), env.insert(param.clone(), val)));
+                }
+                let result = eval(body, env, defs);
+                for (param, prev) in prevs {
+                    match prev {
+                        Some(old) => { env.insert(param, old); }
+                        None => { env.remove(&param); }
+                    }
+                }
+                result
             })
         }
 
@@ -1674,7 +1755,7 @@ pub fn eval(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Value> {
 
 pub fn eval_with_instances(
     expr: &Expr,
-    env: &Env,
+    env: &mut Env,
     defs: &Definitions,
     instances: &ResolvedInstances,
 ) -> Result<Value> {
@@ -1698,13 +1779,22 @@ pub fn eval_with_instances(
                 )));
             }
 
-            let mut local = env.clone();
-            for (param, arg_expr) in params.iter().zip(args) {
-                let arg_val = eval_with_instances(arg_expr, env, defs, instances)?;
-                local.insert(param.clone(), arg_val);
+            let mut arg_vals = Vec::with_capacity(args.len());
+            for arg_expr in args {
+                arg_vals.push(eval_with_instances(arg_expr, env, defs, instances)?);
             }
-
-            eval_with_instances(body, &local, defs, instances)
+            let mut prevs = Vec::with_capacity(params.len());
+            for (param, val) in params.iter().zip(arg_vals) {
+                prevs.push((param.clone(), env.insert(param.clone(), val)));
+            }
+            let result = eval_with_instances(body, env, defs, instances);
+            for (param, prev) in prevs {
+                match prev {
+                    Some(old) => { env.insert(param, old); }
+                    None => { env.remove(&param); }
+                }
+            }
+            result
         }
         _ => eval(expr, env, defs),
     }
@@ -1712,7 +1802,7 @@ pub fn eval_with_instances(
 
 pub fn eval_with_context(
     expr: &Expr,
-    env: &Env,
+    env: &mut Env,
     defs: &Definitions,
     ctx: &EvalContext,
 ) -> Result<Value> {
@@ -1772,12 +1862,22 @@ pub fn eval_with_context(
                         args.len()
                     )));
                 }
-                let mut local = env.clone();
-                for (param, arg_expr) in params.iter().zip(args) {
-                    let arg_val = eval_with_context(arg_expr, env, defs, ctx)?;
-                    local.insert(param.clone(), arg_val);
+                let mut arg_vals = Vec::with_capacity(args.len());
+                for arg_expr in args {
+                    arg_vals.push(eval_with_context(arg_expr, env, defs, ctx)?);
                 }
-                eval_with_context(body, &local, defs, ctx)
+                let mut prevs = Vec::with_capacity(params.len());
+                for (param, val) in params.iter().zip(arg_vals) {
+                    prevs.push((param.clone(), env.insert(param.clone(), val)));
+                }
+                let result = eval_with_context(body, env, defs, ctx);
+                for (param, prev) in prevs {
+                    match prev {
+                        Some(old) => { env.insert(param, old); }
+                        None => { env.remove(&param); }
+                    }
+                }
+                result
             } else {
                 Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
             }
@@ -1795,52 +1895,64 @@ pub fn eval_with_context(
         }
         Expr::Forall(var, domain, body) => {
             let dom = eval_set(domain, env, defs)?;
-            let mut scoped_env = env.clone();
+            let prev = env.remove(var);
+            let mut holds = true;
             for val in dom {
-                scoped_env.insert(var.clone(), val);
-                if !eval_bool_with_context(body, &scoped_env, defs, ctx)? {
-                    return Ok(Value::Bool(false));
+                env.insert(var.clone(), val);
+                if !eval_bool_with_context(body, env, defs, ctx)? {
+                    holds = false;
+                    break;
                 }
             }
-            Ok(Value::Bool(true))
+            match prev {
+                Some(old) => { env.insert(var.clone(), old); }
+                None => { env.remove(var); }
+            }
+            Ok(Value::Bool(holds))
         }
         Expr::Exists(var, domain, body) => {
             let dom = eval_set(domain, env, defs)?;
-            let mut scoped_env = env.clone();
+            let prev = env.remove(var);
+            let mut found = false;
             for val in dom {
-                scoped_env.insert(var.clone(), val);
-                if eval_bool_with_context(body, &scoped_env, defs, ctx)? {
-                    return Ok(Value::Bool(true));
+                env.insert(var.clone(), val);
+                if eval_bool_with_context(body, env, defs, ctx)? {
+                    found = true;
+                    break;
                 }
             }
-            Ok(Value::Bool(false))
+            match prev {
+                Some(old) => { env.insert(var.clone(), old); }
+                None => { env.remove(var); }
+            }
+            Ok(Value::Bool(found))
         }
         _ => eval(expr, env, defs),
     }
 }
 
-fn eval_bool_with_context(expr: &Expr, env: &Env, defs: &Definitions, ctx: &EvalContext) -> Result<bool> {
+fn eval_bool_with_context(expr: &Expr, env: &mut Env, defs: &Definitions, ctx: &EvalContext) -> Result<bool> {
     match eval_with_context(expr, env, defs, ctx)? {
         Value::Bool(b) => Ok(b),
         other => Err(EvalError::TypeMismatch { expected: "Bool", got: other, context: None,  span: None }),
     }
 }
 
-fn eval_bool(expr: &Expr, env: &Env, defs: &Definitions) -> Result<bool> {
+fn eval_bool(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<bool> {
     match eval(expr, env, defs)? {
         Value::Bool(b) => Ok(b),
         other => Err(EvalError::TypeMismatch { expected: "Bool", got: other, context: None,  span: None }),
     }
 }
 
-fn eval_int(expr: &Expr, env: &Env, defs: &Definitions) -> Result<i64> {
+fn eval_int(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<i64> {
     match eval(expr, env, defs)? {
         Value::Int(i) => Ok(i),
         other => Err(EvalError::TypeMismatch { expected: "Int", got: other, context: None,  span: None }),
     }
 }
 
-fn in_set_symbolic(val: &Value, set_expr: &Expr, env: &Env, defs: &Definitions) -> Result<bool> {
+fn in_set_symbolic(val: &Value, set_expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<bool> {
     match set_expr {
         Expr::Powerset(inner) => {
             if let Value::Set(s) = val {
@@ -1887,28 +1999,28 @@ fn in_set_symbolic(val: &Value, set_expr: &Expr, env: &Env, defs: &Definitions) 
     }
 }
 
-fn eval_set(expr: &Expr, env: &Env, defs: &Definitions) -> Result<BTreeSet<Value>> {
+fn eval_set(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<BTreeSet<Value>> {
     match eval(expr, env, defs)? {
         Value::Set(s) => Ok(s),
         other => Err(EvalError::TypeMismatch { expected: "Set", got: other, context: None,  span: None }),
     }
 }
 
-fn eval_fn(expr: &Expr, env: &Env, defs: &Definitions) -> Result<BTreeMap<Value, Value>> {
+fn eval_fn(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<BTreeMap<Value, Value>> {
     match eval(expr, env, defs)? {
         Value::Fn(f) => Ok(f),
         other => Err(EvalError::TypeMismatch { expected: "Fn", got: other, context: None,  span: None }),
     }
 }
 
-fn eval_record(expr: &Expr, env: &Env, defs: &Definitions) -> Result<BTreeMap<Arc<str>, Value>> {
+fn eval_record(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<BTreeMap<Arc<str>, Value>> {
     match eval(expr, env, defs)? {
         Value::Record(r) => Ok(r),
         other => Err(EvalError::TypeMismatch { expected: "Record", got: other, context: None,  span: None }),
     }
 }
 
-fn eval_tuple(expr: &Expr, env: &Env, defs: &Definitions) -> Result<Vec<Value>> {
+fn eval_tuple(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Vec<Value>> {
     match eval(expr, env, defs)? {
         Value::Tuple(t) => Ok(t),
         other => Err(EvalError::TypeMismatch { expected: "Tuple", got: other, context: None,  span: None }),
@@ -1993,14 +2105,16 @@ pub fn next_states(
     #[cfg(feature = "profiling")]
     let _start = Instant::now();
 
-    for (k, v) in &current.vars {
-        env.insert(k.clone(), v.clone());
+    for (i, var) in vars.iter().enumerate() {
+        if let Some(val) = current.values.get(i) {
+            env.insert(var.clone(), val.clone());
+        }
     }
 
     let result = next_states_impl(next, env, vars, primed_vars, defs);
 
-    for k in current.vars.keys() {
-        env.remove(k);
+    for var in vars {
+        env.remove(var);
     }
 
     #[cfg(feature = "profiling")]
@@ -2087,7 +2201,7 @@ pub fn is_action_enabled(
     constants: &Env,
     defs: &Definitions,
 ) -> Result<bool> {
-    let mut base_env = state_to_env(current);
+    let mut base_env = state_to_env(current, vars);
     for (k, v) in constants {
         base_env.insert(k.clone(), v.clone());
     }
@@ -2123,18 +2237,24 @@ fn check_enabled(
     Ok(false)
 }
 
-fn state_to_env(state: &State) -> Env {
-    state.vars.clone()
+pub fn state_to_env(state: &State, vars: &[Arc<str>]) -> Env {
+    let mut env = Env::new();
+    for (i, var) in vars.iter().enumerate() {
+        if let Some(val) = state.values.get(i) {
+            env.insert(var.clone(), val.clone());
+        }
+    }
+    env
 }
 
 fn env_to_next_state(env: &Env, vars: &[Arc<str>], primed_vars: &[Arc<str>]) -> State {
-    let mut state = State::new();
-    for (i, var) in vars.iter().enumerate() {
-        if let Some(val) = env.get(&primed_vars[i]) {
-            state.vars.insert(var.clone(), val.clone());
+    let mut values = Vec::with_capacity(vars.len());
+    for primed in primed_vars {
+        if let Some(val) = env.get(primed) {
+            values.push(val.clone());
         }
     }
-    state
+    State { values }
 }
 
 fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
@@ -2248,7 +2368,7 @@ fn collect_conjuncts(expr: &Expr) -> Vec<&Expr> {
     }
 }
 
-fn evaluate_guards(expr: &Expr, env: &Env, defs: &Definitions) -> Result<bool> {
+fn evaluate_guards(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<bool> {
     for conjunct in collect_conjuncts(expr) {
         if !contains_prime_ref(conjunct, defs) && !eval_bool(conjunct, env, defs)? {
             return Ok(false);
@@ -2487,13 +2607,10 @@ fn enumerate_init(
 ) -> Result<()> {
     if var_idx >= vars.len() {
         if eval_bool(init, env, defs)? {
-            let mut state = State::new();
-            for var in vars {
-                if let Some(val) = env.get(var) {
-                    state.vars.insert(var.clone(), val.clone());
-                }
-            }
-            results.push(state);
+            let values: Vec<Value> = vars.iter()
+                .filter_map(|var| env.get(var).cloned())
+                .collect();
+            results.push(State { values });
         }
         return Ok(());
     }
@@ -2515,12 +2632,12 @@ fn enumerate_init(
     Ok(())
 }
 
-fn infer_init_candidates(init: &Expr, env: &Env, var: &Arc<str>, defs: &Definitions) -> Result<Vec<Value>> {
+fn infer_init_candidates(init: &Expr, env: &mut Env, var: &Arc<str>, defs: &Definitions) -> Result<Vec<Value>> {
     let mut candidates = BTreeSet::new();
 
     fn collect(
         expr: &Expr,
-        env: &Env,
+        env: &mut Env,
         var: &Arc<str>,
         defs: &Definitions,
         candidates: &mut BTreeSet<Value>,
@@ -2608,14 +2725,14 @@ enum CardinalityConstraint {
 fn detect_cardinality_constraint(
     predicate: &Expr,
     var: &Arc<str>,
-    env: &Env,
+    env: &mut Env,
     defs: &Definitions,
 ) -> Option<CardinalityConstraint> {
     fn is_cardinality_of_var(expr: &Expr, var: &Arc<str>) -> bool {
         matches!(expr, Expr::Cardinality(inner) if matches!(inner.as_ref(), Expr::Var(v) if v == var))
     }
 
-    fn try_eval_int(expr: &Expr, env: &Env, defs: &Definitions) -> Option<i64> {
+    fn try_eval_int(expr: &Expr, env: &mut Env, defs: &Definitions) -> Option<i64> {
         match eval(expr, env, defs) {
             Ok(Value::Int(n)) => Some(n),
             _ => None,

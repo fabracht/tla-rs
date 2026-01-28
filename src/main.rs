@@ -402,7 +402,7 @@ fn main() -> ExitCode {
         match execute_scenario(&spec, &scenario, &domains) {
             Ok(result) => {
                 let vars_of_interest: Vec<&str> = spec.vars.iter().map(|s| s.as_ref()).collect();
-                println!("{}", format_scenario_result(&result, &vars_of_interest));
+                println!("{}", format_scenario_result(&result, &vars_of_interest, &spec.vars));
                 if result.failure.is_some() {
                     return ExitCode::FAILURE;
                 }

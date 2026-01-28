@@ -142,29 +142,7 @@ pub type Env = BTreeMap<Arc<str>, Value>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct State {
-    pub vars: BTreeMap<Arc<str>, Value>,
-}
-
-impl State {
-    pub fn new() -> Self {
-        Self {
-            vars: BTreeMap::new(),
-        }
-    }
-
-    pub fn get(&self, name: &str) -> Option<&Value> {
-        self.vars.get(name)
-    }
-
-    pub fn set(&mut self, name: Arc<str>, value: Value) {
-        self.vars.insert(name, value);
-    }
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub values: Vec<Value>,
 }
 
 #[derive(Debug, Clone)]
