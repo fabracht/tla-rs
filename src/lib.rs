@@ -4,6 +4,8 @@ pub mod diagnostic;
 pub mod eval;
 pub mod export;
 pub mod graph;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod interactive;
 pub mod lexer;
 pub mod liveness;
 pub mod modules;

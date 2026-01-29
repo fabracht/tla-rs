@@ -11,8 +11,10 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use tlc_executor::ast::{Env, Value};
-use tlc_executor::checker::{check, check_result_to_json, eval_error_to_diagnostic, format_eval_error, format_trace, format_trace_with_diffs, write_trace_json, CheckResult, CheckerConfig};
+use tlc_executor::checker::{check, check_result_to_json, eval_error_to_diagnostic, format_eval_error, format_trace, format_trace_with_actions, format_trace_with_diffs, write_trace_json, CheckResult, CheckerConfig};
 use tlc_executor::diagnostic::Diagnostic;
+#[cfg(not(target_arch = "wasm32"))]
+use tlc_executor::interactive::{run_interactive, run_interactive_replay};
 use tlc_executor::parser::parse;
 use tlc_executor::scenario::{execute_scenario, format_scenario_result, parse_scenario};
 use tlc_executor::Source;
@@ -103,6 +105,12 @@ fn main() -> ExitCode {
     let mut scenario_input: Option<String> = None;
     let mut validate_only = false;
     let mut list_invariants = false;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut interactive_mode = false;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut save_counterexample_path: Option<PathBuf> = None;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut replay_path: Option<PathBuf> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -223,6 +231,28 @@ fn main() -> ExitCode {
                     scenario_input = Some(arg.clone());
                 }
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            "--interactive" | "-i" => {
+                interactive_mode = true;
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            "--save-counterexample" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--save-counterexample requires a filename");
+                    return ExitCode::FAILURE;
+                }
+                save_counterexample_path = Some(PathBuf::from(&args[i]));
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            "--replay" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--replay requires a counterexample JSON file");
+                    return ExitCode::FAILURE;
+                }
+                replay_path = Some(PathBuf::from(&args[i]));
+            }
             "--help" | "-h" => {
                 println!("tlc-executor - TLA+ model checker");
                 println!();
@@ -237,6 +267,8 @@ fn main() -> ExitCode {
                 println!("  --max-depth N              Maximum trace depth (default: 100)");
                 println!("  --export-dot FILE          Export state graph to DOT format");
                 println!("  --trace-json FILE          Export counterexample trace to JSON format");
+                println!("  --save-counterexample FILE Export counterexample with metadata for replay");
+                println!("  --replay FILE              Replay a counterexample interactively");
                 println!("  --allow-deadlock           Allow states with no successors");
                 println!("  --check-liveness           Check liveness and fairness properties");
                 println!("  --quick, -q                Quick exploration (limit: 10,000 states)");
@@ -246,6 +278,7 @@ fn main() -> ExitCode {
                 println!("  --validate                 Parse and validate spec without model checking");
                 println!("  --list-invariants          Show detected invariants and exit");
                 println!("  --scenario TEXT            Explore a specific scenario (or @file)");
+                println!("  --interactive, -i          Interactive TUI exploration mode");
                 println!("  --help, -h                 Show this help");
                 println!();
                 println!("Scenario format:");
@@ -415,6 +448,28 @@ fn main() -> ExitCode {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(ref replay_file) = replay_path {
+        match run_interactive_replay(&spec, &domains, replay_file) {
+            Ok(()) => return ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("replay mode error: {}", e);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if interactive_mode {
+        match run_interactive(&spec, &domains) {
+            Ok(()) => return ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("interactive mode error: {}", e);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
     println!("Checking spec: {}", spec_path);
     if !spec.extends.is_empty() {
         println!("  Extends: {}", spec.extends.iter().map(|s| s.as_ref()).collect::<Vec<_>>().join(", "));
@@ -461,6 +516,28 @@ fn main() -> ExitCode {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(ref cex_path) = save_counterexample_path
+        && let CheckResult::InvariantViolation(ref cex, _) = result
+    {
+        let inv_name = spec
+            .invariant_names
+            .get(cex.violated_invariant)
+            .and_then(|n| n.as_ref())
+            .map(|n| n.as_ref());
+        if let Err(e) = tlc_executor::checker::write_counterexample_json(
+            cex_path,
+            cex,
+            Some(&spec_path),
+            &spec.vars,
+            inv_name,
+        ) {
+            eprintln!("failed to write counterexample JSON to {}: {}", cex_path.display(), e);
+        } else {
+            println!("Counterexample saved to {}", cex_path.display());
+        }
+    }
+
     match result {
         CheckResult::Ok(stats) => {
             println!("Model checking complete. No errors found.");
@@ -483,7 +560,7 @@ fn main() -> ExitCode {
             println!("Counterexample trace ({} states):", cex.trace.len());
             println!("  (* marks changed variables)");
             println!();
-            print!("{}", format_trace_with_diffs(&cex.trace, &spec.vars));
+            print!("{}", format_trace_with_actions(&cex.trace, &cex.actions, &spec.vars));
             println!();
             println!("  States explored: {}", stats.states_explored);
             println!("  Transitions: {}", stats.transitions);

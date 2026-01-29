@@ -2,10 +2,10 @@ use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use tlc_executor::ast::{Env, Expr, State, Value};
-use tlc_executor::checker::{check, CheckerConfig, CheckResult};
-use tlc_executor::eval::{eval, Definitions};
+use tlc_executor::checker::{CheckResult, CheckerConfig, check};
+use tlc_executor::eval::{Definitions, eval};
 use tlc_executor::parser::parse;
 use tlc_executor::symmetry::SymmetryConfig;
 
@@ -183,9 +183,7 @@ fn bench_eval_operations(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("powerset", size),
             &powerset_expr,
-            |b, expr| {
-                b.iter(|| eval(black_box(expr), &mut env.clone(), &defs))
-            },
+            |b, expr| b.iter(|| eval(black_box(expr), &mut env.clone(), &defs)),
         );
     }
 
@@ -196,26 +194,20 @@ fn bench_eval_operations(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("set_membership", set_size),
             &(set.clone(), elem.clone()),
-            |b, (s, e)| {
-                b.iter(|| black_box(s).contains(black_box(e)))
-            },
+            |b, (s, e)| b.iter(|| black_box(s).contains(black_box(e))),
         );
     }
 
     for var_count in [5, 10, 20] {
         let state = create_test_state(var_count, 10);
 
-        group.bench_with_input(
-            BenchmarkId::new("state_hash", var_count),
-            &state,
-            |b, s| {
-                b.iter(|| {
-                    let mut hasher = DefaultHasher::new();
-                    black_box(s).hash(&mut hasher);
-                    hasher.finish()
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("state_hash", var_count), &state, |b, s| {
+            b.iter(|| {
+                let mut hasher = DefaultHasher::new();
+                black_box(s).hash(&mut hasher);
+                hasher.finish()
+            })
+        });
     }
 
     for var_count in [5, 10, 20] {
@@ -228,9 +220,7 @@ fn bench_eval_operations(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("env_clone", var_count),
             &env_to_clone,
-            |b, e| {
-                b.iter(|| black_box(e).clone())
-            },
+            |b, e| b.iter(|| black_box(e).clone()),
         );
     }
 
@@ -260,9 +250,7 @@ fn bench_symmetry_canonicalize(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("canonicalize", var_count),
             &state,
-            |b, s| {
-                b.iter(|| sym_config.canonicalize(black_box(s)))
-            },
+            |b, s| b.iter(|| sym_config.canonicalize(black_box(s))),
         );
     }
 
@@ -275,25 +263,17 @@ fn bench_btreeset_operations(c: &mut Criterion) {
     for size in [100, 1000, 10000] {
         let set: BTreeSet<Value> = create_test_set(size);
 
-        group.bench_with_input(
-            BenchmarkId::new("clone", size),
-            &set,
-            |b, s| {
-                b.iter(|| black_box(s).clone())
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("clone", size), &set, |b, s| {
+            b.iter(|| black_box(s).clone())
+        });
 
-        group.bench_with_input(
-            BenchmarkId::new("insert_new", size),
-            &set,
-            |b, s| {
-                b.iter(|| {
-                    let mut cloned = s.clone();
-                    cloned.insert(Value::Int(size as i64 + 1));
-                    cloned
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("insert_new", size), &set, |b, s| {
+            b.iter(|| {
+                let mut cloned = s.clone();
+                cloned.insert(Value::Int(size as i64 + 1));
+                cloned
+            })
+        });
 
         let other: BTreeSet<Value> = (size / 2..size + size / 2)
             .map(|i| Value::Int(i as i64))
@@ -303,7 +283,12 @@ fn bench_btreeset_operations(c: &mut Criterion) {
             BenchmarkId::new("union", size),
             &(set.clone(), other),
             |b, (s, o)| {
-                b.iter(|| black_box(s).union(black_box(o)).cloned().collect::<BTreeSet<_>>())
+                b.iter(|| {
+                    black_box(s)
+                        .union(black_box(o))
+                        .cloned()
+                        .collect::<BTreeSet<_>>()
+                })
             },
         );
     }
@@ -318,8 +303,8 @@ fn bench_state_indexset(c: &mut Criterion) {
 
     for state_count in [100, 1000, 5000] {
         let states: Vec<State> = (0..state_count)
-            .map(|i| {
-                State { values: vec![Value::Int(i as i64), Value::Int((i * 2) as i64)] }
+            .map(|i| State {
+                values: vec![Value::Int(i as i64), Value::Int((i * 2) as i64)],
             })
             .collect();
 
@@ -346,9 +331,7 @@ fn bench_state_indexset(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("lookup", state_count),
             &(existing_set, lookup_state),
-            |b, (set, state)| {
-                b.iter(|| black_box(set).contains(black_box(state)))
-            },
+            |b, (set, state)| b.iter(|| black_box(set).contains(black_box(state))),
         );
     }
 

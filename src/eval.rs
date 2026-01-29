@@ -4,7 +4,7 @@ use std::sync::Arc;
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
-use crate::ast::{Env, Expr, State, Value};
+use crate::ast::{Env, Expr, State, Transition, Value};
 use crate::checker::format_value;
 use crate::diagnostic::find_similar;
 use crate::span::Span;
@@ -380,6 +380,52 @@ fn eval_with_memo(
 }
 
 pub fn eval(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || eval_inner(expr, env, defs))
+}
+
+fn flatten_fnapp_chain(expr: &Expr) -> (&Expr, Vec<&Expr>) {
+    let mut keys = Vec::new();
+    let mut current = expr;
+    while let Expr::FnApp(f, arg) = current {
+        if matches!(f.as_ref(), Expr::Lambda(..)) {
+            break;
+        }
+        keys.push(arg.as_ref());
+        current = f.as_ref();
+    }
+    keys.reverse();
+    (current, keys)
+}
+
+fn apply_fn_value(fval: Value, key: Value) -> Result<Value> {
+    match fval {
+        Value::Fn(fv) => fv
+            .get(&key)
+            .cloned()
+            .ok_or_else(|| EvalError::domain_error(format!(
+                "key {} not in function domain",
+                format_value(&key)
+            ))),
+        Value::Tuple(tv) => {
+            if let Value::Int(idx) = key {
+                let i = idx as usize;
+                if i >= 1 && i <= tv.len() {
+                    Ok(tv[i - 1].clone())
+                } else {
+                    Err(EvalError::domain_error(format!(
+                        "sequence index {} out of bounds (sequence has {} elements)",
+                        idx, tv.len()
+                    )))
+                }
+            } else {
+                Err(EvalError::TypeMismatch { expected: "Int", got: key, context: Some("sequence index"), span: None })
+            }
+        }
+        other => Err(EvalError::TypeMismatch { expected: "Fn or Tuple", got: other, context: Some("function application"), span: None }),
+    }
+}
+
+fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
     #[cfg(feature = "profiling")]
     PROFILING_STATS.with(|s| s.borrow_mut().eval_calls += 1);
 
@@ -918,32 +964,18 @@ pub fn eval(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 }
                 return result;
             }
-            let fval = eval(f, env, defs)?;
-            let av = eval(arg, env, defs)?;
-            match fval {
-                Value::Fn(fv) => fv
-                    .get(&av)
-                    .cloned()
-                    .ok_or_else(|| EvalError::domain_error(format!(
-                        "key {} not in function domain",
-                        format_value(&av)
-                    ))),
-                Value::Tuple(tv) => {
-                    if let Value::Int(idx) = av {
-                        let i = idx as usize;
-                        if i >= 1 && i <= tv.len() {
-                            Ok(tv[i - 1].clone())
-                        } else {
-                            Err(EvalError::domain_error(format!(
-                                "sequence index {} out of bounds (sequence has {} elements)",
-                                idx, tv.len()
-                            )))
-                        }
-                    } else {
-                        Err(EvalError::TypeMismatch { expected: "Int", got: av, context: Some("sequence index"),  span: None })
-                    }
+            let (base, keys) = flatten_fnapp_chain(expr);
+            if keys.is_empty() {
+                let fval = eval(f, env, defs)?;
+                let av = eval(arg, env, defs)?;
+                apply_fn_value(fval, av)
+            } else {
+                let mut current = eval(base, env, defs)?;
+                for key_expr in keys {
+                    let key = eval(key_expr, env, defs)?;
+                    current = apply_fn_value(current, key)?;
                 }
-                other => Err(EvalError::TypeMismatch { expected: "Fn or Tuple", got: other, context: Some("function application"),  span: None }),
+                Ok(current)
             }
         }
 
@@ -1927,6 +1959,139 @@ pub fn eval_with_context(
             }
             Ok(Value::Bool(found))
         }
+        Expr::In(elem, set) => {
+            if matches!(set.as_ref(), Expr::Any) {
+                return Ok(Value::Bool(true));
+            }
+            if let Expr::FunctionSet(domain_expr, codomain_expr) = set.as_ref() {
+                let ev = eval_with_context(elem, env, defs, ctx)?;
+                if let Value::Fn(f) = ev {
+                    let domain = eval_set(domain_expr, env, defs)?;
+                    let fn_domain: BTreeSet<Value> = f.keys().cloned().collect();
+                    if fn_domain != domain {
+                        return Ok(Value::Bool(false));
+                    }
+                    for val in f.values() {
+                        if !in_set_symbolic(val, codomain_expr, env, defs)? {
+                            return Ok(Value::Bool(false));
+                        }
+                    }
+                    return Ok(Value::Bool(true));
+                }
+                return Ok(Value::Bool(false));
+            }
+            if let Expr::Powerset(inner) = set.as_ref() {
+                let ev = eval_with_context(elem, env, defs, ctx)?;
+                if let Value::Set(s) = ev {
+                    let base = eval_set(inner, env, defs)?;
+                    return Ok(Value::Bool(s.is_subset(&base)));
+                }
+                return Ok(Value::Bool(false));
+            }
+            if let Expr::SeqSet(domain_expr) = set.as_ref() {
+                let ev = eval_with_context(elem, env, defs, ctx)?;
+                if let Value::Tuple(seq) = ev {
+                    let domain = eval_set(domain_expr, env, defs)?;
+                    for e in &seq {
+                        if !domain.contains(e) {
+                            return Ok(Value::Bool(false));
+                        }
+                    }
+                    return Ok(Value::Bool(true));
+                }
+                return Ok(Value::Bool(false));
+            }
+            let ev = eval_with_context(elem, env, defs, ctx)?;
+            let sv = eval_set(set, env, defs)?;
+            Ok(Value::Bool(sv.contains(&ev)))
+        }
+        Expr::NotIn(elem, set) => {
+            if matches!(set.as_ref(), Expr::Any) {
+                return Ok(Value::Bool(false));
+            }
+            if let Expr::FunctionSet(domain_expr, codomain_expr) = set.as_ref() {
+                let ev = eval_with_context(elem, env, defs, ctx)?;
+                if let Value::Fn(f) = ev {
+                    let domain = eval_set(domain_expr, env, defs)?;
+                    let fn_domain: BTreeSet<Value> = f.keys().cloned().collect();
+                    if fn_domain != domain {
+                        return Ok(Value::Bool(true));
+                    }
+                    for val in f.values() {
+                        if !in_set_symbolic(val, codomain_expr, env, defs)? {
+                            return Ok(Value::Bool(true));
+                        }
+                    }
+                    return Ok(Value::Bool(false));
+                }
+                return Ok(Value::Bool(true));
+            }
+            if let Expr::Powerset(inner) = set.as_ref() {
+                let ev = eval_with_context(elem, env, defs, ctx)?;
+                if let Value::Set(s) = ev {
+                    let base = eval_set(inner, env, defs)?;
+                    return Ok(Value::Bool(!s.is_subset(&base)));
+                }
+                return Ok(Value::Bool(true));
+            }
+            if let Expr::SeqSet(domain_expr) = set.as_ref() {
+                let ev = eval_with_context(elem, env, defs, ctx)?;
+                if let Value::Tuple(seq) = ev {
+                    let domain = eval_set(domain_expr, env, defs)?;
+                    for e in &seq {
+                        if !domain.contains(e) {
+                            return Ok(Value::Bool(true));
+                        }
+                    }
+                    return Ok(Value::Bool(false));
+                }
+                return Ok(Value::Bool(true));
+            }
+            let ev = eval_with_context(elem, env, defs, ctx)?;
+            let sv = eval_set(set, env, defs)?;
+            Ok(Value::Bool(!sv.contains(&ev)))
+        }
+        Expr::FnApp(f, arg) => {
+            if let Expr::Lambda(params, body) = f.as_ref() {
+                if params.len() != 1 {
+                    return Err(EvalError::domain_error(format!(
+                        "lambda expects {} args for [], got 1",
+                        params.len()
+                    )));
+                }
+                let av = eval_with_context(arg, env, defs, ctx)?;
+                let prev = env.insert(params[0].clone(), av);
+                let result = eval_with_context(body, env, defs, ctx);
+                match prev {
+                    Some(old) => { env.insert(params[0].clone(), old); }
+                    None => { env.remove(&params[0]); }
+                }
+                return result;
+            }
+            let (base, keys) = flatten_fnapp_chain(expr);
+            if keys.is_empty() {
+                let fval = eval_with_context(f, env, defs, ctx)?;
+                let av = eval_with_context(arg, env, defs, ctx)?;
+                apply_fn_value(fval, av)
+            } else {
+                let mut current = eval_with_context(base, env, defs, ctx)?;
+                for key_expr in keys {
+                    let key = eval_with_context(key_expr, env, defs, ctx)?;
+                    current = apply_fn_value(current, key)?;
+                }
+                Ok(current)
+            }
+        }
+        Expr::Eq(l, r) => {
+            let lv = eval_with_context(l, env, defs, ctx)?;
+            let rv = eval_with_context(r, env, defs, ctx)?;
+            Ok(Value::Bool(lv == rv))
+        }
+        Expr::Neq(l, r) => {
+            let lv = eval_with_context(l, env, defs, ctx)?;
+            let rv = eval_with_context(r, env, defs, ctx)?;
+            Ok(Value::Bool(lv != rv))
+        }
         _ => eval(expr, env, defs),
     }
 }
@@ -2101,7 +2266,7 @@ pub fn next_states(
     primed_vars: &[Arc<str>],
     env: &mut Env,
     defs: &Definitions,
-) -> Result<Vec<State>> {
+) -> Result<Vec<Transition>> {
     #[cfg(feature = "profiling")]
     let _start = Instant::now();
 
@@ -2127,47 +2292,332 @@ pub fn next_states(
     result
 }
 
+use crate::ast::{TransitionWithGuards, GuardEval, InvariantViolationInfo, SubExprEval};
+
+pub fn next_states_with_guards(
+    next: &Expr,
+    current: &State,
+    vars: &[Arc<str>],
+    primed_vars: &[Arc<str>],
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<Vec<TransitionWithGuards>> {
+    for (i, var) in vars.iter().enumerate() {
+        if let Some(val) = current.values.get(i) {
+            env.insert(var.clone(), val.clone());
+        }
+    }
+
+    let result = next_states_with_guards_impl(next, env, vars, primed_vars, defs);
+
+    for var in vars {
+        env.remove(var);
+    }
+
+    result
+}
+
+fn next_states_with_guards_impl(
+    next: &Expr,
+    base_env: &mut Env,
+    vars: &[Arc<str>],
+    primed_vars: &[Arc<str>],
+    defs: &Definitions,
+) -> Result<Vec<TransitionWithGuards>> {
+    let transitions = next_states_impl(next, base_env, vars, primed_vars, defs)?;
+
+    let mut results = Vec::new();
+    for transition in transitions {
+        for (i, _var) in vars.iter().enumerate() {
+            if let Some(val) = transition.state.values.get(i) {
+                base_env.insert(primed_vars[i].clone(), val.clone());
+            }
+        }
+
+        let guards = extract_guards_for_action(next, base_env, defs, transition.action.as_ref())?;
+
+        for primed in primed_vars {
+            base_env.remove(primed);
+        }
+
+        results.push(TransitionWithGuards {
+            transition,
+            guards,
+            parameter_bindings: Vec::new(),
+        });
+    }
+
+    Ok(results)
+}
+
+fn extract_guards_for_action(
+    next: &Expr,
+    env: &mut Env,
+    defs: &Definitions,
+    action: Option<&Arc<str>>,
+) -> Result<Vec<GuardEval>> {
+    let disjuncts = collect_disjuncts_with_labels(next, defs);
+
+    for (disjunct, label) in &disjuncts {
+        let matches = match (action, label) {
+            (Some(a), Some(l)) => a == l,
+            (None, None) => true,
+            _ => false,
+        };
+
+        if matches {
+            return extract_guards_from_expr(disjunct, env, defs);
+        }
+    }
+
+    extract_guards_from_expr(next, env, defs)
+}
+
+fn extract_guards_from_expr(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Vec<GuardEval>> {
+    let mut guards = Vec::new();
+    let conjuncts = collect_conjuncts(expr);
+
+    for conjunct in conjuncts {
+        if !contains_prime_ref(conjunct, defs) {
+            let expr_str = format_expr_brief(conjunct);
+            let result = eval_bool(conjunct, env, defs).unwrap_or(false);
+
+            guards.push(GuardEval {
+                expression: expr_str,
+                result,
+                bindings: Vec::new(),
+            });
+        }
+    }
+
+    Ok(guards)
+}
+
+fn format_expr_brief(expr: &Expr) -> String {
+    match expr {
+        Expr::Lit(Value::Bool(true)) => "TRUE".to_string(),
+        Expr::Lit(Value::Bool(false)) => "FALSE".to_string(),
+        Expr::Lit(Value::Int(n)) => n.to_string(),
+        Expr::Lit(Value::Str(s)) => format!("\"{}\"", s),
+        Expr::Lit(v) => format_value(v),
+        Expr::Var(name) => name.to_string(),
+        Expr::Prime(name) => format!("{}'", name),
+        Expr::Eq(l, r) => format!("{} = {}", format_expr_brief(l), format_expr_brief(r)),
+        Expr::Neq(l, r) => format!("{} # {}", format_expr_brief(l), format_expr_brief(r)),
+        Expr::Lt(l, r) => format!("{} < {}", format_expr_brief(l), format_expr_brief(r)),
+        Expr::Le(l, r) => format!("{} <= {}", format_expr_brief(l), format_expr_brief(r)),
+        Expr::Gt(l, r) => format!("{} > {}", format_expr_brief(l), format_expr_brief(r)),
+        Expr::Ge(l, r) => format!("{} >= {}", format_expr_brief(l), format_expr_brief(r)),
+        Expr::In(l, r) => format!("{} \\in {}", format_expr_brief(l), format_expr_brief(r)),
+        Expr::NotIn(l, r) => format!("{} \\notin {}", format_expr_brief(l), format_expr_brief(r)),
+        Expr::And(l, r) => format!("{} /\\ {}", format_expr_brief(l), format_expr_brief(r)),
+        Expr::Or(l, r) => format!("{} \\/ {}", format_expr_brief(l), format_expr_brief(r)),
+        Expr::Not(e) => format!("~{}", format_expr_brief(e)),
+        Expr::FnCall(name, args) => {
+            let args_str: Vec<_> = args.iter().map(format_expr_brief).collect();
+            if args_str.is_empty() {
+                name.to_string()
+            } else {
+                format!("{}({})", name, args_str.join(", "))
+            }
+        }
+        Expr::FnApp(f, arg) => format!("{}[{}]", format_expr_brief(f), format_expr_brief(arg)),
+        Expr::Forall(v, d, b) => format!("\\A {} \\in {}: {}", v, format_expr_brief(d), format_expr_brief(b)),
+        Expr::Exists(v, d, b) => format!("\\E {} \\in {}: {}", v, format_expr_brief(d), format_expr_brief(b)),
+        _ => "(complex)".to_string(),
+    }
+}
+
+pub fn explain_invariant_failure(
+    invariant: &Expr,
+    state: &State,
+    spec: &crate::ast::Spec,
+    env: &Env,
+    defs: &Definitions,
+    inv_name: &str,
+) -> Option<InvariantViolationInfo> {
+    let mut eval_env = env.clone();
+    for (i, var) in spec.vars.iter().enumerate() {
+        if let Some(val) = state.values.get(i) {
+            eval_env.insert(var.clone(), val.clone());
+        }
+    }
+
+    match eval(invariant, &mut eval_env, defs) {
+        Ok(Value::Bool(true)) => return None,
+        Ok(Value::Bool(false)) => {}
+        _ => return None,
+    }
+
+    let mut info = InvariantViolationInfo {
+        name: inv_name.to_string(),
+        failing_bindings: Vec::new(),
+        subexpression_evals: Vec::new(),
+    };
+
+    explain_invariant_impl(invariant, &mut eval_env, defs, &mut info);
+
+    Some(info)
+}
+
+fn explain_invariant_impl(
+    expr: &Expr,
+    env: &mut Env,
+    defs: &Definitions,
+    info: &mut InvariantViolationInfo,
+) {
+    match expr {
+        Expr::Forall(var, domain, body) => {
+            if let Ok(Value::Set(elements)) = eval(domain, env, defs) {
+                for elem in elements {
+                    env.insert(var.clone(), elem.clone());
+                    if let Ok(Value::Bool(false)) = eval(body, env, defs) {
+                        info.failing_bindings.push((var.to_string(), elem.clone()));
+                        explain_invariant_impl(body, env, defs, info);
+                        env.remove(var);
+                        return;
+                    }
+                    env.remove(var);
+                }
+            }
+        }
+        Expr::And(l, r) => {
+            if let Ok(Value::Bool(false)) = eval(l, env, defs) {
+                let expr_str = format_expr_brief(l);
+                if let Ok(val) = eval(l, env, defs) {
+                    info.subexpression_evals.push(SubExprEval {
+                        expression: expr_str,
+                        value: val,
+                        passed: false,
+                    });
+                }
+                explain_invariant_impl(l, env, defs, info);
+            } else {
+                let expr_str = format_expr_brief(l);
+                if let Ok(val) = eval(l, env, defs) {
+                    info.subexpression_evals.push(SubExprEval {
+                        expression: expr_str,
+                        value: val,
+                        passed: true,
+                    });
+                }
+                explain_invariant_impl(r, env, defs, info);
+            }
+        }
+        Expr::Implies(l, r) => {
+            if let Ok(Value::Bool(true)) = eval(l, env, defs) {
+                let left_str = format_expr_brief(l);
+                info.subexpression_evals.push(SubExprEval {
+                    expression: format!("{} (antecedent)", left_str),
+                    value: Value::Bool(true),
+                    passed: true,
+                });
+                if let Ok(Value::Bool(false)) = eval(r, env, defs) {
+                    let right_str = format_expr_brief(r);
+                    if let Ok(val) = eval(r, env, defs) {
+                        info.subexpression_evals.push(SubExprEval {
+                            expression: format!("{} (consequent)", right_str),
+                            value: val,
+                            passed: false,
+                        });
+                    }
+                    explain_invariant_impl(r, env, defs, info);
+                }
+            }
+        }
+        Expr::Eq(l, r) => {
+            if let (Ok(lval), Ok(rval)) = (eval(l, env, defs), eval(r, env, defs))
+                && lval != rval
+            {
+                info.subexpression_evals.push(SubExprEval {
+                    expression: format!("{} = {}", format_value(&lval), format_value(&rval)),
+                    value: Value::Bool(false),
+                    passed: false,
+                });
+            }
+        }
+        _ => {
+            let expr_str = format_expr_brief(expr);
+            if let Ok(val) = eval(expr, env, defs) {
+                let passed = val == Value::Bool(true);
+                info.subexpression_evals.push(SubExprEval {
+                    expression: expr_str,
+                    value: val,
+                    passed,
+                });
+            }
+        }
+    }
+}
+
 fn next_states_impl(
     next: &Expr,
     base_env: &mut Env,
     vars: &[Arc<str>],
     primed_vars: &[Arc<str>],
     defs: &Definitions,
-) -> Result<Vec<State>> {
+) -> Result<Vec<Transition>> {
     if let Expr::Or(_, _) = next {
-        let disjuncts = collect_disjuncts(next);
+        let disjuncts = collect_disjuncts_with_labels(next, defs);
         let mut all_results = indexmap::IndexSet::new();
-        for disjunct in &disjuncts {
+        for (disjunct, action) in &disjuncts {
             if let Expr::Exists(_, _, _) = disjunct {
                 let mut results = Vec::new();
-                expand_and_enumerate(disjunct, base_env, vars, primed_vars, defs, &mut results)?;
-                for state in results {
-                    all_results.insert(state);
+                expand_and_enumerate(disjunct, base_env, vars, primed_vars, defs, action.clone(), &mut results)?;
+                for transition in results {
+                    all_results.insert(transition);
                 }
             } else {
                 let mut results = Vec::new();
-                enumerate_next(disjunct, base_env, vars, primed_vars, 0, defs, &mut results)?;
-                for state in results {
-                    all_results.insert(state);
+                enumerate_next(disjunct, base_env, vars, primed_vars, 0, defs, action.clone(), &mut results)?;
+                for transition in results {
+                    all_results.insert(transition);
                 }
             }
         }
         return Ok(all_results.into_iter().collect());
     }
 
+    let action = infer_action_name(next, defs);
     let mut results = Vec::new();
-    enumerate_next(next, base_env, vars, primed_vars, 0, defs, &mut results)?;
+    enumerate_next(next, base_env, vars, primed_vars, 0, defs, action, &mut results)?;
     Ok(results)
 }
 
-fn collect_disjuncts(expr: &Expr) -> Vec<&Expr> {
+fn infer_action_name(expr: &Expr, defs: &Definitions) -> Option<Arc<str>> {
+    match expr {
+        Expr::LabeledAction(label, _) => Some(label.clone()),
+        Expr::Var(name) => Some(name.clone()),
+        Expr::FnCall(name, _) => Some(name.clone()),
+        _ => {
+            for (name, (params, body)) in defs {
+                if params.is_empty() && body == expr {
+                    return Some(name.clone());
+                }
+            }
+            None
+        }
+    }
+}
+
+fn collect_disjuncts_with_labels<'a>(expr: &'a Expr, defs: &Definitions) -> Vec<(&'a Expr, Option<Arc<str>>)> {
     match expr {
         Expr::Or(l, r) => {
-            let mut result = collect_disjuncts(l);
-            result.extend(collect_disjuncts(r));
+            let mut result = collect_disjuncts_with_labels(l, defs);
+            result.extend(collect_disjuncts_with_labels(r, defs));
             result
         }
-        _ => vec![expr],
+        Expr::LabeledAction(label, action) => vec![(action.as_ref(), Some(label.clone()))],
+        Expr::Var(name) => vec![(expr, Some(name.clone()))],
+        Expr::FnCall(name, _) => vec![(expr, Some(name.clone()))],
+        _ => {
+            for (name, (params, body)) in defs {
+                if params.is_empty() && body == expr {
+                    return vec![(expr, Some(name.clone()))];
+                }
+            }
+            vec![(expr, None)]
+        }
     }
 }
 
@@ -2177,7 +2627,8 @@ fn expand_and_enumerate(
     vars: &[Arc<str>],
     primed_vars: &[Arc<str>],
     defs: &Definitions,
-    results: &mut Vec<State>,
+    action: Option<Arc<str>>,
+    results: &mut Vec<Transition>,
 ) -> Result<()> {
     match expr {
         Expr::Exists(var, domain, body) => {
@@ -2185,12 +2636,12 @@ fn expand_and_enumerate(
             let var = var.clone();
             for val in dom {
                 env.insert(var.clone(), val);
-                expand_and_enumerate(body, env, vars, primed_vars, defs, results)?;
+                expand_and_enumerate(body, env, vars, primed_vars, defs, action.clone(), results)?;
             }
             env.remove(&var);
             Ok(())
         }
-        _ => enumerate_next(expr, env, vars, primed_vars, 0, defs, results),
+        _ => enumerate_next(expr, env, vars, primed_vars, 0, defs, action, results),
     }
 }
 
@@ -2377,6 +2828,7 @@ fn evaluate_guards(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<boo
     Ok(true)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn enumerate_next(
     next: &Expr,
     env: &mut Env,
@@ -2384,12 +2836,17 @@ fn enumerate_next(
     primed_vars: &[Arc<str>],
     var_idx: usize,
     defs: &Definitions,
-    results: &mut Vec<State>,
+    action: Option<Arc<str>>,
+    results: &mut Vec<Transition>,
 ) -> Result<()> {
     #[cfg(feature = "profiling")]
     let _start = Instant::now();
 
-    let result = enumerate_next_impl(next, env, vars, primed_vars, var_idx, defs, results);
+    let result = if var_idx == 0 {
+        enumerate_next_with_refinement(next, env, vars, primed_vars, defs, action, results)
+    } else {
+        enumerate_next_impl(next, env, vars, primed_vars, var_idx, defs, action, results)
+    };
 
     #[cfg(feature = "profiling")]
     PROFILING_STATS.with(|s| {
@@ -2401,6 +2858,7 @@ fn enumerate_next(
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 fn enumerate_next_impl(
     next: &Expr,
     env: &mut Env,
@@ -2408,7 +2866,8 @@ fn enumerate_next_impl(
     primed_vars: &[Arc<str>],
     var_idx: usize,
     defs: &Definitions,
-    results: &mut Vec<State>,
+    action: Option<Arc<str>>,
+    results: &mut Vec<Transition>,
 ) -> Result<()> {
     if var_idx == 0 && !evaluate_guards(next, env, defs)? {
         return Ok(());
@@ -2416,7 +2875,10 @@ fn enumerate_next_impl(
 
     if var_idx >= vars.len() {
         if eval_bool(next, env, defs)? {
-            results.push(env_to_next_state(env, vars, primed_vars));
+            results.push(Transition {
+                state: env_to_next_state(env, vars, primed_vars),
+                action: action.clone(),
+            });
         }
         return Ok(());
     }
@@ -2428,7 +2890,88 @@ fn enumerate_next_impl(
 
     for candidate in candidates {
         env.insert(primed.clone(), candidate);
-        enumerate_next_impl(next, env, vars, primed_vars, var_idx + 1, defs, results)?;
+        enumerate_next_impl(next, env, vars, primed_vars, var_idx + 1, defs, action.clone(), results)?;
+    }
+    env.remove(primed);
+
+    Ok(())
+}
+
+fn enumerate_next_with_refinement(
+    next: &Expr,
+    env: &mut Env,
+    vars: &[Arc<str>],
+    primed_vars: &[Arc<str>],
+    defs: &Definitions,
+    action: Option<Arc<str>>,
+    results: &mut Vec<Transition>,
+) -> Result<()> {
+    if !evaluate_guards(next, env, defs)? {
+        return Ok(());
+    }
+
+    let mut all_candidates: Vec<Vec<Value>> = Vec::with_capacity(vars.len());
+    for var in vars {
+        all_candidates.push(infer_candidates(next, env, var, defs)?);
+    }
+
+    for (i, primed) in primed_vars.iter().enumerate() {
+        if let Some(first) = all_candidates[i].first() {
+            env.insert(primed.clone(), first.clone());
+        }
+    }
+
+    let mut changed = true;
+    let mut iterations = 0;
+    while changed && iterations < 3 {
+        changed = false;
+        iterations += 1;
+
+        for (i, var) in vars.iter().enumerate() {
+            let new_candidates = infer_candidates(next, env, var, defs)?;
+            if new_candidates != all_candidates[i] {
+                all_candidates[i] = new_candidates;
+                changed = true;
+                if let Some(first) = all_candidates[i].first() {
+                    env.insert(primed_vars[i].clone(), first.clone());
+                }
+            }
+        }
+    }
+
+    for primed in primed_vars {
+        env.remove(primed);
+    }
+
+    enumerate_combinations(next, env, vars, primed_vars, 0, &all_candidates, defs, &action, results)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn enumerate_combinations(
+    next: &Expr,
+    env: &mut Env,
+    vars: &[Arc<str>],
+    primed_vars: &[Arc<str>],
+    idx: usize,
+    all_candidates: &[Vec<Value>],
+    defs: &Definitions,
+    action: &Option<Arc<str>>,
+    results: &mut Vec<Transition>,
+) -> Result<()> {
+    if idx >= vars.len() {
+        if eval_bool(next, env, defs)? {
+            results.push(Transition {
+                state: env_to_next_state(env, vars, primed_vars),
+                action: action.clone(),
+            });
+        }
+        return Ok(());
+    }
+
+    let primed = &primed_vars[idx];
+    for candidate in &all_candidates[idx] {
+        env.insert(primed.clone(), candidate.clone());
+        enumerate_combinations(next, env, vars, primed_vars, idx + 1, all_candidates, defs, action, results)?;
     }
     env.remove(primed);
 

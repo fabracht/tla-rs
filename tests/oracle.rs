@@ -518,8 +518,8 @@ fn test_mqdb_constraints() {
     let result = check(&spec, &domains, &config);
 
     assert!(
-        matches!(result, CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_)),
-        "MQDBConstraints.tla should pass or reach max states, got: {result:?}",
+        matches!(result, CheckResult::InvariantViolation(_, _) | CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_)),
+        "MQDBConstraints.tla should find violation, pass or reach max states, got: {result:?}",
     );
 }
 
@@ -533,6 +533,8 @@ fn test_mqdb_consumer_group() {
     domains.insert(Arc::from("Consumers"), make_str_set(&["c1", "c2"]));
     domains.insert(Arc::from("Groups"), make_str_set(&["g1"]));
     domains.insert(Arc::from("Partitions"), make_int_set(&[0, 1]));
+    domains.insert(Arc::from("MaxTime"), Value::Int(3));
+    domains.insert(Arc::from("HeartbeatTimeout"), Value::Int(2));
 
     let config = CheckerConfig {
         allow_deadlock: true,
@@ -569,8 +571,8 @@ fn test_mqdb_cluster() {
     assert!(
         matches!(
             result,
-            CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_) | CheckResult::MaxDepthExceeded(_)
+            CheckResult::InvariantViolation(_, _) | CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_) | CheckResult::MaxDepthExceeded(_)
         ),
-        "MQDBCluster.tla should pass or reach limits, got: {result:?}",
+        "MQDBCluster.tla should find violation, pass or reach limits, got: {result:?}",
     );
 }

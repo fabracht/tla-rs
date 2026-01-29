@@ -158,6 +158,12 @@ pub enum FairnessConstraint {
     Strong(Expr, Expr),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Transition {
+    pub state: State,
+    pub action: Option<Arc<str>>,
+}
+
 pub struct Spec {
     pub vars: Vec<Arc<str>>,
     pub constants: Vec<Arc<str>>,
@@ -171,4 +177,41 @@ pub struct Spec {
     pub invariant_names: Vec<Option<Arc<str>>>,
     pub fairness: Vec<FairnessConstraint>,
     pub liveness_properties: Vec<Expr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GuardEval {
+    pub expression: String,
+    pub result: bool,
+    pub bindings: Vec<(String, Value)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TransitionWithGuards {
+    pub transition: Transition,
+    pub guards: Vec<GuardEval>,
+    pub parameter_bindings: Vec<(String, Value)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct VarChange {
+    pub state_idx: usize,
+    pub path: String,
+    pub old_value: Value,
+    pub new_value: Value,
+    pub action: Option<Arc<str>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SubExprEval {
+    pub expression: String,
+    pub value: Value,
+    pub passed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct InvariantViolationInfo {
+    pub name: String,
+    pub failing_bindings: Vec<(String, Value)>,
+    pub subexpression_evals: Vec<SubExprEval>,
 }

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::ast::{Env, Expr, Spec, State, Value};
+use crate::ast::{Env, Expr, Spec, State, Transition, Value};
 use crate::checker::format_value;
 use crate::eval::{make_primed_names, next_states, Definitions, EvalError};
 use crate::parser::parse_expr;
@@ -98,9 +98,9 @@ pub fn execute_scenario(
         let matching = find_matching_transition(&successors, step, &current_state, &defs, &spec.vars)?;
 
         match matching {
-            Some((next_state, changes)) => {
-                current_state = next_state.clone();
-                results.push((step.clone(), next_state, changes));
+            Some((transition, changes)) => {
+                current_state = transition.state.clone();
+                results.push((step.clone(), transition.state, changes));
             }
             None => {
                 let available = describe_available_actions(&successors, &current_state, &spec.vars);
@@ -146,16 +146,16 @@ fn build_scenario_env(current: &State, next: &State, constants: &Env, vars: &[Ar
 }
 
 fn find_matching_transition(
-    successors: &[State],
+    successors: &[Transition],
     step: &ScenarioStep,
     current: &State,
     defs: &Definitions,
     vars: &[Arc<str>],
-) -> Result<Option<(State, Vec<String>)>, EvalError> {
-    for succ in successors {
-        if matches_step(current, succ, step, defs, vars)? {
-            let changes = compute_changes(current, succ, vars);
-            return Ok(Some((succ.clone(), changes)));
+) -> Result<Option<(Transition, Vec<String>)>, EvalError> {
+    for transition in successors {
+        if matches_step(current, &transition.state, step, defs, vars)? {
+            let changes = compute_changes(current, &transition.state, vars);
+            return Ok(Some((transition.clone(), changes)));
         }
     }
     Ok(None)
@@ -255,22 +255,30 @@ fn format_value_compact(v: &Value) -> String {
     }
 }
 
-fn describe_available_actions(successors: &[State], current: &State, vars: &[Arc<str>]) -> Vec<String> {
+fn describe_available_actions(successors: &[Transition], current: &State, vars: &[Arc<str>]) -> Vec<String> {
     let mut actions = Vec::new();
 
-    for succ in successors {
-        let changes = compute_changes(current, succ, vars);
+    for transition in successors {
+        let changes = compute_changes(current, &transition.state, vars);
+        let action_name = transition
+            .action
+            .as_ref()
+            .map(|s| s.as_ref())
+            .unwrap_or("(unnamed)");
         if !changes.is_empty() {
             let summary = if changes.len() > 2 {
                 format!(
-                    "{}, ... ({} changes)",
+                    "{}: {}, ... ({} changes)",
+                    action_name,
                     changes[..2].join("; "),
                     changes.len()
                 )
             } else {
-                changes.join("; ")
+                format!("{}: {}", action_name, changes.join("; "))
             };
             actions.push(summary);
+        } else {
+            actions.push(format!("{}: (no changes)", action_name));
         }
     }
 

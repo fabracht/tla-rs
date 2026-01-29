@@ -8,6 +8,8 @@ use crate::span::{Span, Spanned};
 pub struct Parser {
     tokens: Vec<Spanned<Token>>,
     pos: usize,
+    source: Arc<str>,
+    paren_depth: u32,
     definitions: BTreeMap<Arc<str>, Expr>,
     fn_definitions: BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>,
     recursive_names: BTreeSet<Arc<str>>,
@@ -77,6 +79,8 @@ impl Parser {
         Ok(Self {
             tokens,
             pos: 0,
+            source: Arc::from(input),
+            paren_depth: 0,
             definitions: BTreeMap::new(),
             fn_definitions: BTreeMap::new(),
             recursive_names: BTreeSet::new(),
@@ -87,6 +91,40 @@ impl Parser {
             fairness: Vec::new(),
             liveness_properties: Vec::new(),
         })
+    }
+
+    fn column_of(&self, byte_offset: u32) -> u32 {
+        let offset = byte_offset as usize;
+        let src = &self.source[..offset.min(self.source.len())];
+        match src.rfind('\n') {
+            Some(nl) => (offset - nl - 1) as u32,
+            None => offset as u32,
+        }
+    }
+
+    fn line_of(&self, byte_offset: u32) -> u32 {
+        let offset = byte_offset as usize;
+        self.source[..offset.min(self.source.len())]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count() as u32
+    }
+
+    fn current_column(&self) -> u32 {
+        self.column_of(self.current_span().start)
+    }
+
+    fn current_line(&self) -> u32 {
+        self.line_of(self.current_span().start)
+    }
+
+    fn col_mismatch(&self, list_col: u32, list_line: u32) -> bool {
+        if self.paren_depth > 0 {
+            return false;
+        }
+        let col = self.current_column();
+        let line = self.current_line();
+        line != list_line && col != list_col
     }
 
     fn peek(&self) -> &Token {
@@ -572,12 +610,19 @@ impl Parser {
     }
 
     fn parse_or(&mut self) -> Result<Expr> {
+        let mut list_anchor = None;
         if *self.peek() == Token::Or {
+            list_anchor = Some((self.current_column(), self.current_line()));
             self.advance();
             self.consume_label();
         }
         let mut left = self.parse_and()?;
         while *self.peek() == Token::Or {
+            if let Some((lc, ll)) = list_anchor {
+                if self.col_mismatch(lc, ll) { break; }
+            } else {
+                list_anchor = Some((self.current_column(), self.current_line()));
+            }
             self.advance();
             let label = self.consume_label();
             let right = self.parse_and()?;
@@ -605,7 +650,9 @@ impl Parser {
     }
 
     fn parse_and(&mut self) -> Result<Expr> {
+        let mut list_anchor = None;
         if *self.peek() == Token::And {
+            list_anchor = Some((self.current_column(), self.current_line()));
             self.advance();
             self.consume_label();
         }
@@ -613,6 +660,11 @@ impl Parser {
         loop {
             match self.peek() {
                 Token::And => {
+                    if let Some((lc, ll)) = list_anchor {
+                        if self.col_mismatch(lc, ll) { break; }
+                    } else {
+                        list_anchor = Some((self.current_column(), self.current_line()));
+                    }
                     self.advance();
                     let label = self.consume_label();
                     let right = self.parse_and_conjunct()?;
@@ -655,8 +707,13 @@ impl Parser {
     }
 
     fn parse_single_or(&mut self) -> Result<Expr> {
+        let start_col = self.current_column();
+        let start_line = self.current_line();
         let mut left = self.parse_single_and()?;
         while *self.peek() == Token::Or {
+            if self.paren_depth == 0 && self.current_line() != start_line && self.current_column() < start_col {
+                break;
+            }
             self.advance();
             let right = self.parse_single_and()?;
             left = Expr::Or(Box::new(left), Box::new(right));
@@ -665,10 +722,15 @@ impl Parser {
     }
 
     fn parse_single_and(&mut self) -> Result<Expr> {
+        let start_col = self.current_column();
+        let start_line = self.current_line();
         let mut left = self.parse_comparison()?;
         loop {
             match self.peek() {
                 Token::And => {
+                    if self.paren_depth == 0 && self.current_line() != start_line && self.current_column() < start_col {
+                        break;
+                    }
                     self.advance();
                     let right = self.parse_comparison()?;
                     left = Expr::And(Box::new(left), Box::new(right));
@@ -705,11 +767,41 @@ impl Parser {
     }
 
     fn parse_quantifier_or(&mut self) -> Result<Expr> {
-        let mut left = self.parse_comparison()?;
+        let start_col = self.current_column();
+        let start_line = self.current_line();
+        let mut left = self.parse_quantifier_and()?;
         while *self.peek() == Token::Or {
+            if self.paren_depth == 0 && self.current_line() != start_line && self.current_column() < start_col {
+                break;
+            }
             self.advance();
-            let right = self.parse_comparison()?;
+            let right = self.parse_quantifier_and()?;
             left = Expr::Or(Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_quantifier_and(&mut self) -> Result<Expr> {
+        let start_col = self.current_column();
+        let start_line = self.current_line();
+        let mut left = self.parse_comparison()?;
+        loop {
+            match self.peek() {
+                Token::And => {
+                    if self.paren_depth == 0 && self.current_line() != start_line && self.current_column() < start_col {
+                        break;
+                    }
+                    self.advance();
+                    let right = self.parse_comparison()?;
+                    left = Expr::And(Box::new(left), Box::new(right));
+                }
+                Token::ActionCompose => {
+                    self.advance();
+                    let right = self.parse_comparison()?;
+                    left = Expr::ActionCompose(Box::new(left), Box::new(right));
+                }
+                _ => break,
+            }
         }
         Ok(left)
     }
@@ -1385,7 +1477,9 @@ impl Parser {
             }
             Token::LParen => {
                 self.advance();
+                self.paren_depth += 1;
                 let expr = self.parse_expr()?;
+                self.paren_depth -= 1;
                 self.expect(Token::RParen)?;
                 Ok(expr)
             }
@@ -1402,10 +1496,12 @@ impl Parser {
                 self.parse_tuple()
             }
             Token::And => {
+                let list_col = self.current_column();
+                let list_line = self.current_line();
                 self.advance();
                 let first = self.parse_comparison()?;
                 let mut result = first;
-                while *self.peek() == Token::And {
+                while *self.peek() == Token::And && !self.col_mismatch(list_col, list_line) {
                     self.advance();
                     let next = self.parse_comparison()?;
                     result = Expr::And(Box::new(result), Box::new(next));
@@ -1413,10 +1509,12 @@ impl Parser {
                 Ok(result)
             }
             Token::Or => {
+                let list_col = self.current_column();
+                let list_line = self.current_line();
                 self.advance();
                 let first = self.parse_comparison()?;
                 let mut result = first;
-                while *self.peek() == Token::Or {
+                while *self.peek() == Token::Or && !self.col_mismatch(list_col, list_line) {
                     self.advance();
                     let next = self.parse_comparison()?;
                     result = Expr::Or(Box::new(result), Box::new(next));

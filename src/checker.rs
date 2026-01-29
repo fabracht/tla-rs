@@ -86,6 +86,7 @@ fn format_eta(secs: f64) -> String {
 #[derive(Debug)]
 pub struct Counterexample {
     pub trace: Vec<State>,
+    pub actions: Vec<Option<Arc<str>>>,
     pub violated_invariant: usize,
 }
 
@@ -238,6 +239,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
     let mut states: IndexSet<State> = IndexSet::new();
     let mut parent: Vec<Option<usize>> = Vec::new();
+    let mut parent_action: Vec<Option<Arc<str>>> = Vec::new();
     let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
     let mut stats = CheckStats {
         states_explored: 0,
@@ -255,19 +257,23 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         let (idx, is_new) = states.insert_full(canonical);
         if is_new {
             parent.push(None);
+            parent_action.push(None);
             queue.push_back((idx, 1));
         }
     }
 
-    let reconstruct_trace = |state_idx: usize, states: &IndexSet<State>, parent: &[Option<usize>]| -> Vec<State> {
+    let reconstruct_trace = |state_idx: usize, states: &IndexSet<State>, parent: &[Option<usize>], parent_action: &[Option<Arc<str>>]| -> (Vec<State>, Vec<Option<Arc<str>>>) {
         let mut trace = Vec::new();
+        let mut actions = Vec::new();
         let mut idx = Some(state_idx);
         while let Some(i) = idx {
             trace.push(states.get_index(i).unwrap().clone());
+            actions.push(parent_action[i].clone());
             idx = parent[i];
         }
         trace.reverse();
-        trace
+        actions.reverse();
+        (trace, actions)
     };
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -362,19 +368,20 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             match eval_with_context(invariant, &mut env, &spec.definitions, &ctx) {
                 Ok(Value::Bool(true)) => {}
                 Ok(Value::Bool(false)) => {
-                    let trace = reconstruct_trace(current_idx, &states, &parent);
+                    let (trace, actions) = reconstruct_trace(current_idx, &states, &parent, &parent_action);
                     stats.elapsed_secs = elapsed_secs();
                     do_export(&states, &parent, Some(current_idx));
                     return CheckResult::InvariantViolation(
                         Counterexample {
                             trace,
+                            actions,
                             violated_invariant: idx,
                         },
                         stats,
                     );
                 }
                 Ok(_) => {
-                    let trace = reconstruct_trace(current_idx, &states, &parent);
+                    let (trace, _actions) = reconstruct_trace(current_idx, &states, &parent, &parent_action);
                     do_export(&states, &parent, Some(current_idx));
                     return CheckResult::InvariantError(
                         EvalError::TypeMismatch { expected: "Bool", got: Value::Bool(false), context: Some("invariant evaluation"),  span: None },
@@ -382,7 +389,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                     );
                 }
                 Err(e) => {
-                    let trace = reconstruct_trace(current_idx, &states, &parent);
+                    let (trace, _actions) = reconstruct_trace(current_idx, &states, &parent, &parent_action);
                     do_export(&states, &parent, Some(current_idx));
                     return CheckResult::InvariantError(e, trace);
                 }
@@ -393,28 +400,26 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         let successors = match next_states(&spec.next, current, &spec.vars, &primed_vars, &mut reusable_env, &spec.definitions) {
             Ok(s) => s,
             Err(e) => {
-                let trace = reconstruct_trace(current_idx, &states, &parent);
+                let (trace, _actions) = reconstruct_trace(current_idx, &states, &parent, &parent_action);
                 do_export(&states, &parent, Some(current_idx));
                 return CheckResult::NextError(e, trace);
             }
         };
-        if !config.quiet && stats.states_explored <= 5 {
-            eprintln!("  State {} has {} successors", stats.states_explored, successors.len());
-        }
 
         if successors.is_empty() && !config.allow_deadlock {
-            let trace = reconstruct_trace(current_idx, &states, &parent);
+            let (trace, _actions) = reconstruct_trace(current_idx, &states, &parent, &parent_action);
             stats.elapsed_secs = elapsed_secs();
             do_export(&states, &parent, Some(current_idx));
             return CheckResult::Deadlock(trace, stats);
         }
 
-        for successor in successors {
+        for transition in successors {
             stats.transitions += 1;
-            let canonical = symmetry.canonicalize(&successor).into_owned();
+            let canonical = symmetry.canonicalize(&transition.state).into_owned();
             let (succ_idx, is_new) = states.insert_full(canonical);
             if is_new {
                 parent.push(Some(current_idx));
+                parent_action.push(transition.action);
                 queue.push_back((succ_idx, depth + 1));
             }
         }
@@ -462,10 +467,10 @@ fn check_liveness_properties(
     let mut reusable_env = domains.clone();
     for (state_idx, state) in states.iter().enumerate() {
         let successors = next_states(&spec.next, state, &spec.vars, &primed_vars, &mut reusable_env, &spec.definitions)?;
-        for successor in successors {
-            let canonical = symmetry.canonicalize(&successor);
+        for transition in successors {
+            let canonical = symmetry.canonicalize(&transition.state);
             if let Some(succ_idx) = states.get_index_of(canonical.as_ref()) {
-                graph.add_edge(state_idx, succ_idx, None);
+                graph.add_edge(state_idx, succ_idx, transition.action);
             }
         }
     }
@@ -550,6 +555,10 @@ pub fn format_trace(trace: &[State], vars: &[Arc<str>]) -> String {
 }
 
 pub fn format_trace_with_diffs(trace: &[State], vars: &[Arc<str>]) -> String {
+    format_trace_with_actions(trace, &[], vars)
+}
+
+pub fn format_trace_with_actions(trace: &[State], actions: &[Option<Arc<str>>], vars: &[Arc<str>]) -> String {
     if trace.is_empty() {
         return String::new();
     }
@@ -562,29 +571,12 @@ pub fn format_trace_with_diffs(trace: &[State], vars: &[Arc<str>]) -> String {
     for (i, state) in trace.iter().enumerate() {
         let prev = if i > 0 { Some(&trace[i - 1]) } else { None };
 
-        let changed_vars: Vec<&str> = vars
-            .iter()
-            .enumerate()
-            .filter(|(vi, _)| {
-                if let (Some(p), Some(curr)) = (prev.and_then(|p| p.values.get(*vi)), state.values.get(*vi)) {
-                    p != curr
-                } else {
-                    false
-                }
-            })
-            .map(|(_, s)| s.as_ref())
-            .collect();
-
         if i == last_idx && total_states > 1 {
             out.push_str(&format!("State {} of {} [FINAL]\n", i, last_idx));
         } else if total_states > 1 {
             out.push_str(&format!("State {} of {}\n", i, last_idx));
         } else {
             out.push_str(&format!("State {}\n", i));
-        }
-
-        if !changed_vars.is_empty() && i > 0 {
-            out.push_str(&format!("  (changed: {})\n", changed_vars.join(", ")));
         }
 
         for (vi, var) in vars.iter().enumerate() {
@@ -607,6 +599,15 @@ pub fn format_trace_with_diffs(trace: &[State], vars: &[Arc<str>]) -> String {
                     width = max_var_len
                 ));
             }
+        }
+
+        if i < last_idx {
+            let action_name = actions
+                .get(i + 1)
+                .and_then(|a| a.as_ref())
+                .map(|s| s.as_ref())
+                .unwrap_or("(unnamed)");
+            out.push_str(&format!("\n  --[ {} ]-->\n\n", action_name));
         }
     }
     out
@@ -754,10 +755,21 @@ pub fn state_to_json(state: &State, vars: &[Arc<str>]) -> String {
 }
 
 pub fn trace_to_json(trace: &[State], vars: &[Arc<str>]) -> String {
+    trace_to_json_with_actions(trace, &[], vars)
+}
+
+pub fn trace_to_json_with_actions(trace: &[State], actions: &[Option<Arc<str>>], vars: &[Arc<str>]) -> String {
     let states: Vec<_> = trace
         .iter()
         .enumerate()
-        .map(|(i, state)| format!("{{\"index\": {}, \"state\": {}}}", i, state_to_json(state, vars)))
+        .map(|(i, state)| {
+            let action_str = actions
+                .get(i)
+                .and_then(|a| a.as_ref())
+                .map(|s| format!("\"{}\"", s))
+                .unwrap_or_else(|| "null".to_string());
+            format!("{{\"index\": {}, \"action\": {}, \"state\": {}}}", i, action_str, state_to_json(state, vars))
+        })
         .collect();
     format!("[{}]", states.join(", "))
 }
@@ -781,7 +793,7 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                 r#"{{"status": "invariant_violation", "invariant_index": {}, "invariant_name": {}, "trace": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
                 cex.violated_invariant,
                 inv_name,
-                trace_to_json(&cex.trace, &spec.vars),
+                trace_to_json_with_actions(&cex.trace, &cex.actions, &spec.vars),
                 stats.states_explored,
                 stats.transitions,
                 stats.max_depth_reached,
@@ -864,6 +876,39 @@ pub fn write_trace_json(path: &std::path::Path, trace: &[State], vars: &[Arc<str
     use std::io::Write;
     let mut file = std::fs::File::create(path)?;
     writeln!(file, "{}", trace_to_json(trace, vars))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn write_counterexample_json(
+    path: &std::path::Path,
+    cex: &Counterexample,
+    spec_path: Option<&str>,
+    vars: &[Arc<str>],
+    invariant_name: Option<&str>,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+
+    let spec_file = spec_path.map(|s| format!("\"{}\"", s)).unwrap_or_else(|| "null".to_string());
+    let inv_name = invariant_name.map(|s| format!("\"{}\"", s)).unwrap_or_else(|| "null".to_string());
+    let vars_json: Vec<String> = vars.iter().map(|v| format!("\"{}\"", v)).collect();
+
+    let mut trace_entries: Vec<String> = Vec::new();
+    for (i, state) in cex.trace.iter().enumerate() {
+        let action = cex.actions.get(i).and_then(|a| a.as_ref()).map(|s| format!("\"{}\"", s)).unwrap_or_else(|| "null".to_string());
+        trace_entries.push(format!("{{\"action\": {}, \"state\": {}}}", action, state_to_json(state, vars)));
+    }
+
+    let json = format!(
+        r#"{{"spec_file": {}, "invariant": {}, "violated_invariant_index": {}, "vars": [{}], "trace": [{}]}}"#,
+        spec_file,
+        inv_name,
+        cex.violated_invariant,
+        vars_json.join(", "),
+        trace_entries.join(", ")
+    );
+
+    writeln!(file, "{}", json)
 }
 
 #[cfg(test)]
