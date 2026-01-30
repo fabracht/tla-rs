@@ -12,6 +12,9 @@ tlc-executor performs explicit-state model checking of TLA+ specifications, expl
 - **State graph export** to DOT format for visualization
 - **Progress reporting** with exploration rate and ETA
 - **Helpful error messages** with source locations and suggestions
+- **Continue-past-violation mode** to explore the full state space and count all violations
+- **Property satisfaction statistics** with depth-stratified breakdowns
+- **JSON output** for programmatic consumption of all results
 
 ## When to Use
 
@@ -57,7 +60,11 @@ tlc-executor <spec.tla> [options]
 | `--export-dot FILE` | Export state graph to DOT format |
 | `--allow-deadlock` | Allow states with no successors |
 | `--check-liveness` | Check liveness and fairness properties |
+| `--continue` | Continue past invariant violations (explore full state space) |
+| `--count-satisfying NAME` | Count states satisfying a definition (repeatable) |
 | `--scenario TEXT` | Explore a specific scenario (or @file) |
+| `--json` | Output results in JSON format |
+| `--verbose, -v` | Verbose output (depth breakdowns, etc.) |
 
 ### Constant Value Formats
 
@@ -114,6 +121,71 @@ step: count' = count + 1        # count increments by 1
 ```
 
 Each `step:` line specifies a TLA+ expression that must be TRUE for the transition. Unprimed variables refer to the current state, primed variables refer to the next state.
+
+### Analytics & Property Statistics
+
+These features are designed for understanding *how* a protocol fails, not just *whether* it fails. They answer questions like "how many states violate safety?" and "at what depth do violations start appearing?"
+
+**Continue past violations** to explore the full state space of a buggy spec:
+```bash
+tlc-executor test_cases/mqdb/bugs/MQDBOwnershipTOCTOU_BugNoCAS.tla \
+  -c 'Users={"u1","u2"}' -c 'Requests={"r1","r2"}' -c 'DataValues={"d1","d2"}' \
+  --allow-deadlock --continue
+```
+```
+Model checking complete. 640 invariant violation(s) found across 1668 states.
+
+  Violations by invariant:
+    InvOwnershipSafety: 640 violation(s)
+
+  First violation trace (InvOwnershipSafety, 6 states):
+    ...
+
+  Reachable states: 1668
+  Transitions: 3748
+  Max depth: 13
+```
+Without `--continue`, the checker would stop at the first of those 640 violations after exploring only 239 states.
+
+**Count property satisfaction** to measure what fraction of reachable states satisfy a predicate:
+```bash
+tlc-executor test_cases/mqdb/MQDBOwnershipTOCTOU.tla \
+  -c 'Users={"u1","u2"}' -c 'Requests={"r1","r2"}' -c 'DataValues={"d1","d2"}' \
+  --allow-deadlock \
+  --count-satisfying InvOwnershipSafety \
+  --count-satisfying InvCheckedImpliesOwner
+```
+```
+Property statistics:
+  InvOwnershipSafety: 1316/1316 satisfied (100.0%)
+  InvCheckedImpliesOwner: 1316/1316 satisfied (100.0%)
+```
+
+**Combine `--continue` with `--count-satisfying`** to see how a bug degrades safety across the state space:
+```bash
+tlc-executor test_cases/mqdb/bugs/MQDBOwnershipTOCTOU_BugNoCAS.tla \
+  -c 'Users={"u1","u2"}' -c 'Requests={"r1","r2"}' -c 'DataValues={"d1","d2"}' \
+  --allow-deadlock --continue \
+  --count-satisfying InvOwnershipSafety --verbose
+```
+```
+Property statistics:
+  InvOwnershipSafety: 1028/1668 satisfied (61.6%)
+  InvOwnershipSafety by depth:
+    depth   1:      4/4      (100.0%)
+    depth   2:     16/16     (100.0%)
+    ...
+    depth   6:    160/176    (90.9%)
+    depth   9:    160/336    (47.6%)
+    depth  11:      0/104    (0.0%)
+```
+This shows the TOCTOU bug (missing CAS on commit) starts causing violations at depth 6, and by depth 11 every reachable state is unsafe. The `--verbose` flag enables the per-depth breakdown.
+
+**JSON output** for programmatic use:
+```bash
+tlc-executor spec.tla --count-satisfying InvSafety --json
+```
+Returns structured data including `properties` array with `depth_breakdown` per property.
 
 ## Supported TLA+ Subset
 
