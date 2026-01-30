@@ -17,6 +17,7 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::ast::{Env, Spec, TransitionWithGuards};
+use crate::diagnostic::Diagnostic;
 use crate::eval::{
     Definitions, init_states, make_primed_names, next_states, next_states_with_guards,
 };
@@ -38,13 +39,29 @@ pub fn run_interactive(spec: &Spec, domains: &Env) -> io::Result<()> {
     let initial_states = match init_states(&spec.init, &spec.vars, &env, &defs) {
         Ok(states) => states,
         Err(e) => {
-            eprintln!("Error computing initial states: {:?}", e);
+            let diag =
+                crate::checker::eval_error_to_diagnostic(&e).with_note("error occurred while evaluating Init");
+            eprintln!("{}", diag.render_simple());
             return Ok(());
         }
     };
 
     let Some(initial) = initial_states.into_iter().next() else {
-        eprintln!("No initial states found");
+        let mut diag = Diagnostic::error("no initial states found");
+        let missing: Vec<&str> = spec
+            .constants
+            .iter()
+            .filter(|c| !domains.contains_key(c.as_ref()))
+            .map(|c| c.as_ref())
+            .collect();
+        if !missing.is_empty() {
+            diag = diag
+                .with_note(format!("missing constants: {}", missing.join(", ")))
+                .with_help("provide values with --constant NAME=VALUE");
+        } else {
+            diag = diag.with_help("verify Init predicate can be satisfied");
+        }
+        eprintln!("{}", diag.render_simple());
         return Ok(());
     };
 
@@ -59,7 +76,9 @@ pub fn run_interactive(spec: &Spec, domains: &Env) -> io::Result<()> {
     ) {
         Ok(actions) => actions,
         Err(e) => {
-            eprintln!("Error computing next states: {:?}", e);
+            let diag = crate::checker::eval_error_to_diagnostic(&e)
+                .with_note("error occurred while evaluating Next");
+            eprintln!("{}", diag.render_simple());
             return Ok(());
         }
     };
@@ -177,7 +196,9 @@ pub fn run_interactive_replay(spec: &Spec, domains: &Env, replay_file: &Path) ->
     ) {
         Ok(actions) => actions,
         Err(e) => {
-            eprintln!("Error computing next states: {:?}", e);
+            let diag = crate::checker::eval_error_to_diagnostic(&e)
+                .with_note("error occurred while evaluating Next during replay");
+            eprintln!("{}", diag.render_simple());
             return Ok(());
         }
     };

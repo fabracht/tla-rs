@@ -84,6 +84,9 @@ fn parse_constant_value(s: &str) -> Option<Value> {
         }
         return Some(Value::Set(set));
     }
+    if !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Some(Value::Str(s.into()));
+    }
     None
 }
 
@@ -134,10 +137,17 @@ fn main() -> ExitCode {
                     match parse_constant_value(val_str) {
                         Some(val) => constants.push((name, val)),
                         None => {
-                            eprintln!("invalid constant value: {}", val_str);
-                            eprintln!(
-                                "supported formats: integer, TRUE, FALSE, \"string\", {{1,2,3}}"
+                            let diag = Diagnostic::error(format!(
+                                "invalid constant value `{}`",
+                                val_str
+                            ))
+                            .with_help(
+                                "supported formats: 42, TRUE, FALSE, \"hello\", {s1,s2}, {\"a\",\"b\"}",
+                            )
+                            .with_note(
+                                "bare identifiers like s1 are treated as model values (strings)",
                             );
+                            eprintln!("{}", diag.render_simple());
                             return ExitCode::FAILURE;
                         }
                     }
@@ -269,7 +279,7 @@ fn main() -> ExitCode {
                 println!("Options:");
                 println!("  --constant, -c NAME=VALUE  Set a constant value");
                 println!(
-                    "                             Formats: 3, TRUE, FALSE, \"str\", {{1,2,3}}"
+                    "                             Formats: 3, TRUE, FALSE, \"str\", name, {{s1,s2}}"
                 );
                 println!("  --symmetry, -s CONST       Enable symmetry reduction for a constant");
                 println!(
@@ -749,56 +759,57 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         CheckResult::NoInitialStates => {
-            eprintln!("No initial states found.");
-            eprintln!();
-            eprintln!("Possible causes:");
-            eprintln!("  - Init predicate evaluates to FALSE for all variable combinations");
+            let mut diag = Diagnostic::error("no initial states found");
             if !spec.constants.is_empty() {
                 let missing: Vec<_> = spec
                     .constants
                     .iter()
                     .filter(|c| !domains.contains_key(c.as_ref()))
+                    .map(|c| c.as_ref())
                     .collect();
                 if !missing.is_empty() {
-                    eprintln!(
-                        "  - Missing constant values: {}",
-                        missing
-                            .iter()
-                            .map(|c| c.as_ref())
-                            .collect::<Vec<_>>()
-                            .join(", ")
+                    diag = diag.with_note(format!("missing constants: {}", missing.join(", ")));
+                    let example: String = missing
+                        .iter()
+                        .map(|c| format!("--constant {}=VALUE", c))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    diag = diag.with_help(format!("provide values with {}", example));
+                } else {
+                    diag = diag.with_help(
+                        "verify Init predicate can be satisfied, or check constant values",
                     );
                 }
+            } else {
+                diag = diag
+                    .with_help("verify Init predicate can be satisfied with the given domains");
             }
-            eprintln!("  - Type error or domain error in Init expression");
-            eprintln!();
-            eprintln!("Suggestions:");
-            eprintln!("  - Verify Init predicate can be satisfied");
-            eprintln!("  - Check that all constants have appropriate values");
-            eprintln!("  - Use --validate to check spec structure");
+            eprintln!("{}", diag.render_colored(&source, &colors));
             ExitCode::FAILURE
         }
         CheckResult::MissingConstants(missing) => {
-            eprintln!("Missing constant values:");
-            for c in &missing {
-                eprintln!("  {}", c);
-            }
-            eprintln!();
-            eprintln!("Provide values with --constant NAME=VALUE");
+            let names: Vec<&str> = missing.iter().map(|c| c.as_ref()).collect();
+            let example: String = names
+                .iter()
+                .map(|c| format!("--constant {}=VALUE", c))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let diag = Diagnostic::error(format!(
+                "missing constant values: {}",
+                names.join(", ")
+            ))
+            .with_help(format!("provide values with {}", example));
+            eprintln!("{}", diag.render_colored(&source, &colors));
             ExitCode::FAILURE
         }
         CheckResult::AssumeViolation(idx) => {
-            eprintln!("ASSUME violation: constraint {} evaluated to FALSE", idx);
-            eprintln!();
-            if let Some(assume_expr) = spec.assumes.get(idx) {
-                eprintln!("Expression: {:?}", assume_expr);
-                eprintln!();
-            }
-            eprintln!("The ASSUME constraint is not satisfied by the current constant values.");
-            eprintln!();
-            eprintln!("Suggestions:");
-            eprintln!("  - Check that --constant values satisfy all ASSUME constraints");
-            eprintln!("  - Verify the ASSUME expression is correct");
+            let diag = Diagnostic::error("ASSUME constraint evaluated to FALSE")
+                .with_note(format!(
+                    "ASSUME constraint {} is not satisfied by current constant values",
+                    idx
+                ))
+                .with_help("check that --constant values satisfy all ASSUME constraints");
+            eprintln!("{}", diag.render_colored(&source, &colors));
             ExitCode::FAILURE
         }
         CheckResult::AssumeError(idx, e) => {

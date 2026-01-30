@@ -590,3 +590,58 @@ fn test_mqdb_cluster() {
         "MQDBCluster.tla should find violation, pass or reach limits, got: {result:?}",
     );
 }
+
+#[test]
+fn test_should_error_no_initial_states() {
+    let path = Path::new("test_cases/should_error/no_initial_states.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::NoInitialStates),
+        "no_initial_states.tla should produce NoInitialStates, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_error_init_error() {
+    let path = Path::new("test_cases/should_error/init_error.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::InitError(_)),
+        "init_error.tla should produce InitError, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_error_next_error() {
+    let path = Path::new("test_cases/should_error/next_error.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::NextError(_, _)),
+        "next_error.tla should produce NextError, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_error_invariant_error() {
+    let path = Path::new("test_cases/should_error/invariant_error.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::InvariantError(_, _)),
+        "invariant_error.tla should produce InvariantError, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_error_deadlock() {
+    let path = Path::new("test_cases/should_error/deadlock.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Deadlock(_, _)),
+        "deadlock.tla should produce Deadlock, got: {:?}",
+        result
+    );
+}

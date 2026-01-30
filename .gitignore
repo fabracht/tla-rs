@@ -8,3 +8,4 @@ profile.json
 .DS_Store
 CLAUDE.md
 .claude/
+trace.json

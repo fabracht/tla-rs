@@ -394,4 +394,52 @@ mod tests {
         let result = find_similar("coutn", names.iter().copied(), 2);
         assert_eq!(result, Some("count"));
     }
+
+    #[test]
+    fn render_colored_disabled_matches_plain() {
+        let src = Source::new("test.tla", "x = 1 + TRUE");
+        let diag = Diagnostic::error("type mismatch")
+            .with_span(Span::new(4, 12))
+            .with_label("expected Int")
+            .with_note("value was: true")
+            .with_help("check operand types");
+
+        let plain = diag.render(&src);
+        let colored_disabled = diag.render_colored(&src, &ColorConfig::disabled());
+        assert_eq!(plain, colored_disabled);
+    }
+
+    #[test]
+    fn multiple_notes_appended() {
+        let diag = Diagnostic::error("something failed")
+            .with_note("first note")
+            .with_note("second note");
+
+        let output = diag.render_simple();
+        assert!(output.contains("first note"), "missing first note: {}", output);
+        assert!(output.contains("second note"), "missing second note: {}", output);
+    }
+
+    #[test]
+    fn render_simple_no_initial_states() {
+        let diag = Diagnostic::error("no initial states found")
+            .with_note("missing constants: Serials, MaxTimestamp")
+            .with_help("provide values with --constant Serials=VALUE --constant MaxTimestamp=VALUE");
+
+        let output = diag.render_simple();
+        assert!(output.contains("error: no initial states found"));
+        assert!(output.contains("missing constants: Serials, MaxTimestamp"));
+        assert!(output.contains("--constant Serials=VALUE"));
+    }
+
+    #[test]
+    fn render_colored_note_and_help() {
+        let src = Source::new("test.tla", "Init == x = 0");
+        let diag = Diagnostic::error("no initial states found")
+            .with_help("verify Init predicate");
+
+        let output = diag.render_colored(&src, &ColorConfig::disabled());
+        assert!(output.contains("error: no initial states found"));
+        assert!(output.contains("help: verify Init predicate"));
+    }
 }
