@@ -88,8 +88,12 @@ pub(crate) fn in_set_symbolic(
     match set_expr {
         Expr::Powerset(inner) => {
             if let Value::Set(s) = val {
-                let base = eval_set(inner, env, defs)?;
-                Ok(s.is_subset(&base))
+                for member in s {
+                    if !in_set_symbolic(member, inner, env, defs)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
             } else {
                 Ok(false)
             }
@@ -112,9 +116,14 @@ pub(crate) fn in_set_symbolic(
             }
         }
         Expr::SeqSet(domain_expr) => {
-            if let Value::Tuple(seq) = val {
+            let seq = match val {
+                Value::Tuple(t) => Some(t.clone()),
+                Value::Fn(f) => fn_as_tuple(f),
+                _ => None,
+            };
+            if let Some(seq) = seq {
                 let domain = eval_set(domain_expr, env, defs)?;
-                for e in seq {
+                for e in &seq {
                     if !domain.contains(e) {
                         return Ok(false);
                     }
@@ -175,9 +184,27 @@ pub(crate) fn eval_record(
     }
 }
 
+pub(crate) fn fn_as_tuple(f: &BTreeMap<Value, Value>) -> Option<Vec<Value>> {
+    let n = f.len();
+    let mut result = Vec::with_capacity(n);
+    for i in 1..=n {
+        match f.get(&Value::Int(i as i64)) {
+            Some(v) => result.push(v.clone()),
+            None => return None,
+        }
+    }
+    Some(result)
+}
+
 pub(crate) fn eval_tuple(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Vec<Value>> {
     match eval(expr, env, defs)? {
         Value::Tuple(t) => Ok(t),
+        Value::Fn(f) => fn_as_tuple(&f).ok_or(EvalError::TypeMismatch {
+            expected: "Tuple",
+            got: Value::Fn(f),
+            context: None,
+            span: None,
+        }),
         other => Err(EvalError::TypeMismatch {
             expected: "Tuple",
             got: other,

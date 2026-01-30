@@ -465,13 +465,23 @@ fn test_official_hanoi() {
 }
 
 #[test]
-fn test_official_queens_parses() {
+fn test_official_queens() {
     let path = Path::new("test_cases/official/Queens.tla");
     let input = fs::read_to_string(path).expect("failed to read spec file");
     let spec = parse(&input).expect("failed to parse Queens.tla");
+
+    let mut domains = Env::new();
+    domains.insert(Arc::from("N"), Value::Int(4));
+
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
+    let result = check(&spec, &domains, &config);
+
     assert!(
-        !spec.invariants.is_empty(),
-        "Queens.tla should have TypeInvariant detected as invariant"
+        matches!(result, CheckResult::Ok(_)),
+        "Queens.tla with N=4 should pass, got: {result:?}",
     );
 }
 

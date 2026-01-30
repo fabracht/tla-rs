@@ -9,7 +9,7 @@ use super::global_state::PROFILING_STATS;
 use super::global_state::{CHECKER_STATS, RESOLVED_INSTANCES, RNG, TLC_STATE};
 use super::helpers::{
     apply_fn_value, cartesian_product_records, eval_bool, eval_fn, eval_int, eval_record, eval_set,
-    eval_tuple, flatten_fnapp_chain, get_nested, in_set_symbolic, update_nested,
+    eval_tuple, flatten_fnapp_chain, fn_as_tuple, get_nested, in_set_symbolic, update_nested,
 };
 use super::recursive::eval_fn_def_recursive;
 use crate::ast::{Env, Expr, Value};
@@ -123,14 +123,23 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Expr::Powerset(inner) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
                 if let Value::Set(s) = ev {
-                    let base = eval_set(inner, env, defs)?;
-                    return Ok(Value::Bool(s.is_subset(&base)));
+                    for member in &s {
+                        if !in_set_symbolic(member, inner, env, defs)? {
+                            return Ok(Value::Bool(false));
+                        }
+                    }
+                    return Ok(Value::Bool(true));
                 }
                 return Ok(Value::Bool(false));
             }
             if let Expr::SeqSet(domain_expr) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
-                if let Value::Tuple(seq) = ev {
+                let seq = match &ev {
+                    Value::Tuple(t) => Some(t.clone()),
+                    Value::Fn(f) => fn_as_tuple(f),
+                    _ => None,
+                };
+                if let Some(seq) = seq {
                     let domain = eval_set(domain_expr, env, defs)?;
                     for e in &seq {
                         if !domain.contains(e) {
@@ -170,14 +179,23 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Expr::Powerset(inner) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
                 if let Value::Set(s) = ev {
-                    let base = eval_set(inner, env, defs)?;
-                    return Ok(Value::Bool(!s.is_subset(&base)));
+                    for member in &s {
+                        if !in_set_symbolic(member, inner, env, defs)? {
+                            return Ok(Value::Bool(true));
+                        }
+                    }
+                    return Ok(Value::Bool(false));
                 }
                 return Ok(Value::Bool(true));
             }
             if let Expr::SeqSet(domain_expr) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
-                if let Value::Tuple(seq) = ev {
+                let seq = match &ev {
+                    Value::Tuple(t) => Some(t.clone()),
+                    Value::Fn(f) => fn_as_tuple(f),
+                    _ => None,
+                };
+                if let Some(seq) = seq {
                     let domain = eval_set(domain_expr, env, defs)?;
                     for e in &seq {
                         if !domain.contains(e) {
@@ -873,7 +891,14 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
 
             let keys: Vec<Value> = dom.into_iter().collect();
             let functions = enumerate_functions(&keys, &cod);
-            let set: BTreeSet<Value> = functions.into_iter().map(Value::Fn).collect();
+            let set: BTreeSet<Value> = functions
+                .into_iter()
+                .map(|f| {
+                    fn_as_tuple(&f)
+                        .map(Value::Tuple)
+                        .unwrap_or(Value::Fn(f))
+                })
+                .collect();
             Ok(Value::Set(set))
         }
 
