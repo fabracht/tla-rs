@@ -181,6 +181,33 @@ Property statistics:
 ```
 This shows the TOCTOU bug (missing CAS on commit) starts causing violations at depth 6, and by depth 11 every reachable state is unsafe. The `--verbose` flag enables the per-depth breakdown.
 
+**A fun example** — C-3PO famously calculates "the possibility of successfully navigating an asteroid field is approximately 3,720 to 1." The spec `examples/c3po_asteroid_field.tla` models the Empire Strikes Back asteroid chase: the Falcon's shields degrade under asteroid impacts and TIE fighter attacks, Han can hide in the space slug's cave, and R2-D2 can fix the broken hyperdrive to escape.
+
+```bash
+tlc-executor examples/c3po_asteroid_field.tla --allow-deadlock --continue \
+  --count-satisfying InvNeverTellMeTheOdds \
+  --count-satisfying ShieldsHolding \
+  --count-satisfying Escaped --verbose
+```
+```
+Model checking complete. 2 invariant violation(s) found across 26 states.
+
+Property statistics:
+  InvNeverTellMeTheOdds: 24/26 satisfied (92.3%)
+  InvNeverTellMeTheOdds by depth:
+    depth   1:      1/1      (100.0%)
+    ...
+    depth   5:      5/6      (83.3%)
+    depth   6:      3/4      (75.0%)
+  ShieldsHolding: 18/26 satisfied (69.2%)
+  Escaped: 8/26 satisfied (30.8%)
+  Escaped by depth:
+    depth   1:      0/1      (0.0%)
+    depth   3:      1/5      (20.0%)
+    depth   7:      1/1      (100.0%)
+```
+C-3PO's odds were pessimistic — 92.3% of reachable states have the Falcon intact. Shields degrade from 100% to 0% over depth, while escape probability rises as R2 gets time to fix the hyperdrive. The destruction trace shows three asteroid impacts draining shields, then a fourth destroying the ship.
+
 **JSON output** for programmatic use:
 ```bash
 tlc-executor spec.tla --count-satisfying InvSafety --json
