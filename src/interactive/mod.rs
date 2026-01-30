@@ -39,8 +39,8 @@ pub fn run_interactive(spec: &Spec, domains: &Env) -> io::Result<()> {
     let initial_states = match init_states(&spec.init, &spec.vars, &env, &defs) {
         Ok(states) => states,
         Err(e) => {
-            let diag =
-                crate::checker::eval_error_to_diagnostic(&e).with_note("error occurred while evaluating Init");
+            let diag = crate::checker::eval_error_to_diagnostic(&e)
+                .with_note("error occurred while evaluating Init");
             eprintln!("{}", diag.render_simple());
             return Ok(());
         }

@@ -296,10 +296,20 @@ impl Diagnostic {
             let _ = writeln!(out, "   {}", colors.blue("|"));
         }
         if let Some(ref note) = self.note {
-            let _ = writeln!(out, "   {} {}", colors.blue("="), colors.cyan(&format!("note: {}", note)));
+            let _ = writeln!(
+                out,
+                "   {} {}",
+                colors.blue("="),
+                colors.cyan(&format!("note: {}", note))
+            );
         }
         if let Some(ref help) = self.help {
-            let _ = writeln!(out, "   {} {}", colors.blue("="), colors.cyan(&format!("help: {}", help)));
+            let _ = writeln!(
+                out,
+                "   {} {}",
+                colors.blue("="),
+                colors.cyan(&format!("help: {}", help))
+            );
         }
 
         out
@@ -416,15 +426,25 @@ mod tests {
             .with_note("second note");
 
         let output = diag.render_simple();
-        assert!(output.contains("first note"), "missing first note: {}", output);
-        assert!(output.contains("second note"), "missing second note: {}", output);
+        assert!(
+            output.contains("first note"),
+            "missing first note: {}",
+            output
+        );
+        assert!(
+            output.contains("second note"),
+            "missing second note: {}",
+            output
+        );
     }
 
     #[test]
     fn render_simple_no_initial_states() {
         let diag = Diagnostic::error("no initial states found")
             .with_note("missing constants: Serials, MaxTimestamp")
-            .with_help("provide values with --constant Serials=VALUE --constant MaxTimestamp=VALUE");
+            .with_help(
+                "provide values with --constant Serials=VALUE --constant MaxTimestamp=VALUE",
+            );
 
         let output = diag.render_simple();
         assert!(output.contains("error: no initial states found"));
@@ -435,8 +455,7 @@ mod tests {
     #[test]
     fn render_colored_note_and_help() {
         let src = Source::new("test.tla", "Init == x = 0");
-        let diag = Diagnostic::error("no initial states found")
-            .with_help("verify Init predicate");
+        let diag = Diagnostic::error("no initial states found").with_help("verify Init predicate");
 
         let output = diag.render_colored(&src, &ColorConfig::disabled());
         assert!(output.contains("error: no initial states found"));

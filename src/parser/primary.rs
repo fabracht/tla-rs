@@ -626,12 +626,11 @@ impl Parser {
             }
         }
         if keys.is_empty() {
-            return Err(ParseError::new(format!(
-                "unexpected {} in EXCEPT update",
-                self.peek()
-            ))
-            .with_span(self.current_span())
-            .with_context("`.` or `[`", format!("{}", self.peek())));
+            return Err(
+                ParseError::new(format!("unexpected {} in EXCEPT update", self.peek()))
+                    .with_span(self.current_span())
+                    .with_context("`.` or `[`", format!("{}", self.peek())),
+            );
         }
         self.expect(Token::Eq)?;
         let val = self.parse_expr()?;

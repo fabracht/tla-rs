@@ -893,11 +893,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             let functions = enumerate_functions(&keys, &cod);
             let set: BTreeSet<Value> = functions
                 .into_iter()
-                .map(|f| {
-                    fn_as_tuple(&f)
-                        .map(Value::Tuple)
-                        .unwrap_or(Value::Fn(f))
-                })
+                .map(|f| fn_as_tuple(&f).map(Value::Tuple).unwrap_or(Value::Fn(f)))
                 .collect();
             Ok(Value::Set(set))
         }
