@@ -640,7 +640,7 @@ fn test_should_error_deadlock() {
     let path = Path::new("test_cases/should_error/deadlock.tla");
     let result = check_spec_file(path);
     assert!(
-        matches!(result, CheckResult::Deadlock(_, _)),
+        matches!(result, CheckResult::Deadlock(_, _, _)),
         "deadlock.tla should produce Deadlock, got: {:?}",
         result
     );

@@ -72,20 +72,6 @@ impl CheckerConfig {
     }
 }
 
-fn format_eta(secs: f64) -> String {
-    if secs.is_nan() || secs.is_infinite() || secs < 0.0 {
-        return "N/A".to_string();
-    }
-    let secs = secs as u64;
-    if secs < 60 {
-        format!("{}s", secs)
-    } else if secs < 3600 {
-        format!("{}m{}s", secs / 60, secs % 60)
-    } else {
-        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
-    }
-}
-
 #[derive(Debug)]
 pub struct Counterexample {
     pub trace: Vec<State>,
@@ -106,7 +92,7 @@ pub enum CheckResult {
     Ok(CheckStats),
     InvariantViolation(Counterexample, CheckStats),
     LivenessViolation(LivenessViolation, CheckStats),
-    Deadlock(Vec<State>, CheckStats),
+    Deadlock(Vec<State>, Vec<Option<Arc<str>>>, CheckStats),
     InitError(EvalError),
     NextError(EvalError, Vec<State>),
     InvariantError(EvalError, Vec<State>),
@@ -195,6 +181,17 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     for sym_const in &config.symmetric_constants {
         if let Some(Value::Set(elements)) = domains.get(sym_const) {
             symmetry.add_symmetric_set(elements.clone());
+        } else if !config.quiet {
+            let available: Vec<_> = spec.constants.iter().map(|c| c.as_ref()).collect();
+            eprintln!(
+                "  Warning: --symmetry '{}' does not match any set constant (available: {})",
+                sym_const,
+                if available.is_empty() {
+                    "none".to_string()
+                } else {
+                    available.join(", ")
+                }
+            );
         }
     }
     if !symmetry.is_empty() && !config.quiet {
@@ -346,20 +343,12 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             } else {
                 let elapsed = elapsed_secs();
                 let rate = stats.states_explored as f64 / elapsed.max(0.001);
-                let remaining = config.max_states.saturating_sub(stats.states_explored);
-                let eta = remaining as f64 / rate;
-                let pct =
-                    (stats.states_explored as f64 / config.max_states as f64 * 100.0).min(100.0);
-                let bar_width = 20;
-                let filled = (pct / 100.0 * bar_width as f64) as usize;
-                let empty = bar_width - filled;
-                let bar: String = std::iter::repeat_n('\u{2588}', filled)
-                    .chain(std::iter::repeat_n('\u{2591}', empty))
-                    .collect();
-                let eta_str = format_eta(eta);
                 eprintln!(
-                    "  [{}] {}/{} ({:.1}%) | {:.0}/s | depth: {} | ETA: {}",
-                    bar, stats.states_explored, config.max_states, pct, rate, depth, eta_str
+                    "  {} states explored | {:.0}/s | depth: {} | queue: {}",
+                    stats.states_explored,
+                    rate,
+                    depth,
+                    queue.len()
                 );
             }
         }
@@ -449,11 +438,10 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         };
 
         if successors.is_empty() && !config.allow_deadlock {
-            let (trace, _actions) =
-                reconstruct_trace(current_idx, &states, &parent, &parent_action);
+            let (trace, actions) = reconstruct_trace(current_idx, &states, &parent, &parent_action);
             stats.elapsed_secs = elapsed_secs();
             do_export(&states, &parent, Some(current_idx));
-            return CheckResult::Deadlock(trace, stats);
+            return CheckResult::Deadlock(trace, actions, stats);
         }
 
         for transition in successors {
@@ -892,10 +880,10 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                 stats.elapsed_secs
             )
         }
-        CheckResult::Deadlock(trace, stats) => {
+        CheckResult::Deadlock(trace, actions, stats) => {
             format!(
                 r#"{{"status": "deadlock", "trace": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
-                trace_to_json(trace, &spec.vars),
+                trace_to_json_with_actions(trace, actions, &spec.vars),
                 stats.states_explored,
                 stats.transitions,
                 stats.max_depth_reached,
@@ -1273,7 +1261,7 @@ mod tests {
 
         let result = check(&spec, &Env::new(), &CheckerConfig::default());
         match result {
-            CheckResult::Deadlock(trace, _) => {
+            CheckResult::Deadlock(trace, _, _) => {
                 assert_eq!(trace.len(), 3);
                 let final_state = trace.last().unwrap();
                 assert_eq!(final_state.values.get(0), Some(&Value::Int(2)));

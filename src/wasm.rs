@@ -139,7 +139,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
                 format_trace(&violation.cycle, vars),
             ]),
         },
-        CheckResult::Deadlock(trace, stats) => WasmCheckResult {
+        CheckResult::Deadlock(trace, _, stats) => WasmCheckResult {
             success: false,
             error_type: Some("Deadlock".into()),
             error_message: Some("Deadlock detected".into()),

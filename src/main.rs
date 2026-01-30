@@ -102,7 +102,7 @@ fn main() -> ExitCode {
 
     if args.len() < 2 {
         eprintln!(
-            "Usage: {} <spec.tla> [--constant NAME=VALUE] [--symmetry CONST] [--max-states N] [--export-dot FILE] [--allow-deadlock] [--check-liveness]",
+            "Usage: {} <spec.tla> [--constant NAME=VALUE] [--symmetry NAME] [--max-states N] [--export-dot FILE] [--allow-deadlock] [--check-liveness]",
             args[0]
         );
         return ExitCode::FAILURE;
@@ -281,10 +281,10 @@ fn main() -> ExitCode {
                 println!(
                     "                             Formats: 3, TRUE, FALSE, \"str\", name, {{s1,s2}}"
                 );
-                println!("  --symmetry, -s CONST       Enable symmetry reduction for a constant");
                 println!(
-                    "                             Can be used multiple times for multiple constants"
+                    "  --symmetry, -s NAME        Enable symmetry reduction for a set constant"
                 );
+                println!("                             e.g. --symmetry Serials (not a number)");
                 println!(
                     "  --max-states N             Maximum states to explore (default: 1000000)"
                 );
@@ -567,7 +567,7 @@ fn main() -> ExitCode {
     if let Some(ref trace_path) = config.trace_json_path {
         let trace = match &result {
             CheckResult::InvariantViolation(cex, _) => Some(&cex.trace),
-            CheckResult::Deadlock(trace, _) => Some(trace),
+            CheckResult::Deadlock(trace, _, _) => Some(trace),
             CheckResult::NextError(_, trace) => Some(trace),
             CheckResult::InvariantError(_, trace) => Some(trace),
             _ => None,
@@ -615,7 +615,7 @@ fn main() -> ExitCode {
         CheckResult::Ok(stats) => {
             println!("Model checking complete. No errors found.");
             println!();
-            println!("  States explored: {}", stats.states_explored);
+            println!("  Reachable states: {}", stats.states_explored);
             println!("  Transitions: {}", stats.transitions);
             println!("  Max depth: {}", stats.max_depth_reached);
             println!("  Time: {:.3}s", stats.elapsed_secs);
@@ -671,13 +671,16 @@ fn main() -> ExitCode {
             println!("  Time: {:.3}s", stats.elapsed_secs);
             ExitCode::FAILURE
         }
-        CheckResult::Deadlock(trace, stats) => {
+        CheckResult::Deadlock(trace, actions, stats) => {
             println!("Deadlock detected!");
             println!();
             println!("Trace to deadlock state ({} states):", trace.len());
             println!("  (* marks changed variables)");
             println!();
-            print!("{}", format_trace_with_diffs(&trace, &spec.vars));
+            print!(
+                "{}",
+                format_trace_with_actions(&trace, &actions, &spec.vars)
+            );
             println!();
             println!("  States explored: {}", stats.states_explored);
             println!("  Transitions: {}", stats.transitions);
@@ -687,22 +690,22 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         CheckResult::InitError(e) => {
-            let diag = eval_error_to_diagnostic(&e)
-                .with_note("error occurred while evaluating Init");
+            let diag =
+                eval_error_to_diagnostic(&e).with_note("error occurred while evaluating Init");
             eprintln!("{}", diag.render_colored(&source, &colors));
             ExitCode::FAILURE
         }
         CheckResult::NextError(e, trace) => {
-            let diag = eval_error_to_diagnostic(&e)
-                .with_note("error occurred while evaluating Next");
+            let diag =
+                eval_error_to_diagnostic(&e).with_note("error occurred while evaluating Next");
             eprintln!("{}", diag.render_colored(&source, &colors));
             eprintln!("State when error occurred:");
             print!("{}", format_trace(&trace, &spec.vars));
             ExitCode::FAILURE
         }
         CheckResult::InvariantError(e, trace) => {
-            let diag = eval_error_to_diagnostic(&e)
-                .with_note("error occurred while evaluating invariant");
+            let diag =
+                eval_error_to_diagnostic(&e).with_note("error occurred while evaluating invariant");
             eprintln!("{}", diag.render_colored(&source, &colors));
             eprintln!("State when error occurred:");
             print!("{}", format_trace(&trace, &spec.vars));
@@ -744,7 +747,9 @@ fn main() -> ExitCode {
                 );
                 println!();
                 println!("To reduce state space:");
-                println!("  --symmetry CONST     Enable symmetry reduction");
+                println!(
+                    "  --symmetry NAME      Enable symmetry reduction (e.g. --symmetry Serials)"
+                );
                 ExitCode::FAILURE
             }
         }
@@ -781,8 +786,8 @@ fn main() -> ExitCode {
                     );
                 }
             } else {
-                diag = diag
-                    .with_help("verify Init predicate can be satisfied with the given domains");
+                diag =
+                    diag.with_help("verify Init predicate can be satisfied with the given domains");
             }
             eprintln!("{}", diag.render_colored(&source, &colors));
             ExitCode::FAILURE
@@ -794,11 +799,8 @@ fn main() -> ExitCode {
                 .map(|c| format!("--constant {}=VALUE", c))
                 .collect::<Vec<_>>()
                 .join(" ");
-            let diag = Diagnostic::error(format!(
-                "missing constant values: {}",
-                names.join(", ")
-            ))
-            .with_help(format!("provide values with {}", example));
+            let diag = Diagnostic::error(format!("missing constant values: {}", names.join(", ")))
+                .with_help(format!("provide values with {}", example));
             eprintln!("{}", diag.render_colored(&source, &colors));
             ExitCode::FAILURE
         }
