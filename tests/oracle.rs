@@ -464,6 +464,17 @@ fn test_official_hanoi() {
     );
 }
 
+#[test]
+fn test_official_queens_parses() {
+    let path = Path::new("test_cases/official/Queens.tla");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let spec = parse(&input).expect("failed to parse Queens.tla");
+    assert!(
+        !spec.invariants.is_empty(),
+        "Queens.tla should have TypeInvariant detected as invariant"
+    );
+}
+
 fn make_str_set(values: &[&str]) -> Value {
     let set: BTreeSet<Value> = values.iter().map(|s| Value::Str(Arc::from(*s))).collect();
     Value::Set(set)

@@ -72,21 +72,33 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_and_conjunct(&mut self) -> Result<Expr> {
+    fn parse_and_conjunct(&mut self, list_col: Option<u32>) -> Result<Expr> {
         let left = self.parse_comparison()?;
-        match self.peek() {
+        let mut result = match self.peek() {
             Token::Implies => {
                 self.advance();
                 let right = self.parse_comparison()?;
-                Ok(Expr::Implies(Box::new(left), Box::new(right)))
+                Expr::Implies(Box::new(left), Box::new(right))
             }
             Token::Equiv => {
                 self.advance();
                 let right = self.parse_comparison()?;
-                Ok(Expr::Equiv(Box::new(left), Box::new(right)))
+                Expr::Equiv(Box::new(left), Box::new(right))
             }
-            _ => Ok(left),
+            _ => left,
+        };
+        while *self.peek() == Token::And {
+            if let Some(lc) = list_col
+                && self.paren_depth == 0
+                && self.current_column() == lc
+            {
+                break;
+            }
+            self.advance();
+            let right = self.parse_comparison()?;
+            result = Expr::And(Box::new(result), Box::new(right));
         }
+        Ok(result)
     }
 
     fn parse_and(&mut self) -> Result<Expr> {
@@ -96,12 +108,12 @@ impl Parser {
             self.advance();
             self.consume_label();
         }
-        let mut left = self.parse_and_conjunct()?;
+        let mut left = self.parse_and_conjunct(list_anchor.map(|(c, _)| c))?;
         loop {
             match self.peek() {
                 Token::And => {
-                    if let Some((lc, ll)) = list_anchor {
-                        if self.col_mismatch(lc, ll) {
+                    if let Some((lc, _)) = list_anchor {
+                        if self.paren_depth == 0 && self.current_column() != lc {
                             break;
                         }
                     } else {
@@ -109,13 +121,13 @@ impl Parser {
                     }
                     self.advance();
                     let label = self.consume_label();
-                    let right = self.parse_and_conjunct()?;
+                    let right = self.parse_and_conjunct(list_anchor.map(|(c, _)| c))?;
                     let right = wrap_with_label(right, label);
                     left = Expr::And(Box::new(left), Box::new(right));
                 }
                 Token::ActionCompose => {
                     self.advance();
-                    let right = self.parse_and_conjunct()?;
+                    let right = self.parse_and_conjunct(list_anchor.map(|(c, _)| c))?;
                     left = Expr::ActionCompose(Box::new(left), Box::new(right));
                 }
                 _ => break,

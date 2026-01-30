@@ -135,6 +135,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_inline_and_within_conjunction_list() {
+        let input = "/\\ a \\in S /\\ b > 0\n/\\ c \\in T /\\ d > 1";
+        let expr = parse_expr(input).unwrap();
+        if let Expr::And(left, right) = expr {
+            assert!(matches!(*left, Expr::And(_, _)));
+            assert!(matches!(*right, Expr::And(_, _)));
+        } else {
+            panic!("expected top-level And");
+        }
+    }
+
+    #[test]
+    fn parse_simple_infix_and() {
+        let expr = parse_expr("a /\\ b /\\ c").unwrap();
+        assert!(matches!(expr, Expr::And(_, _)));
+    }
+
+    #[test]
     fn parse_spec_counter() {
         let input = r#"
             VARIABLES count
