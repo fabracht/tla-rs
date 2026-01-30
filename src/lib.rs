@@ -10,8 +10,8 @@ pub mod lexer;
 pub mod liveness;
 pub mod modules;
 pub mod parser;
-pub mod scenario;
 pub mod scc;
+pub mod scenario;
 pub mod source;
 pub mod span;
 pub mod stdlib;
@@ -20,8 +20,13 @@ pub mod symmetry;
 pub mod wasm;
 
 pub use diagnostic::{Diagnostic, Severity};
-pub use eval::{reset_tlc_state, set_checker_level, set_random_seed, update_checker_stats, CheckerStats, ResolvedInstances};
+pub use eval::{
+    CheckerStats, ResolvedInstances, reset_tlc_state, set_checker_level, set_random_seed,
+    update_checker_stats,
+};
 #[cfg(feature = "profiling")]
-pub use eval::{get_profiling_stats, report_profiling_stats, reset_profiling_stats, ProfilingStats};
+pub use eval::{
+    ProfilingStats, get_profiling_stats, report_profiling_stats, reset_profiling_stats,
+};
 pub use source::Source;
 pub use span::{Span, Spanned};

@@ -15,6 +15,7 @@ pub struct Diagnostic {
     pub message: String,
     pub span: Option<Span>,
     pub label: Option<String>,
+    pub note: Option<String>,
     pub help: Option<String>,
 }
 
@@ -25,6 +26,7 @@ impl Diagnostic {
             message: message.into(),
             span: None,
             label: None,
+            note: None,
             help: None,
         }
     }
@@ -35,6 +37,7 @@ impl Diagnostic {
             message: message.into(),
             span: None,
             label: None,
+            note: None,
             help: None,
         }
     }
@@ -46,6 +49,15 @@ impl Diagnostic {
 
     pub fn with_label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        let new_note = note.into();
+        self.note = Some(match self.note {
+            Some(existing) => format!("{}\n   = note: {}", existing, new_note),
+            None => new_note,
+        });
         self
     }
 
@@ -75,11 +87,31 @@ impl Diagnostic {
 
             let line_text = source.line_text(line);
             let line_num_width = line.to_string().len().max(2);
-            let _ = writeln!(out, "{:>width$} | {}", line, line_text, width = line_num_width);
+
+            if line > 1 {
+                let ctx_text = source.line_text(line - 1);
+                let _ = writeln!(
+                    out,
+                    "{:>width$} | {}",
+                    line - 1,
+                    ctx_text,
+                    width = line_num_width
+                );
+            }
+
+            let _ = writeln!(
+                out,
+                "{:>width$} | {}",
+                line,
+                line_text,
+                width = line_num_width
+            );
 
             let line_start = source.line_col(span.start).1;
             let span_len = span.len() as usize;
-            let underline_len = span_len.max(1).min(line_text.len().saturating_sub(line_start - 1));
+            let underline_len = span_len
+                .max(1)
+                .min(line_text.len().saturating_sub(line_start - 1));
 
             let _ = write!(
                 out,
@@ -100,8 +132,13 @@ impl Diagnostic {
             out.push('\n');
         }
 
-        if let Some(ref help) = self.help {
+        if self.note.is_some() || self.help.is_some() {
             let _ = writeln!(out, "   |");
+        }
+        if let Some(ref note) = self.note {
+            let _ = writeln!(out, "   = note: {}", note);
+        }
+        if let Some(ref help) = self.help {
             let _ = writeln!(out, "   = help: {}", help);
         }
     }
@@ -112,9 +149,159 @@ impl Diagnostic {
             Severity::Warning => "warning",
         };
         let mut out = format!("{}: {}", severity_str, self.message);
+        if let Some(ref note) = self.note {
+            out.push_str(&format!("\nnote: {}", note));
+        }
         if let Some(ref help) = self.help {
             out.push_str(&format!("\nhelp: {}", help));
         }
+        out
+    }
+}
+
+pub struct ColorConfig {
+    enabled: bool,
+}
+
+impl ColorConfig {
+    pub fn detect() -> Self {
+        use std::io::IsTerminal;
+        Self {
+            enabled: std::env::var("NO_COLOR").is_err() && std::io::stderr().is_terminal(),
+        }
+    }
+
+    pub fn disabled() -> Self {
+        Self { enabled: false }
+    }
+
+    fn red_bold(&self, text: &str) -> String {
+        if self.enabled {
+            format!("\x1b[1;31m{}\x1b[0m", text)
+        } else {
+            text.to_string()
+        }
+    }
+
+    fn yellow_bold(&self, text: &str) -> String {
+        if self.enabled {
+            format!("\x1b[1;33m{}\x1b[0m", text)
+        } else {
+            text.to_string()
+        }
+    }
+
+    fn bold(&self, text: &str) -> String {
+        if self.enabled {
+            format!("\x1b[1m{}\x1b[0m", text)
+        } else {
+            text.to_string()
+        }
+    }
+
+    fn blue(&self, text: &str) -> String {
+        if self.enabled {
+            format!("\x1b[34m{}\x1b[0m", text)
+        } else {
+            text.to_string()
+        }
+    }
+
+    fn red(&self, text: &str) -> String {
+        if self.enabled {
+            format!("\x1b[31m{}\x1b[0m", text)
+        } else {
+            text.to_string()
+        }
+    }
+
+    fn cyan(&self, text: &str) -> String {
+        if self.enabled {
+            format!("\x1b[36m{}\x1b[0m", text)
+        } else {
+            text.to_string()
+        }
+    }
+}
+
+impl Diagnostic {
+    pub fn render_colored(&self, source: &Source, colors: &ColorConfig) -> String {
+        let mut out = String::new();
+
+        let severity_str = match self.severity {
+            Severity::Error => colors.red_bold("error"),
+            Severity::Warning => colors.yellow_bold("warning"),
+        };
+        let _ = writeln!(out, "{}: {}", severity_str, colors.bold(&self.message));
+
+        if let Some(span) = self.span {
+            let (line, col) = source.line_col(span.start);
+            let _ = writeln!(
+                out,
+                "  {} {}:{}:{}",
+                colors.blue("-->"),
+                source.name(),
+                line,
+                col
+            );
+            let _ = writeln!(out, "   {}", colors.blue("|"));
+
+            let line_text = source.line_text(line);
+            let line_num_width = line.to_string().len().max(2);
+
+            if line > 1 {
+                let ctx_text = source.line_text(line - 1);
+                let _ = writeln!(
+                    out,
+                    "{} {} {}",
+                    colors.blue(&format!("{:>width$}", line - 1, width = line_num_width)),
+                    colors.blue("|"),
+                    ctx_text
+                );
+            }
+
+            let _ = writeln!(
+                out,
+                "{} {} {}",
+                colors.blue(&format!("{:>width$}", line, width = line_num_width)),
+                colors.blue("|"),
+                line_text
+            );
+
+            let line_start = source.line_col(span.start).1;
+            let span_len = span.len() as usize;
+            let underline_len = span_len
+                .max(1)
+                .min(line_text.len().saturating_sub(line_start - 1));
+
+            let padding: String = std::iter::repeat_n(' ', line_start - 1).collect();
+            let carets: String = std::iter::repeat_n('^', underline_len).collect();
+            let label_str = self
+                .label
+                .as_ref()
+                .map(|l| format!(" {}", l))
+                .unwrap_or_default();
+
+            let _ = writeln!(
+                out,
+                "{} {} {}{}",
+                colors.blue(&format!("{:>width$}", "", width = line_num_width)),
+                colors.blue("|"),
+                padding,
+                colors.red(&format!("{}{}", carets, label_str))
+            );
+        }
+
+        if self.note.is_some() || self.help.is_some() {
+            let _ = writeln!(out, "   {}", colors.blue("|"));
+        }
+        if let Some(ref note) = self.note {
+            let _ = writeln!(out, "   {} {}", colors.blue("="), colors.cyan(&format!("note: {}", note)));
+        }
+        if let Some(ref help) = self.help {
+            let _ = writeln!(out, "   {} {}", colors.blue("="), colors.cyan(&format!("help: {}", help)));
+        }
+
         out
     }
 }
@@ -138,7 +325,11 @@ pub fn levenshtein_distance(a: &str, b: &str) -> usize {
     for i in 1..=a_len {
         curr_row[0] = i;
         for j in 1..=b_len {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
             curr_row[j] = (prev_row[j] + 1)
                 .min(curr_row[j - 1] + 1)
                 .min(prev_row[j - 1] + cost);
@@ -149,7 +340,11 @@ pub fn levenshtein_distance(a: &str, b: &str) -> usize {
     prev_row[b_len]
 }
 
-pub fn find_similar<'a>(name: &str, candidates: impl Iterator<Item = &'a str>, max_dist: usize) -> Option<&'a str> {
+pub fn find_similar<'a>(
+    name: &str,
+    candidates: impl Iterator<Item = &'a str>,
+    max_dist: usize,
+) -> Option<&'a str> {
     let mut best: Option<(&str, usize)> = None;
     for candidate in candidates {
         let dist = levenshtein_distance(name, candidate);

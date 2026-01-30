@@ -1,21 +1,31 @@
 use std::sync::Arc;
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
-    Frame,
 };
 
 use crate::ast::{Env, Spec, State, Value};
 use crate::checker::format_value;
-use crate::eval::{eval, explain_invariant_failure, state_to_env, Definitions};
+use crate::eval::{Definitions, eval, explain_invariant_failure, state_to_env};
 
 use super::state::{ExplorerState, InputMode};
 
-pub(super) fn ui(f: &mut Frame, explorer: &ExplorerState, spec: &Spec, env: &Env, defs: &Definitions) {
-    let objective_height = if spec.invariants.is_empty() { 0 } else { 3 + spec.invariants.len().min(4) as u16 };
+pub(super) fn ui(
+    f: &mut Frame,
+    explorer: &ExplorerState,
+    spec: &Spec,
+    env: &Env,
+    defs: &Definitions,
+) {
+    let objective_height = if spec.invariants.is_empty() {
+        0
+    } else {
+        3 + spec.invariants.len().min(4) as u16
+    };
     let tool_active = explorer.input_mode != InputMode::Normal;
 
     let main_chunks = Layout::default()
@@ -47,8 +57,18 @@ pub(super) fn ui(f: &mut Frame, explorer: &ExplorerState, spec: &Spec, env: &Env
     render_status(f, main_chunks[4], explorer);
 }
 
-pub(super) fn ui_replay(f: &mut Frame, explorer: &ExplorerState, spec: &Spec, env: &Env, defs: &Definitions) {
-    let objective_height = if spec.invariants.is_empty() { 0 } else { 3 + spec.invariants.len().min(4) as u16 };
+pub(super) fn ui_replay(
+    f: &mut Frame,
+    explorer: &ExplorerState,
+    spec: &Spec,
+    env: &Env,
+    defs: &Definitions,
+) {
+    let objective_height = if spec.invariants.is_empty() {
+        0
+    } else {
+        3 + spec.invariants.len().min(4) as u16
+    };
 
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -68,7 +88,14 @@ pub(super) fn ui_replay(f: &mut Frame, explorer: &ExplorerState, spec: &Spec, en
     render_replay_status(f, main_chunks[4], explorer);
 }
 
-fn render_objectives(f: &mut Frame, area: Rect, state: &State, spec: &Spec, env: &Env, defs: &Definitions) {
+fn render_objectives(
+    f: &mut Frame,
+    area: Rect,
+    state: &State,
+    spec: &Spec,
+    env: &Env,
+    defs: &Definitions,
+) {
     if spec.invariants.is_empty() {
         return;
     }
@@ -92,7 +119,11 @@ fn render_objectives(f: &mut Frame, area: Rect, state: &State, spec: &Spec, env:
             Ok(Value::Bool(true)) => ("✓", Style::default().fg(Color::Green), None),
             Ok(Value::Bool(false)) => {
                 let expl = explain_invariant_failure(invariant, state, spec, env, defs, name);
-                ("✗ VIOLATED", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD), expl)
+                (
+                    "✗ VIOLATED",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    expl,
+                )
             }
             _ => ("?", Style::default().fg(Color::Yellow), None),
         };
@@ -104,12 +135,16 @@ fn render_objectives(f: &mut Frame, area: Rect, state: &State, spec: &Spec, env:
 
         if let Some(expl) = explanation {
             if !expl.failing_bindings.is_empty() {
-                let bindings_str: Vec<String> = expl.failing_bindings
+                let bindings_str: Vec<String> = expl
+                    .failing_bindings
                     .iter()
                     .map(|(var, val)| format!("{}={}", var, format_value(val)))
                     .collect();
                 lines.push(Line::from(vec![
-                    Span::styled("     For ".to_string(), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        "     For ".to_string(),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                     Span::styled(bindings_str.join(", "), Style::default().fg(Color::Yellow)),
                     Span::styled(":".to_string(), Style::default().fg(Color::DarkGray)),
                 ]));
@@ -124,14 +159,20 @@ fn render_objectives(f: &mut Frame, area: Rect, state: &State, spec: &Spec, env:
                 lines.push(Line::from(vec![
                     Span::styled(format!("       {} ", check), sub_style),
                     Span::styled(sub_eval.expression.clone(), sub_style),
-                    Span::styled(format!(" = {}", format_value(&sub_eval.value)), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!(" = {}", format_value(&sub_eval.value)),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                 ]));
             }
         }
     }
 
-    let widget = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(" Objectives (Invariants) "));
+    let widget = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Objectives (Invariants) "),
+    );
 
     f.render_widget(widget, area);
 }
@@ -155,7 +196,11 @@ fn render_state(f: &mut Frame, area: Rect, state: &State, vars: &[Arc<str>]) {
     f.render_widget(state_widget, area);
 }
 
-fn format_nested_changes(old_val: &Value, new_val: &Value, path: &str) -> Vec<(String, String, String)> {
+fn format_nested_changes(
+    old_val: &Value,
+    new_val: &Value,
+    path: &str,
+) -> Vec<(String, String, String)> {
     let mut changes = Vec::new();
     match (old_val, new_val) {
         (Value::Fn(old_map), Value::Fn(new_map)) => {
@@ -176,7 +221,11 @@ fn format_nested_changes(old_val: &Value, new_val: &Value, path: &str) -> Vec<(S
                 if !new_map.contains_key(k) {
                     let key_str = format_value(k);
                     let new_path = format!("{}[{}]", path, key_str);
-                    changes.push((new_path, format_value(old_map.get(k).unwrap()), String::new()));
+                    changes.push((
+                        new_path,
+                        format_value(old_map.get(k).unwrap()),
+                        String::new(),
+                    ));
                 }
             }
         }
@@ -195,23 +244,35 @@ fn format_nested_changes(old_val: &Value, new_val: &Value, path: &str) -> Vec<(S
             }
         }
         _ => {
-            changes.push((path.to_string(), format_value(old_val), format_value(new_val)));
+            changes.push((
+                path.to_string(),
+                format_value(old_val),
+                format_value(new_val),
+            ));
         }
     }
     changes
 }
 
 fn render_actions(f: &mut Frame, area: Rect, explorer: &ExplorerState, vars: &[Arc<str>]) {
-    let guard_indicator = if explorer.show_guards { " [g:ON] " } else { " [g:off] " };
+    let guard_indicator = if explorer.show_guards {
+        " [g:ON] "
+    } else {
+        " [g:off] "
+    };
     let title = format!(" Available Actions{}", guard_indicator);
 
     let mut items: Vec<ListItem> = Vec::new();
 
     if explorer.available_actions.is_empty() {
-        items.push(ListItem::new("  DEADLOCK — no actions available from this state")
-            .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
-        items.push(ListItem::new("  Press [b] to backtrack or [r] to reset")
-            .style(Style::default().fg(Color::DarkGray)));
+        items.push(
+            ListItem::new("  DEADLOCK — no actions available from this state")
+                .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        );
+        items.push(
+            ListItem::new("  Press [b] to backtrack or [r] to reset")
+                .style(Style::default().fg(Color::DarkGray)),
+        );
     }
 
     for (i, transition) in explorer.available_actions.iter().enumerate() {
@@ -223,8 +284,10 @@ fn render_actions(f: &mut Frame, area: Rect, explorer: &ExplorerState, vars: &[A
 
         let mut all_changes: Vec<(String, String, String)> = Vec::new();
         for (vi, var) in vars.iter().enumerate() {
-            if let (Some(old_val), Some(new_val)) = (explorer.current.values.get(vi), transition.state.values.get(vi))
-                && old_val != new_val
+            if let (Some(old_val), Some(new_val)) = (
+                explorer.current.values.get(vi),
+                transition.state.values.get(vi),
+            ) && old_val != new_val
             {
                 all_changes.extend(format_nested_changes(old_val, new_val, var));
             }
@@ -233,7 +296,8 @@ fn render_actions(f: &mut Frame, area: Rect, explorer: &ExplorerState, vars: &[A
         let change_str = if all_changes.is_empty() {
             "(no changes)".to_string()
         } else if all_changes.len() <= 3 {
-            all_changes.iter()
+            all_changes
+                .iter()
                 .map(|(path, old, new)| {
                     if old.is_empty() {
                         format!("{}': {}", path, new)
@@ -257,14 +321,30 @@ fn render_actions(f: &mut Frame, area: Rect, explorer: &ExplorerState, vars: &[A
             Style::default()
         };
 
-        let prefix = if i == explorer.selected_action { "▸ " } else { "  " };
-        items.push(ListItem::new(format!("{}[{}] {}: {}", prefix, i + 1, action_name, change_str)).style(style));
+        let prefix = if i == explorer.selected_action {
+            "▸ "
+        } else {
+            "  "
+        };
+        items.push(
+            ListItem::new(format!(
+                "{}[{}] {}: {}",
+                prefix,
+                i + 1,
+                action_name,
+                change_str
+            ))
+            .style(style),
+        );
 
         if explorer.show_guards
             && let Some(transition_with_guards) = explorer.available_actions_with_guards.get(i)
         {
             if transition_with_guards.guards.is_empty() {
-                items.push(ListItem::new("       (no preconditions)").style(Style::default().fg(Color::DarkGray)));
+                items.push(
+                    ListItem::new("       (no preconditions)")
+                        .style(Style::default().fg(Color::DarkGray)),
+                );
             } else {
                 for guard in &transition_with_guards.guards {
                     let check = if guard.result { "✓" } else { "✗" };
@@ -273,14 +353,17 @@ fn render_actions(f: &mut Frame, area: Rect, explorer: &ExplorerState, vars: &[A
                     } else {
                         Style::default().fg(Color::Red)
                     };
-                    items.push(ListItem::new(format!("       {} {}", check, guard.expression)).style(guard_style));
+                    items.push(
+                        ListItem::new(format!("       {} {}", check, guard.expression))
+                            .style(guard_style),
+                    );
                 }
             }
         }
     }
 
-    let actions_widget = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title));
+    let actions_widget =
+        List::new(items).block(Block::default().borders(Borders::ALL).title(title));
 
     let mut list_state = ListState::default();
     list_state.select(Some(explorer.selected_action));
@@ -290,17 +373,12 @@ fn render_actions(f: &mut Frame, area: Rect, explorer: &ExplorerState, vars: &[A
 
 fn render_trace(f: &mut Frame, area: Rect, explorer: &ExplorerState) {
     let trace_items: Vec<String> = std::iter::once("Init".to_string())
-        .chain(
-            explorer
-                .history
-                .iter()
-                .map(|(_, action)| {
-                    action
-                        .as_ref()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| "(unnamed)".to_string())
-                }),
-        )
+        .chain(explorer.history.iter().map(|(_, action)| {
+            action
+                .as_ref()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "(unnamed)".to_string())
+        }))
         .collect();
 
     let trace_text = trace_items.join(" → ") + " → [current]";
@@ -361,21 +439,34 @@ pub(super) fn render_repl(f: &mut Frame, area: Rect, explorer: &ExplorerState) {
                 Style::default().fg(Color::DarkGray),
             )));
             if let Some(ref output_text) = explorer.repl_output {
-                lines.push(Line::from(Span::styled(output_text, Style::default().fg(Color::Yellow))));
+                lines.push(Line::from(Span::styled(
+                    output_text,
+                    Style::default().fg(Color::Yellow),
+                )));
             }
         }
-        InputMode::Repl | InputMode::Trace | InputMode::Hypothesis | InputMode::Walk | InputMode::StepUntil => {
+        InputMode::Repl
+        | InputMode::Trace
+        | InputMode::Hypothesis
+        | InputMode::Walk
+        | InputMode::StepUntil => {
             lines.push(Line::from(vec![
                 Span::styled("> ", Style::default().fg(Color::Green)),
                 Span::raw(input),
                 Span::styled("█", Style::default().fg(Color::White)),
             ]));
             if input.is_empty() {
-                lines.push(Line::from(Span::styled(placeholder, Style::default().fg(Color::DarkGray))));
+                lines.push(Line::from(Span::styled(
+                    placeholder,
+                    Style::default().fg(Color::DarkGray),
+                )));
             }
             if let Some(output_text) = output {
                 for line in output_text.lines() {
-                    lines.push(Line::from(Span::styled(line, Style::default().fg(Color::Yellow))));
+                    lines.push(Line::from(Span::styled(
+                        line,
+                        Style::default().fg(Color::Yellow),
+                    )));
                 }
             }
         }
@@ -385,18 +476,37 @@ pub(super) fn render_repl(f: &mut Frame, area: Rect, explorer: &ExplorerState) {
         && let Some(ref trace_results) = explorer.trace_output
     {
         if trace_results.is_empty() {
-            lines.push(Line::from(Span::styled("  No changes found", Style::default().fg(Color::DarkGray))));
+            lines.push(Line::from(Span::styled(
+                "  No changes found",
+                Style::default().fg(Color::DarkGray),
+            )));
         } else {
             for change in trace_results.iter().take(10) {
-                let action_str = change.action.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "Init".to_string());
+                let action_str = change
+                    .action
+                    .as_ref()
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|| "Init".to_string());
                 lines.push(Line::from(vec![
-                    Span::styled(format!("  [{}] ", change.state_idx), Style::default().fg(Color::Cyan)),
+                    Span::styled(
+                        format!("  [{}] ", change.state_idx),
+                        Style::default().fg(Color::Cyan),
+                    ),
                     Span::styled(&change.path, Style::default().fg(Color::White)),
                     Span::raw(": "),
-                    Span::styled(format_value(&change.old_value), Style::default().fg(Color::Red)),
+                    Span::styled(
+                        format_value(&change.old_value),
+                        Style::default().fg(Color::Red),
+                    ),
                     Span::raw(" -> "),
-                    Span::styled(format_value(&change.new_value), Style::default().fg(Color::Green)),
-                    Span::styled(format!(" ({})", action_str), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format_value(&change.new_value),
+                        Style::default().fg(Color::Green),
+                    ),
+                    Span::styled(
+                        format!(" ({})", action_str),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                 ]));
             }
             if trace_results.len() > 10 {
@@ -408,8 +518,8 @@ pub(super) fn render_repl(f: &mut Frame, area: Rect, explorer: &ExplorerState) {
         }
     }
 
-    let repl_widget = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(title));
+    let repl_widget =
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title));
 
     f.render_widget(repl_widget, area);
 }
@@ -453,7 +563,10 @@ fn render_tool_panel(f: &mut Frame, area: Rect, explorer: &ExplorerState) {
     ]));
 
     if input.is_empty() {
-        lines.push(Line::from(Span::styled(placeholder, Style::default().fg(Color::DarkGray))));
+        lines.push(Line::from(Span::styled(
+            placeholder,
+            Style::default().fg(Color::DarkGray),
+        )));
     }
 
     lines.push(Line::from(""));
@@ -462,21 +575,47 @@ fn render_tool_panel(f: &mut Frame, area: Rect, explorer: &ExplorerState) {
         InputMode::Trace => {
             if let Some(ref trace_results) = explorer.trace_output {
                 if trace_results.is_empty() {
-                    lines.push(Line::from(Span::styled("No changes found", Style::default().fg(Color::DarkGray))));
+                    lines.push(Line::from(Span::styled(
+                        "No changes found",
+                        Style::default().fg(Color::DarkGray),
+                    )));
                 } else {
                     for (i, change) in trace_results.iter().enumerate() {
-                        let action_str = change.action.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "Init".to_string());
-                        let connector = if i == trace_results.len() - 1 { "└" } else { "├" };
+                        let action_str = change
+                            .action
+                            .as_ref()
+                            .map(|a| a.to_string())
+                            .unwrap_or_else(|| "Init".to_string());
+                        let connector = if i == trace_results.len() - 1 {
+                            "└"
+                        } else {
+                            "├"
+                        };
                         lines.push(Line::from(vec![
-                            Span::styled(format!(" {} ", connector), Style::default().fg(Color::DarkGray)),
-                            Span::styled(format!("[{}]", change.state_idx), Style::default().fg(Color::Cyan)),
+                            Span::styled(
+                                format!(" {} ", connector),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                            Span::styled(
+                                format!("[{}]", change.state_idx),
+                                Style::default().fg(Color::Cyan),
+                            ),
                             Span::raw(" "),
                             Span::styled(&change.path, Style::default().fg(Color::White)),
                             Span::styled(" = ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(format_value(&change.old_value), Style::default().fg(Color::Red)),
+                            Span::styled(
+                                format_value(&change.old_value),
+                                Style::default().fg(Color::Red),
+                            ),
                             Span::styled(" → ", Style::default().fg(Color::Yellow)),
-                            Span::styled(format_value(&change.new_value), Style::default().fg(Color::Green)),
-                            Span::styled(format!("  {}", action_str), Style::default().fg(Color::DarkGray)),
+                            Span::styled(
+                                format_value(&change.new_value),
+                                Style::default().fg(Color::Green),
+                            ),
+                            Span::styled(
+                                format!("  {}", action_str),
+                                Style::default().fg(Color::DarkGray),
+                            ),
                         ]));
                     }
                 }
@@ -485,7 +624,10 @@ fn render_tool_panel(f: &mut Frame, area: Rect, explorer: &ExplorerState) {
         InputMode::Repl => {
             if let Some(ref output) = explorer.repl_output {
                 for line in output.lines() {
-                    lines.push(Line::from(Span::styled(line, Style::default().fg(Color::Yellow))));
+                    lines.push(Line::from(Span::styled(
+                        line,
+                        Style::default().fg(Color::Yellow),
+                    )));
                 }
             }
         }
@@ -519,7 +661,10 @@ pub(super) fn render_replay_trace(f: &mut Frame, area: Rect, explorer: &Explorer
 
     let mut trace_items: Vec<String> = Vec::new();
     for (i, (_, action)) in explorer.replay_trace.iter().enumerate() {
-        let name = action.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "Init".to_string());
+        let name = action
+            .as_ref()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "Init".to_string());
         let marker = if i == pos { ">" } else { " " };
         trace_items.push(format!("{}[{}] {}", marker, i, name));
     }
@@ -531,7 +676,11 @@ pub(super) fn render_replay_trace(f: &mut Frame, area: Rect, explorer: &Explorer
     let trace_text = format!("Position: {}/{}\n{}", pos, total - 1, visible.join(" → "));
 
     let trace_widget = Paragraph::new(trace_text)
-        .block(Block::default().borders(Borders::ALL).title(" Replay Trace "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Replay Trace "),
+        )
         .wrap(Wrap { trim: false });
 
     f.render_widget(trace_widget, area);

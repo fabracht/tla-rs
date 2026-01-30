@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use crate::ast::{Env, Value};
-use crate::checker::{check, format_eval_error, format_trace, CheckResult, CheckerConfig};
+use crate::checker::{CheckResult, CheckerConfig, check, format_eval_error, format_trace};
 use crate::parser::parse;
 
 #[derive(Serialize, Deserialize)]
@@ -31,7 +31,7 @@ pub fn check_spec(spec_source: &str, constants_json: &str) -> String {
                 states_explored: 0,
                 trace: None,
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
         }
     };
 
@@ -67,7 +67,7 @@ pub fn check_spec_with_config(
                 states_explored: 0,
                 trace: None,
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
         }
     };
 
@@ -95,7 +95,8 @@ fn json_to_value(v: serde_json::Value) -> Value {
         serde_json::Value::Number(n) => Value::Int(n.as_i64().unwrap_or(0)),
         serde_json::Value::String(s) => Value::Str(Arc::from(s)),
         serde_json::Value::Array(arr) => {
-            let set: std::collections::BTreeSet<Value> = arr.into_iter().map(json_to_value).collect();
+            let set: std::collections::BTreeSet<Value> =
+                arr.into_iter().map(json_to_value).collect();
             Value::Set(set)
         }
         serde_json::Value::Object(obj) => {
@@ -128,7 +129,10 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
         CheckResult::LivenessViolation(violation, stats) => WasmCheckResult {
             success: false,
             error_type: Some("LivenessViolation".into()),
-            error_message: Some(format!("Liveness property violated: {}", violation.property)),
+            error_message: Some(format!(
+                "Liveness property violated: {}",
+                violation.property
+            )),
             states_explored: stats.states_explored,
             trace: Some(vec![
                 format_trace(&violation.prefix, vars),
@@ -203,7 +207,11 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             error_type: Some("MissingConstants".into()),
             error_message: Some(format!(
                 "Missing constants: {}",
-                missing.iter().map(|s| s.as_ref()).collect::<Vec<_>>().join(", ")
+                missing
+                    .iter()
+                    .map(|s| s.as_ref())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )),
             states_explored: 0,
             trace: None,

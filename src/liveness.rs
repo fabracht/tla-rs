@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::ast::{Env, Expr, FairnessConstraint, State, Value};
-use crate::eval::{eval, is_action_enabled, Definitions, EvalError};
+use crate::eval::{Definitions, EvalError, eval, is_action_enabled};
 use crate::graph::StateGraph;
 use crate::scc::SCC;
 
@@ -33,7 +33,8 @@ pub fn check_fairness_in_scc(
             FairnessConstraint::Weak(_vars_expr, action) => {
                 let all_enabled = scc_all_enabled(graph, scc, action, vars, constants, defs)?;
                 if all_enabled {
-                    let action_taken = scc_has_action_edge(graph, scc, action, vars, constants, defs)?;
+                    let action_taken =
+                        scc_has_action_edge(graph, scc, action, vars, constants, defs)?;
                     if !action_taken {
                         return Ok(false);
                     }
@@ -42,7 +43,8 @@ pub fn check_fairness_in_scc(
             FairnessConstraint::Strong(_vars_expr, action) => {
                 let any_enabled = scc_any_enabled(graph, scc, action, vars, constants, defs)?;
                 if any_enabled {
-                    let action_taken = scc_has_action_edge(graph, scc, action, vars, constants, defs)?;
+                    let action_taken =
+                        scc_has_action_edge(graph, scc, action, vars, constants, defs)?;
                     if !action_taken {
                         return Ok(false);
                     }
@@ -140,7 +142,12 @@ fn action_matches(
 
     match eval(action, &mut env, defs) {
         Ok(Value::Bool(b)) => Ok(b),
-        Ok(_) => Err(EvalError::TypeMismatch { expected: "Bool", got: Value::Bool(false), context: Some("fairness action"),  span: None }),
+        Ok(_) => Err(EvalError::TypeMismatch {
+            expected: "Bool",
+            got: Value::Bool(false),
+            context: Some("fairness action"),
+            span: None,
+        }),
         Err(e) => Err(e),
     }
 }
@@ -167,7 +174,12 @@ pub fn check_eventually(
                 Ok(Value::Bool(true)) => return Ok(true),
                 Ok(Value::Bool(false)) => continue,
                 Ok(_) => {
-                    return Err(EvalError::TypeMismatch { expected: "Bool", got: Value::Bool(false), context: Some("liveness property"),  span: None })
+                    return Err(EvalError::TypeMismatch {
+                        expected: "Bool",
+                        got: Value::Bool(false),
+                        context: Some("liveness property"),
+                        span: None,
+                    });
                 }
                 Err(e) => return Err(e),
             }
@@ -204,7 +216,12 @@ pub fn check_leads_to(
                 Ok(Value::Bool(true)) => p_holds_somewhere = true,
                 Ok(Value::Bool(false)) => {}
                 Ok(_) => {
-                    return Err(EvalError::TypeMismatch { expected: "Bool", got: Value::Bool(false), context: Some("leads-to antecedent"),  span: None })
+                    return Err(EvalError::TypeMismatch {
+                        expected: "Bool",
+                        got: Value::Bool(false),
+                        context: Some("leads-to antecedent"),
+                        span: None,
+                    });
                 }
                 Err(e) => return Err(e),
             }
@@ -213,7 +230,12 @@ pub fn check_leads_to(
                 Ok(Value::Bool(true)) => q_holds_somewhere = true,
                 Ok(Value::Bool(false)) => {}
                 Ok(_) => {
-                    return Err(EvalError::TypeMismatch { expected: "Bool", got: Value::Bool(false), context: Some("leads-to consequent"),  span: None })
+                    return Err(EvalError::TypeMismatch {
+                        expected: "Bool",
+                        got: Value::Bool(false),
+                        context: Some("leads-to consequent"),
+                        span: None,
+                    });
                 }
                 Err(e) => return Err(e),
             }
@@ -266,12 +288,18 @@ pub fn build_counterexample(
             FairnessConstraint::Weak(_, action) => {
                 let enabled = scc_any_enabled(graph, scc, action, vars, constants, defs)?;
                 let taken = scc_has_action_edge(graph, scc, action, vars, constants, defs)?;
-                fairness_info.push((format!("WF(action): enabled={}, taken={}", enabled, taken), taken));
+                fairness_info.push((
+                    format!("WF(action): enabled={}, taken={}", enabled, taken),
+                    taken,
+                ));
             }
             FairnessConstraint::Strong(_, action) => {
                 let enabled = scc_any_enabled(graph, scc, action, vars, constants, defs)?;
                 let taken = scc_has_action_edge(graph, scc, action, vars, constants, defs)?;
-                fairness_info.push((format!("SF(action): enabled={}, taken={}", enabled, taken), taken));
+                fairness_info.push((
+                    format!("SF(action): enabled={}, taken={}", enabled, taken),
+                    taken,
+                ));
             }
         }
     }
@@ -292,7 +320,9 @@ mod tests {
     use crate::scc::compute_sccs;
 
     fn state_with_x(n: i64) -> State {
-        State { values: vec![Value::Int(n)] }
+        State {
+            values: vec![Value::Int(n)],
+        }
     }
 
     #[test]
@@ -313,10 +343,7 @@ mod tests {
         let defs = Definitions::new();
 
         let action = Expr::Lit(Value::Bool(true));
-        let fairness = vec![FairnessConstraint::Weak(
-            Expr::Var(Arc::from("x")),
-            action,
-        )];
+        let fairness = vec![FairnessConstraint::Weak(Expr::Var(Arc::from("x")), action)];
 
         let result = check_fairness_in_scc(&graph, scc, &fairness, &vars, &constants, &defs);
         assert!(result.is_ok());

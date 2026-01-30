@@ -147,6 +147,149 @@ pub enum Token {
     Eof,
 }
 
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::Ident(s) => write!(f, "identifier `{s}`"),
+            Token::Int(n) => write!(f, "integer `{n}`"),
+            Token::Str(s) => write!(f, "string \"{s}\""),
+            Token::True => write!(f, "`TRUE`"),
+            Token::False => write!(f, "`FALSE`"),
+            Token::LParen => write!(f, "`(`"),
+            Token::RParen => write!(f, "`)`"),
+            Token::LBrace => write!(f, "`{{`"),
+            Token::RBrace => write!(f, "`}}`"),
+            Token::LBracket => write!(f, "`[`"),
+            Token::RBracket => write!(f, "`]`"),
+            Token::LAngle => write!(f, "`<<`"),
+            Token::RAngle => write!(f, "`>>`"),
+            Token::Comma => write!(f, "`,`"),
+            Token::Colon => write!(f, "`:`"),
+            Token::Dot => write!(f, "`.`"),
+            Token::Prime => write!(f, "`'`"),
+            Token::Underscore => write!(f, "`_`"),
+            Token::Eq => write!(f, "`=`"),
+            Token::EqEq => write!(f, "`==`"),
+            Token::Neq => write!(f, "`#`"),
+            Token::Lt => write!(f, "`<`"),
+            Token::Le => write!(f, "`<=`"),
+            Token::Gt => write!(f, "`>`"),
+            Token::Ge => write!(f, "`>=`"),
+            Token::Plus => write!(f, "`+`"),
+            Token::Minus => write!(f, "`-`"),
+            Token::Star => write!(f, "`*`"),
+            Token::Div => write!(f, "`\\div`"),
+            Token::Mod => write!(f, "`%`"),
+            Token::DotDot => write!(f, "`..`"),
+            Token::MapsTo => write!(f, "`|->`"),
+            Token::ColonGt => write!(f, "`:>`"),
+            Token::AtAt => write!(f, "`@@`"),
+            Token::At => write!(f, "`@`"),
+            Token::Bang => write!(f, "`!`"),
+            Token::And => write!(f, "`/\\`"),
+            Token::Or => write!(f, "`\\/`"),
+            Token::Not => write!(f, "`~`"),
+            Token::Implies => write!(f, "`=>`"),
+            Token::Equiv => write!(f, "`<=>`"),
+            Token::Eventually => write!(f, "`<>`"),
+            Token::Always => write!(f, "`[]`"),
+            Token::LeadsTo => write!(f, "`~>`"),
+            Token::In => write!(f, "`\\in`"),
+            Token::NotIn => write!(f, "`\\notin`"),
+            Token::Union => write!(f, "`\\union`"),
+            Token::BigUnion => write!(f, "`UNION`"),
+            Token::Intersect => write!(f, "`\\intersect`"),
+            Token::SetMinus => write!(f, "`\\`"),
+            Token::Subseteq => write!(f, "`\\subseteq`"),
+            Token::ProperSubset => write!(f, "`\\subset`"),
+            Token::Supseteq => write!(f, "`\\supseteq`"),
+            Token::ProperSupset => write!(f, "`\\supset`"),
+            Token::Times => write!(f, "`\\X`"),
+            Token::Module => write!(f, "`MODULE`"),
+            Token::Extends => write!(f, "`EXTENDS`"),
+            Token::Variables => write!(f, "`VARIABLES`"),
+            Token::Constants => write!(f, "`CONSTANTS`"),
+            Token::Assume => write!(f, "`ASSUME`"),
+            Token::Theorem => write!(f, "`THEOREM`"),
+            Token::Invariant => write!(f, "`INVARIANT`"),
+            Token::If => write!(f, "`IF`"),
+            Token::Then => write!(f, "`THEN`"),
+            Token::Else => write!(f, "`ELSE`"),
+            Token::Case => write!(f, "`CASE`"),
+            Token::Other => write!(f, "`OTHER`"),
+            Token::Let => write!(f, "`LET`"),
+            Token::Def => write!(f, "`IN`"),
+            Token::Except => write!(f, "`EXCEPT`"),
+            Token::Domain => write!(f, "`DOMAIN`"),
+            Token::Subset => write!(f, "`SUBSET`"),
+            Token::Cardinality => write!(f, "`Cardinality`"),
+            Token::IsFiniteSet => write!(f, "`IsFiniteSet`"),
+            Token::Unchanged => write!(f, "`UNCHANGED`"),
+            Token::Choose => write!(f, "`CHOOSE`"),
+            Token::Exists => write!(f, "`\\E`"),
+            Token::Forall => write!(f, "`\\A`"),
+            Token::Recursive => write!(f, "`RECURSIVE`"),
+            Token::Lambda => write!(f, "`LAMBDA`"),
+            Token::Instance => write!(f, "`INSTANCE`"),
+            Token::Local => write!(f, "`LOCAL`"),
+            Token::With => write!(f, "`WITH`"),
+            Token::By => write!(f, "`BY`"),
+            Token::ProofDef => write!(f, "`PROOF`"),
+            Token::Qed => write!(f, "`QED`"),
+            Token::Lemma => write!(f, "`LEMMA`"),
+            Token::Enabled => write!(f, "`ENABLED`"),
+            Token::ProofStep => write!(f, "proof step"),
+            Token::LabelSep => write!(f, "`::`"),
+            Token::Semicolon => write!(f, "`;`"),
+            Token::Dollar => write!(f, "`$`"),
+            Token::Pipe => write!(f, "`|`"),
+            Token::Caret => write!(f, "`^`"),
+            Token::TransitiveClosure => write!(f, "`^+`"),
+            Token::ReflexiveTransitiveClosure => write!(f, "`^*`"),
+            Token::ActionCompose => write!(f, "`\\cdot`"),
+            Token::Ampersand => write!(f, "`&`"),
+            Token::LeftArrow => write!(f, "`<-`"),
+            Token::RightArrow => write!(f, "`->`"),
+            Token::Concat => write!(f, "`\\o`"),
+            Token::Len => write!(f, "`Len`"),
+            Token::Head => write!(f, "`Head`"),
+            Token::Tail => write!(f, "`Tail`"),
+            Token::Append => write!(f, "`Append`"),
+            Token::SubSeq => write!(f, "`SubSeq`"),
+            Token::SelectSeq => write!(f, "`SelectSeq`"),
+            Token::Seq => write!(f, "`Seq`"),
+            Token::Print => write!(f, "`Print`"),
+            Token::Assert => write!(f, "`Assert`"),
+            Token::JavaTime => write!(f, "`JavaTime`"),
+            Token::SystemTime => write!(f, "`TLCSystemTime`"),
+            Token::Permutations => write!(f, "`Permutations`"),
+            Token::SortSeq => write!(f, "`SortSeq`"),
+            Token::PrintT => write!(f, "`PrintT`"),
+            Token::TLCToString => write!(f, "`ToString`"),
+            Token::RandomElement => write!(f, "`RandomElement`"),
+            Token::TLCGet => write!(f, "`TLCGet`"),
+            Token::TLCSet => write!(f, "`TLCSet`"),
+            Token::Any => write!(f, "`Any`"),
+            Token::TLCEval => write!(f, "`TLCEval`"),
+            Token::IsABag => write!(f, "`IsABag`"),
+            Token::BagToSet => write!(f, "`BagToSet`"),
+            Token::SetToBag => write!(f, "`SetToBag`"),
+            Token::BagIn => write!(f, "`BagIn`"),
+            Token::EmptyBag => write!(f, "`EmptyBag`"),
+            Token::BagUnion => write!(f, "`BagUnion`"),
+            Token::SubBag => write!(f, "`SubBag`"),
+            Token::BagOfAll => write!(f, "`BagOfAll`"),
+            Token::BagCardinality => write!(f, "`BagCardinality`"),
+            Token::CopiesIn => write!(f, "`CopiesIn`"),
+            Token::BagAdd => write!(f, "`(+)`"),
+            Token::BagSub => write!(f, "`(-)`"),
+            Token::SqSubseteq => write!(f, "`\\sqsubseteq`"),
+            Token::CustomOp(name) => write!(f, "operator `{name}`"),
+            Token::Eof => write!(f, "end of input"),
+        }
+    }
+}
+
 pub struct Lexer<'a> {
     input: &'a str,
     pos: usize,
@@ -156,7 +299,12 @@ pub struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
-        Self { input, pos: 0, seen_module: false, module_ended: false }
+        Self {
+            input,
+            pos: 0,
+            seen_module: false,
+            module_ended: false,
+        }
     }
 
     fn peek_char(&self) -> Option<char> {
@@ -260,10 +408,11 @@ impl<'a> Lexer<'a> {
         if self.consume("~>") {
             return Ok(Token::LeadsTo);
         }
-        if self.starts_with("<") && self.input[self.pos + 1..]
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_digit())
+        if self.starts_with("<")
+            && self.input[self.pos + 1..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit())
         {
             self.advance();
             while self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
@@ -272,7 +421,10 @@ impl<'a> Lexer<'a> {
             if self.peek_char() == Some('>') {
                 self.advance();
             }
-            while self.peek_char().is_some_and(|c| c.is_alphanumeric() || c == '.') {
+            while self
+                .peek_char()
+                .is_some_and(|c| c.is_alphanumeric() || c == '.')
+            {
                 self.advance();
             }
             return Ok(Token::ProofStep);
@@ -307,7 +459,8 @@ impl<'a> Lexer<'a> {
         if self.consume("#") || self.consume("/=") || self.consume("\\#") || self.consume("≠") {
             return Ok(Token::Neq);
         }
-        if self.consume("<=") || self.consume("=<") || self.consume("\\leq") || self.consume("≤") {
+        if self.consume("<=") || self.consume("=<") || self.consume("\\leq") || self.consume("≤")
+        {
             return Ok(Token::Le);
         }
         if self.consume(">=") || self.consume("\\geq") || self.consume("≥") {
@@ -387,7 +540,10 @@ impl<'a> Lexer<'a> {
             {
                 self.pos += 2;
                 let start = self.pos;
-                while self.peek_char().is_some_and(|c| c.is_ascii_digit() && c < '8') {
+                while self
+                    .peek_char()
+                    .is_some_and(|c| c.is_ascii_digit() && c < '8')
+                {
                     self.advance();
                 }
                 let n = i64::from_str_radix(&self.input[start..self.pos], 8)
@@ -416,7 +572,8 @@ impl<'a> Lexer<'a> {
         if self.consume("\\A") || self.consume("\\forall") || self.consume("∀") {
             return Ok(Token::Forall);
         }
-        if self.consume("~") || self.consume("\\lnot") || self.consume("\\neg") || self.consume("¬") {
+        if self.consume("~") || self.consume("\\lnot") || self.consume("\\neg") || self.consume("¬")
+        {
             return Ok(Token::Not);
         }
         if self.starts_with("\\o")
@@ -428,10 +585,11 @@ impl<'a> Lexer<'a> {
             self.pos += 2;
             return Ok(Token::Concat);
         }
-        if self.starts_with("\\") && self.input[self.pos + 1..]
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_alphabetic())
+        if self.starts_with("\\")
+            && self.input[self.pos + 1..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphabetic())
         {
             self.advance();
             let start = self.pos;
@@ -729,10 +887,11 @@ impl<'a> Lexer<'a> {
         if self.consume("~>") {
             return Ok(Token::LeadsTo);
         }
-        if self.starts_with("<") && self.input[self.pos + 1..]
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_digit())
+        if self.starts_with("<")
+            && self.input[self.pos + 1..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit())
         {
             self.advance();
             while self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
@@ -741,7 +900,10 @@ impl<'a> Lexer<'a> {
             if self.peek_char() == Some('>') {
                 self.advance();
             }
-            while self.peek_char().is_some_and(|c| c.is_alphanumeric() || c == '.') {
+            while self
+                .peek_char()
+                .is_some_and(|c| c.is_alphanumeric() || c == '.')
+            {
                 self.advance();
             }
             return Ok(Token::ProofStep);
@@ -776,7 +938,8 @@ impl<'a> Lexer<'a> {
         if self.consume("#") || self.consume("/=") || self.consume("\\#") || self.consume("≠") {
             return Ok(Token::Neq);
         }
-        if self.consume("<=") || self.consume("=<") || self.consume("\\leq") || self.consume("≤") {
+        if self.consume("<=") || self.consume("=<") || self.consume("\\leq") || self.consume("≤")
+        {
             return Ok(Token::Le);
         }
         if self.consume(">=") || self.consume("\\geq") || self.consume("≥") {
@@ -856,7 +1019,10 @@ impl<'a> Lexer<'a> {
             {
                 self.pos += 2;
                 let start = self.pos;
-                while self.peek_char().is_some_and(|c| c.is_ascii_digit() && c < '8') {
+                while self
+                    .peek_char()
+                    .is_some_and(|c| c.is_ascii_digit() && c < '8')
+                {
                     self.advance();
                 }
                 let n = i64::from_str_radix(&self.input[start..self.pos], 8)
@@ -885,7 +1051,8 @@ impl<'a> Lexer<'a> {
         if self.consume("\\A") || self.consume("\\forall") || self.consume("∀") {
             return Ok(Token::Forall);
         }
-        if self.consume("~") || self.consume("\\lnot") || self.consume("\\neg") || self.consume("¬") {
+        if self.consume("~") || self.consume("\\lnot") || self.consume("\\neg") || self.consume("¬")
+        {
             return Ok(Token::Not);
         }
         if self.starts_with("\\o")
@@ -897,10 +1064,11 @@ impl<'a> Lexer<'a> {
             self.pos += 2;
             return Ok(Token::Concat);
         }
-        if self.starts_with("\\") && self.input[self.pos + 1..]
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_alphabetic())
+        if self.starts_with("\\")
+            && self.input[self.pos + 1..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphabetic())
         {
             self.advance();
             let start = self.pos;
@@ -923,7 +1091,9 @@ impl<'a> Lexer<'a> {
             return Ok(Token::RightArrow);
         }
 
-        let c = self.peek_char().ok_or_else(|| LexError::new("unexpected end of input", self.pos))?;
+        let c = self
+            .peek_char()
+            .ok_or_else(|| LexError::new("unexpected end of input", self.pos))?;
 
         if c == '(' {
             self.advance();
@@ -1151,7 +1321,10 @@ impl<'a> Lexer<'a> {
             return Ok(tok);
         }
 
-        Err(LexError::new(format!("unexpected character: {}", c), self.pos))
+        Err(LexError::new(
+            format!("unexpected character: {}", c),
+            self.pos,
+        ))
     }
 
     pub fn tokenize_spanned(&mut self) -> Result<Vec<Spanned<Token>>, LexError> {

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tlc_executor::ast::{Env, Value};
-use tlc_executor::checker::{check, CheckResult, CheckerConfig};
+use tlc_executor::checker::{CheckResult, CheckerConfig, check};
 use tlc_executor::parser::parse;
 
 fn check_spec_file(path: &Path) -> CheckResult {
@@ -74,7 +74,10 @@ fn test_should_violate_counter_overflow() {
             assert_eq!(cex.violated_invariant, 0);
             assert!(cex.trace.len() >= 6, "trace should reach count=6");
         }
-        other => panic!("counter_overflow.tla should violate invariant, got: {:?}", other),
+        other => panic!(
+            "counter_overflow.tla should violate invariant, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -462,10 +465,7 @@ fn test_official_hanoi() {
 }
 
 fn make_str_set(values: &[&str]) -> Value {
-    let set: BTreeSet<Value> = values
-        .iter()
-        .map(|s| Value::Str(Arc::from(*s)))
-        .collect();
+    let set: BTreeSet<Value> = values.iter().map(|s| Value::Str(Arc::from(*s))).collect();
     Value::Set(set)
 }
 
@@ -494,7 +494,10 @@ fn test_mqdb_core() {
     let result = check(&spec, &domains, &config);
 
     assert!(
-        matches!(result, CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_)),
+        matches!(
+            result,
+            CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_)
+        ),
         "MQDBCore.tla should pass or reach max states, got: {result:?}",
     );
 }
@@ -518,7 +521,12 @@ fn test_mqdb_constraints() {
     let result = check(&spec, &domains, &config);
 
     assert!(
-        matches!(result, CheckResult::InvariantViolation(_, _) | CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_)),
+        matches!(
+            result,
+            CheckResult::InvariantViolation(_, _)
+                | CheckResult::Ok(_)
+                | CheckResult::MaxStatesExceeded(_)
+        ),
         "MQDBConstraints.tla should find violation, pass or reach max states, got: {result:?}",
     );
 }
@@ -544,7 +552,10 @@ fn test_mqdb_consumer_group() {
     let result = check(&spec, &domains, &config);
 
     assert!(
-        matches!(result, CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_)),
+        matches!(
+            result,
+            CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_)
+        ),
         "MQDBConsumerGroup.tla should pass or reach max states, got: {result:?}",
     );
 }
@@ -571,7 +582,10 @@ fn test_mqdb_cluster() {
     assert!(
         matches!(
             result,
-            CheckResult::InvariantViolation(_, _) | CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_) | CheckResult::MaxDepthExceeded(_)
+            CheckResult::InvariantViolation(_, _)
+                | CheckResult::Ok(_)
+                | CheckResult::MaxStatesExceeded(_)
+                | CheckResult::MaxDepthExceeded(_)
         ),
         "MQDBCluster.tla should find violation, pass or reach limits, got: {result:?}",
     );

@@ -109,7 +109,9 @@ impl SymmetryConfig {
     }
 
     fn apply_mapping(&self, state: &State, mapping: &BTreeMap<Value, Value>) -> State {
-        let values = state.values.iter()
+        let values = state
+            .values
+            .iter()
             .map(|value| self.apply_mapping_to_value(value, mapping))
             .collect();
         State { values }
@@ -178,7 +180,9 @@ mod tests {
     #[test]
     fn empty_symmetry_returns_same_state() {
         let config = SymmetryConfig::new();
-        let state = State { values: vec![Value::Int(42)] };
+        let state = State {
+            values: vec![Value::Int(42)],
+        };
 
         let canonical = config.canonicalize(&state);
         assert_eq!(*canonical, state);
@@ -189,7 +193,9 @@ mod tests {
         let mut config = SymmetryConfig::new();
         config.add_symmetric_set(BTreeSet::from([str_val("a")]));
 
-        let state = State { values: vec![str_val("a")] };
+        let state = State {
+            values: vec![str_val("a")],
+        };
 
         let canonical = config.canonicalize(&state);
         assert_eq!(*canonical, state);
@@ -198,13 +204,19 @@ mod tests {
     #[test]
     fn canonicalize_swaps_elements_based_on_first_occurrence() {
         let mut config = SymmetryConfig::new();
-        config.add_symmetric_set(BTreeSet::from([str_val("p1"), str_val("p2"), str_val("p3")]));
+        config.add_symmetric_set(BTreeSet::from([
+            str_val("p1"),
+            str_val("p2"),
+            str_val("p3"),
+        ]));
 
         let mut votes = BTreeMap::new();
         votes.insert(str_val("p2"), Value::Int(1));
         votes.insert(str_val("p1"), Value::Int(0));
         votes.insert(str_val("p3"), Value::Int(0));
-        let state = State { values: vec![Value::Fn(votes)] };
+        let state = State {
+            values: vec![Value::Fn(votes)],
+        };
 
         let canonical = config.canonicalize(&state);
 
@@ -222,8 +234,12 @@ mod tests {
         let mut config = SymmetryConfig::new();
         config.add_symmetric_set(BTreeSet::from([str_val("a"), str_val("b")]));
 
-        let state1 = State { values: vec![str_val("a")] };
-        let state2 = State { values: vec![str_val("b")] };
+        let state1 = State {
+            values: vec![str_val("a")],
+        };
+        let state2 = State {
+            values: vec![str_val("b")],
+        };
 
         let c1 = config.canonicalize(&state1);
         let c2 = config.canonicalize(&state2);
@@ -237,7 +253,9 @@ mod tests {
         config.add_symmetric_set(BTreeSet::from([str_val("x"), str_val("y")]));
 
         let inner_set = BTreeSet::from([str_val("y")]);
-        let state = State { values: vec![Value::Set(inner_set)] };
+        let state = State {
+            values: vec![Value::Set(inner_set)],
+        };
 
         let canonical = config.canonicalize(&state);
 

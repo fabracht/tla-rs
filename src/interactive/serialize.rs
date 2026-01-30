@@ -8,15 +8,11 @@ pub(super) fn value_to_json(v: &Value) -> serde_json::Value {
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Int(n) => serde_json::Value::Number((*n).into()),
         Value::Str(s) => serde_json::Value::String(s.to_string()),
-        Value::Set(set) => {
-            serde_json::Value::Array(set.iter().map(value_to_json).collect())
-        }
+        Value::Set(set) => serde_json::Value::Array(set.iter().map(value_to_json).collect()),
         Value::Fn(map) => {
             let entries: Vec<serde_json::Value> = map
                 .iter()
-                .map(|(k, v)| {
-                    serde_json::json!([value_to_json(k), value_to_json(v)])
-                })
+                .map(|(k, v)| serde_json::json!([value_to_json(k), value_to_json(v)]))
                 .collect();
             serde_json::json!({"__fn": entries})
         }
@@ -39,10 +35,8 @@ pub(super) fn json_to_value(j: &serde_json::Value) -> Option<Value> {
         serde_json::Value::Number(n) => Some(Value::Int(n.as_i64()?)),
         serde_json::Value::String(s) => Some(Value::Str(Arc::from(s.as_str()))),
         serde_json::Value::Array(arr) => {
-            let set: std::collections::BTreeSet<Value> = arr
-                .iter()
-                .filter_map(json_to_value)
-                .collect();
+            let set: std::collections::BTreeSet<Value> =
+                arr.iter().filter_map(json_to_value).collect();
             Some(Value::Set(set))
         }
         serde_json::Value::Object(obj) => {

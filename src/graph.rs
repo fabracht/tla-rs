@@ -91,7 +91,9 @@ mod tests {
     use crate::ast::{State, Value};
 
     fn state_with_x(n: i64) -> State {
-        State { values: vec![Value::Int(n)] }
+        State {
+            values: vec![Value::Int(n)],
+        }
     }
 
     #[test]

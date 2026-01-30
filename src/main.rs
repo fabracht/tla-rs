@@ -10,14 +10,18 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use tlc_executor::Source;
 use tlc_executor::ast::{Env, Value};
-use tlc_executor::checker::{check, check_result_to_json, eval_error_to_diagnostic, format_eval_error, format_trace, format_trace_with_actions, format_trace_with_diffs, write_trace_json, CheckResult, CheckerConfig};
-use tlc_executor::diagnostic::Diagnostic;
+use tlc_executor::checker::{
+    CheckResult, CheckerConfig, check, check_result_to_json, eval_error_to_diagnostic,
+    format_eval_error, format_trace, format_trace_with_actions, format_trace_with_diffs,
+    write_trace_json,
+};
+use tlc_executor::diagnostic::{ColorConfig, Diagnostic};
 #[cfg(not(target_arch = "wasm32"))]
 use tlc_executor::interactive::{run_interactive, run_interactive_replay};
 use tlc_executor::parser::parse;
 use tlc_executor::scenario::{execute_scenario, format_scenario_result, parse_scenario};
-use tlc_executor::Source;
 
 fn split_top_level(s: &str, delim: char) -> Vec<String> {
     let mut parts = Vec::new();
@@ -84,8 +88,7 @@ fn parse_constant_value(s: &str) -> Option<Value> {
 }
 
 fn is_likely_subcommand(arg: &str) -> bool {
-    ["check", "run", "verify", "parse", "lint", "test"]
-        .contains(&arg.to_lowercase().as_str())
+    ["check", "run", "verify", "parse", "lint", "test"].contains(&arg.to_lowercase().as_str())
 }
 
 fn main() -> ExitCode {
@@ -95,7 +98,10 @@ fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: {} <spec.tla> [--constant NAME=VALUE] [--symmetry CONST] [--max-states N] [--export-dot FILE] [--allow-deadlock] [--check-liveness]", args[0]);
+        eprintln!(
+            "Usage: {} <spec.tla> [--constant NAME=VALUE] [--symmetry CONST] [--max-states N] [--export-dot FILE] [--allow-deadlock] [--check-liveness]",
+            args[0]
+        );
         return ExitCode::FAILURE;
     }
 
@@ -129,7 +135,9 @@ fn main() -> ExitCode {
                         Some(val) => constants.push((name, val)),
                         None => {
                             eprintln!("invalid constant value: {}", val_str);
-                            eprintln!("supported formats: integer, TRUE, FALSE, \"string\", {{1,2,3}}");
+                            eprintln!(
+                                "supported formats: integer, TRUE, FALSE, \"string\", {{1,2,3}}"
+                            );
                             return ExitCode::FAILURE;
                         }
                     }
@@ -260,14 +268,22 @@ fn main() -> ExitCode {
                 println!();
                 println!("Options:");
                 println!("  --constant, -c NAME=VALUE  Set a constant value");
-                println!("                             Formats: 3, TRUE, FALSE, \"str\", {{1,2,3}}");
+                println!(
+                    "                             Formats: 3, TRUE, FALSE, \"str\", {{1,2,3}}"
+                );
                 println!("  --symmetry, -s CONST       Enable symmetry reduction for a constant");
-                println!("                             Can be used multiple times for multiple constants");
-                println!("  --max-states N             Maximum states to explore (default: 1000000)");
+                println!(
+                    "                             Can be used multiple times for multiple constants"
+                );
+                println!(
+                    "  --max-states N             Maximum states to explore (default: 1000000)"
+                );
                 println!("  --max-depth N              Maximum trace depth (default: 100)");
                 println!("  --export-dot FILE          Export state graph to DOT format");
                 println!("  --trace-json FILE          Export counterexample trace to JSON format");
-                println!("  --save-counterexample FILE Export counterexample with metadata for replay");
+                println!(
+                    "  --save-counterexample FILE Export counterexample with metadata for replay"
+                );
                 println!("  --replay FILE              Replay a counterexample interactively");
                 println!("  --allow-deadlock           Allow states with no successors");
                 println!("  --check-liveness           Check liveness and fairness properties");
@@ -275,7 +291,9 @@ fn main() -> ExitCode {
                 println!("  --verbose, -v              Verbose output (show more details)");
                 println!("  -vv                        Debug output (show all details)");
                 println!("  --json                     Output results in JSON format");
-                println!("  --validate                 Parse and validate spec without model checking");
+                println!(
+                    "  --validate                 Parse and validate spec without model checking"
+                );
                 println!("  --list-invariants          Show detected invariants and exit");
                 println!("  --scenario TEXT            Explore a specific scenario (or @file)");
                 println!("  --interactive, -i          Interactive TUI exploration mode");
@@ -335,6 +353,7 @@ fn main() -> ExitCode {
     };
 
     let source = Source::new(spec_path.as_str(), input.as_str());
+    let colors = ColorConfig::detect();
 
     let spec = match parse(&input) {
         Ok(s) => s,
@@ -348,7 +367,10 @@ fn main() -> ExitCode {
             {
                 diag = diag.with_label(format!("expected {}, found {}", expected, found));
             }
-            eprintln!("{}", diag.render(&source));
+            if let Some(help) = &e.help {
+                diag = diag.with_help(help);
+            }
+            eprintln!("{}", diag.render_colored(&source, &colors));
             return ExitCode::FAILURE;
         }
     };
@@ -390,7 +412,14 @@ fn main() -> ExitCode {
             .filter(|c| !domains.contains_key(c.as_ref()))
             .collect();
         if !missing.is_empty() {
-            eprintln!("  Missing constants: {}", missing.iter().map(|c| c.as_ref()).collect::<Vec<_>>().join(", "));
+            eprintln!(
+                "  Missing constants: {}",
+                missing
+                    .iter()
+                    .map(|c| c.as_ref())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
             has_issues = true;
         } else if !spec.constants.is_empty() {
             println!("  Constants: {} provided", spec.constants.len());
@@ -435,7 +464,10 @@ fn main() -> ExitCode {
         match execute_scenario(&spec, &scenario, &domains) {
             Ok(result) => {
                 let vars_of_interest: Vec<&str> = spec.vars.iter().map(|s| s.as_ref()).collect();
-                println!("{}", format_scenario_result(&result, &vars_of_interest, &spec.vars));
+                println!(
+                    "{}",
+                    format_scenario_result(&result, &vars_of_interest, &spec.vars)
+                );
                 if result.failure.is_some() {
                     return ExitCode::FAILURE;
                 }
@@ -472,11 +504,32 @@ fn main() -> ExitCode {
 
     println!("Checking spec: {}", spec_path);
     if !spec.extends.is_empty() {
-        println!("  Extends: {}", spec.extends.iter().map(|s| s.as_ref()).collect::<Vec<_>>().join(", "));
+        println!(
+            "  Extends: {}",
+            spec.extends
+                .iter()
+                .map(|s| s.as_ref())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     }
-    println!("  Variables: {}", spec.vars.iter().map(|s| s.as_ref()).collect::<Vec<_>>().join(", "));
+    println!(
+        "  Variables: {}",
+        spec.vars
+            .iter()
+            .map(|s| s.as_ref())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     if !spec.constants.is_empty() {
-        println!("  Constants: {}", spec.constants.iter().map(|s| s.as_ref()).collect::<Vec<_>>().join(", "));
+        println!(
+            "  Constants: {}",
+            spec.constants
+                .iter()
+                .map(|s| s.as_ref())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     }
     println!("  Invariants: {}", spec.invariants.len());
     println!();
@@ -493,7 +546,9 @@ fn main() -> ExitCode {
     if config.json_output {
         println!("{}", check_result_to_json(&result, &spec));
         return match &result {
-            CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_) if config.quick_mode => ExitCode::SUCCESS,
+            CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_) if config.quick_mode => {
+                ExitCode::SUCCESS
+            }
             CheckResult::Ok(_) => ExitCode::SUCCESS,
             _ => ExitCode::FAILURE,
         };
@@ -509,7 +564,11 @@ fn main() -> ExitCode {
         };
         if let Some(trace) = trace {
             if let Err(e) = write_trace_json(trace_path, trace, &spec.vars) {
-                eprintln!("failed to write trace JSON to {}: {}", trace_path.display(), e);
+                eprintln!(
+                    "failed to write trace JSON to {}: {}",
+                    trace_path.display(),
+                    e
+                );
             } else if config.verbosity >= 2 {
                 println!("Trace written to {}", trace_path.display());
             }
@@ -532,7 +591,11 @@ fn main() -> ExitCode {
             &spec.vars,
             inv_name,
         ) {
-            eprintln!("failed to write counterexample JSON to {}: {}", cex_path.display(), e);
+            eprintln!(
+                "failed to write counterexample JSON to {}: {}",
+                cex_path.display(),
+                e
+            );
         } else {
             println!("Counterexample saved to {}", cex_path.display());
         }
@@ -555,12 +618,18 @@ fn main() -> ExitCode {
                 .and_then(|n| n.as_ref())
                 .map(|n| n.as_ref())
                 .unwrap_or("(unnamed)");
-            println!("Invariant {} ({}) violated!", cex.violated_invariant, inv_name);
+            println!(
+                "Invariant {} ({}) violated!",
+                cex.violated_invariant, inv_name
+            );
             println!();
             println!("Counterexample trace ({} states):", cex.trace.len());
             println!("  (* marks changed variables)");
             println!();
-            print!("{}", format_trace_with_actions(&cex.trace, &cex.actions, &spec.vars));
+            print!(
+                "{}",
+                format_trace_with_actions(&cex.trace, &cex.actions, &spec.vars)
+            );
             println!();
             println!("  States explored: {}", stats.states_explored);
             println!("  Transitions: {}", stats.transitions);
@@ -608,22 +677,23 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         CheckResult::InitError(e) => {
-            let diag = eval_error_to_diagnostic(&e);
-            eprintln!("error evaluating Init: {}", diag.render_simple());
+            let diag = eval_error_to_diagnostic(&e)
+                .with_note("error occurred while evaluating Init");
+            eprintln!("{}", diag.render_colored(&source, &colors));
             ExitCode::FAILURE
         }
         CheckResult::NextError(e, trace) => {
-            let diag = eval_error_to_diagnostic(&e);
-            eprintln!("error evaluating Next: {}", diag.render_simple());
-            eprintln!();
+            let diag = eval_error_to_diagnostic(&e)
+                .with_note("error occurred while evaluating Next");
+            eprintln!("{}", diag.render_colored(&source, &colors));
             eprintln!("State when error occurred:");
             print!("{}", format_trace(&trace, &spec.vars));
             ExitCode::FAILURE
         }
         CheckResult::InvariantError(e, trace) => {
-            let diag = eval_error_to_diagnostic(&e);
-            eprintln!("error evaluating invariant: {}", diag.render_simple());
-            eprintln!();
+            let diag = eval_error_to_diagnostic(&e)
+                .with_note("error occurred while evaluating invariant");
+            eprintln!("{}", diag.render_colored(&source, &colors));
             eprintln!("State when error occurred:");
             print!("{}", format_trace(&trace, &spec.vars));
             ExitCode::FAILURE
@@ -641,7 +711,10 @@ fn main() -> ExitCode {
                 println!("  No invariant violations found in explored states.");
                 println!();
                 println!("To continue exploration:");
-                println!("  --max-states {}   Explore more states", config.max_states * 2);
+                println!(
+                    "  --max-states {}   Explore more states",
+                    config.max_states * 2
+                );
                 ExitCode::SUCCESS
             } else {
                 println!("State limit reached ({} states)", config.max_states);
@@ -655,7 +728,10 @@ fn main() -> ExitCode {
                 println!("  No invariant violations found in explored states.");
                 println!();
                 println!("To continue exploration:");
-                println!("  --max-states {}   Double the limit", config.max_states * 2);
+                println!(
+                    "  --max-states {}   Double the limit",
+                    config.max_states * 2
+                );
                 println!();
                 println!("To reduce state space:");
                 println!("  --symmetry CONST     Enable symmetry reduction");
@@ -678,9 +754,20 @@ fn main() -> ExitCode {
             eprintln!("Possible causes:");
             eprintln!("  - Init predicate evaluates to FALSE for all variable combinations");
             if !spec.constants.is_empty() {
-                let missing: Vec<_> = spec.constants.iter().filter(|c| !domains.contains_key(c.as_ref())).collect();
+                let missing: Vec<_> = spec
+                    .constants
+                    .iter()
+                    .filter(|c| !domains.contains_key(c.as_ref()))
+                    .collect();
                 if !missing.is_empty() {
-                    eprintln!("  - Missing constant values: {}", missing.iter().map(|c| c.as_ref()).collect::<Vec<_>>().join(", "));
+                    eprintln!(
+                        "  - Missing constant values: {}",
+                        missing
+                            .iter()
+                            .map(|c| c.as_ref())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
                 }
             }
             eprintln!("  - Type error or domain error in Init expression");
@@ -715,14 +802,9 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         CheckResult::AssumeError(idx, e) => {
-            let diag = eval_error_to_diagnostic(&e);
-            eprintln!("error evaluating ASSUME {}: {}", idx, diag.render_simple());
-            eprintln!();
-            if let Some(assume_expr) = spec.assumes.get(idx) {
-                eprintln!("Expression: {:?}", assume_expr);
-                eprintln!();
-            }
-            eprintln!("An error occurred while evaluating the ASSUME constraint.");
+            let diag = eval_error_to_diagnostic(&e)
+                .with_note(format!("error occurred while evaluating ASSUME {}", idx));
+            eprintln!("{}", diag.render_colored(&source, &colors));
             ExitCode::FAILURE
         }
     }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::ast::{Env, Expr, Spec, State, Transition, Value};
 use crate::checker::format_value;
-use crate::eval::{make_primed_names, next_states, Definitions, EvalError};
+use crate::eval::{Definitions, EvalError, make_primed_names, next_states};
 use crate::parser::parse_expr;
 
 #[derive(Debug, Clone)]
@@ -48,7 +48,7 @@ pub fn parse_scenario(input: &str) -> Result<Scenario, String> {
                         line_num + 1,
                         expr_text,
                         e.message
-                    ))
+                    ));
                 }
             }
         } else {
@@ -72,11 +72,9 @@ pub fn execute_scenario(
     let mut env = constants.clone();
 
     let init_states = crate::eval::init_states(&spec.init, &spec.vars, &env, &defs)?;
-    if init_states.is_empty() {
+    let Some(mut current_state) = init_states.into_iter().next() else {
         return Err(EvalError::domain_error("no initial states"));
-    }
-
-    let mut current_state = init_states.into_iter().next().unwrap();
+    };
     let mut results: Vec<(ScenarioStep, State, Vec<String>)> = Vec::new();
     let primed_vars = make_primed_names(&spec.vars);
 
@@ -93,9 +91,17 @@ pub fn execute_scenario(
             }
         }
 
-        let successors = next_states(&spec.next, &current_state, &spec.vars, &primed_vars, &mut env, &defs)?;
+        let successors = next_states(
+            &spec.next,
+            &current_state,
+            &spec.vars,
+            &primed_vars,
+            &mut env,
+            &defs,
+        )?;
 
-        let matching = find_matching_transition(&successors, step, &current_state, &defs, &spec.vars)?;
+        let matching =
+            find_matching_transition(&successors, step, &current_state, &defs, &spec.vars)?;
 
         match matching {
             Some((transition, changes)) => {
@@ -173,7 +179,12 @@ fn matches_step(
             let mut env = build_scenario_env(current, next, &Env::new(), vars);
             match crate::eval::eval(expr, &mut env, defs) {
                 Ok(Value::Bool(b)) => Ok(b),
-                Ok(other) => Err(EvalError::TypeMismatch { expected: "Bool", got: other, context: Some("scenario condition"),  span: None }),
+                Ok(other) => Err(EvalError::TypeMismatch {
+                    expected: "Bool",
+                    got: other,
+                    context: Some("scenario condition"),
+                    span: None,
+                }),
                 Err(e) => Err(e),
             }
         }
@@ -255,7 +266,11 @@ fn format_value_compact(v: &Value) -> String {
     }
 }
 
-fn describe_available_actions(successors: &[Transition], current: &State, vars: &[Arc<str>]) -> Vec<String> {
+fn describe_available_actions(
+    successors: &[Transition],
+    current: &State,
+    vars: &[Arc<str>],
+) -> Vec<String> {
     let mut actions = Vec::new();
 
     for transition in successors {
@@ -306,7 +321,11 @@ fn format_expr(expr: &Expr) -> String {
     }
 }
 
-pub fn format_scenario_result(result: &ScenarioResult, vars_of_interest: &[&str], spec_vars: &[Arc<str>]) -> String {
+pub fn format_scenario_result(
+    result: &ScenarioResult,
+    vars_of_interest: &[&str],
+    spec_vars: &[Arc<str>],
+) -> String {
     let mut output = String::new();
 
     for (idx, (step, state, changes)) in result.states.iter().enumerate() {
@@ -333,9 +352,10 @@ pub fn format_scenario_result(result: &ScenarioResult, vars_of_interest: &[&str]
             output.push_str("State:\n");
             for var in vars_of_interest {
                 if let Some(vi) = spec_vars.iter().position(|v| v.as_ref() == *var)
-                    && let Some(val) = state.values.get(vi) {
-                        output.push_str(&format!("  {} = {}\n", var, format_value(val)));
-                    }
+                    && let Some(val) = state.values.get(vi)
+                {
+                    output.push_str(&format!("  {} = {}\n", var, format_value(val)));
+                }
             }
         }
     }

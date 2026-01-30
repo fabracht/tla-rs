@@ -4,7 +4,9 @@ use std::sync::Arc;
 use crate::ast::{Env, Value};
 
 pub fn load_builtins(env: &mut Env) {
-    let boolean: BTreeSet<Value> = [Value::Bool(false), Value::Bool(true)].into_iter().collect();
+    let boolean: BTreeSet<Value> = [Value::Bool(false), Value::Bool(true)]
+        .into_iter()
+        .collect();
     env.insert(Arc::from("BOOLEAN"), Value::Set(boolean));
 }
 
@@ -32,14 +34,10 @@ fn load_integers(env: &mut Env) {
     env.insert(Arc::from("Int"), Value::Set(int));
 }
 
-fn load_sequences(_env: &mut Env) {
-}
+fn load_sequences(_env: &mut Env) {}
 
-fn load_finitesets(_env: &mut Env) {
-}
+fn load_finitesets(_env: &mut Env) {}
 
-fn load_tlc(_env: &mut Env) {
-}
+fn load_tlc(_env: &mut Env) {}
 
-fn load_bags(_env: &mut Env) {
-}
+fn load_bags(_env: &mut Env) {}
