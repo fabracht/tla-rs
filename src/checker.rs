@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
 #[cfg(not(target_arch = "wasm32"))]
@@ -38,6 +38,8 @@ pub struct CheckerConfig {
     pub quick_mode: bool,
     pub verbosity: u8,
     pub json_output: bool,
+    pub continue_on_violation: bool,
+    pub count_properties: Vec<Arc<str>>,
     #[cfg(not(target_arch = "wasm32"))]
     pub spec_path: Option<PathBuf>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -58,6 +60,8 @@ impl Default for CheckerConfig {
             quick_mode: false,
             verbosity: 1,
             json_output: false,
+            continue_on_violation: false,
+            count_properties: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
             spec_path: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -85,6 +89,20 @@ pub struct CheckStats {
     pub transitions: usize,
     pub max_depth_reached: usize,
     pub elapsed_secs: f64,
+    pub violation_count: usize,
+    pub violation_traces: Vec<Counterexample>,
+    pub violations_by_invariant: Vec<(Option<Arc<str>>, usize)>,
+    pub property_stats: Vec<PropertyStats>,
+}
+
+#[derive(Debug)]
+pub struct PropertyStats {
+    pub name: Arc<str>,
+    pub satisfied: usize,
+    pub violated: usize,
+    pub errors: usize,
+    pub depth_satisfied: BTreeMap<usize, usize>,
+    pub depth_total: BTreeMap<usize, usize>,
 }
 
 #[derive(Debug)]
@@ -259,11 +277,50 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         transitions: 0,
         max_depth_reached: 0,
         elapsed_secs: 0.0,
+        violation_count: 0,
+        violation_traces: Vec::new(),
+        violations_by_invariant: Vec::new(),
+        property_stats: Vec::new(),
     };
 
     let base_env: Env = domains.clone();
     let primed_vars = make_primed_names(&spec.vars);
     let mut reusable_env = base_env.clone();
+
+    let mut violation_counts_by_inv: Vec<usize> = vec![0; spec.invariants.len()];
+    let max_violation_traces: usize = 10;
+
+    let count_exprs: Vec<(Arc<str>, Expr)> = config
+        .count_properties
+        .iter()
+        .filter_map(|name| match spec.definitions.get(name) {
+            Some((params, expr)) if params.is_empty() => Some((name.clone(), expr.clone())),
+            Some(_) => {
+                if !config.quiet {
+                    eprintln!("  Warning: '{}' has parameters, skipping", name);
+                }
+                None
+            }
+            None => {
+                if !config.quiet {
+                    eprintln!("  Warning: '{}' not found in definitions, skipping", name);
+                }
+                None
+            }
+        })
+        .collect();
+
+    let mut property_counters: Vec<PropertyStats> = count_exprs
+        .iter()
+        .map(|(name, _)| PropertyStats {
+            name: name.clone(),
+            satisfied: 0,
+            violated: 0,
+            errors: 0,
+            depth_satisfied: BTreeMap::new(),
+            depth_total: BTreeMap::new(),
+        })
+        .collect();
 
     for state in initial {
         let canonical = symmetry.canonicalize(&state).into_owned();
@@ -383,18 +440,32 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             match eval_with_context(invariant, &mut env, &spec.definitions, &ctx) {
                 Ok(Value::Bool(true)) => {}
                 Ok(Value::Bool(false)) => {
-                    let (trace, actions) =
-                        reconstruct_trace(current_idx, &states, &parent, &parent_action);
-                    stats.elapsed_secs = elapsed_secs();
-                    do_export(&states, &parent, Some(current_idx));
-                    return CheckResult::InvariantViolation(
-                        Counterexample {
-                            trace,
-                            actions,
-                            violated_invariant: idx,
-                        },
-                        stats,
-                    );
+                    if config.continue_on_violation {
+                        violation_counts_by_inv[idx] += 1;
+                        stats.violation_count += 1;
+                        if stats.violation_traces.len() < max_violation_traces {
+                            let (trace, actions) =
+                                reconstruct_trace(current_idx, &states, &parent, &parent_action);
+                            stats.violation_traces.push(Counterexample {
+                                trace,
+                                actions,
+                                violated_invariant: idx,
+                            });
+                        }
+                    } else {
+                        let (trace, actions) =
+                            reconstruct_trace(current_idx, &states, &parent, &parent_action);
+                        stats.elapsed_secs = elapsed_secs();
+                        do_export(&states, &parent, Some(current_idx));
+                        return CheckResult::InvariantViolation(
+                            Counterexample {
+                                trace,
+                                actions,
+                                violated_invariant: idx,
+                            },
+                            stats,
+                        );
+                    }
                 }
                 Ok(_) => {
                     let (trace, _actions) =
@@ -415,6 +486,21 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                         reconstruct_trace(current_idx, &states, &parent, &parent_action);
                     do_export(&states, &parent, Some(current_idx));
                     return CheckResult::InvariantError(e, trace);
+                }
+            }
+        }
+
+        if !count_exprs.is_empty() {
+            for (idx, (_name, expr)) in count_exprs.iter().enumerate() {
+                let entry = &mut property_counters[idx];
+                *entry.depth_total.entry(depth).or_default() += 1;
+                match eval_with_context(expr, &mut env, &spec.definitions, &ctx) {
+                    Ok(Value::Bool(true)) => {
+                        entry.satisfied += 1;
+                        *entry.depth_satisfied.entry(depth).or_default() += 1;
+                    }
+                    Ok(Value::Bool(false)) => entry.violated += 1,
+                    _ => entry.errors += 1,
                 }
             }
         }
@@ -458,6 +544,21 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
     stats.elapsed_secs = elapsed_secs();
     do_export(&states, &parent, None);
+
+    if config.continue_on_violation {
+        stats.violations_by_invariant = violation_counts_by_inv
+            .iter()
+            .enumerate()
+            .filter(|(_, count)| **count > 0)
+            .map(|(idx, count)| {
+                let count = *count;
+                let name = spec.invariant_names.get(idx).and_then(|n| n.clone());
+                (name, count)
+            })
+            .collect();
+    }
+
+    stats.property_stats = property_counters;
 
     if config.check_liveness && (!spec.fairness.is_empty() || !spec.liveness_properties.is_empty())
     {
@@ -854,13 +955,68 @@ pub fn trace_to_json_with_actions(
 pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
     match result {
         CheckResult::Ok(stats) => {
-            format!(
-                r#"{{"status": "ok", "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
-                stats.states_explored,
-                stats.transitions,
-                stats.max_depth_reached,
-                stats.elapsed_secs
-            )
+            let mut parts = Vec::new();
+            parts.push(r#""status": "ok""#.to_string());
+
+            let mut stat_parts = Vec::new();
+            stat_parts.push(format!(r#""states_explored": {}"#, stats.states_explored));
+            stat_parts.push(format!(r#""transitions": {}"#, stats.transitions));
+            stat_parts.push(format!(r#""max_depth": {}"#, stats.max_depth_reached));
+            stat_parts.push(format!(r#""elapsed_secs": {:.3}"#, stats.elapsed_secs));
+
+            if stats.violation_count > 0 {
+                stat_parts.push(format!(r#""violation_count": {}"#, stats.violation_count));
+                let by_inv: Vec<String> = stats
+                    .violations_by_invariant
+                    .iter()
+                    .map(|(name, count)| {
+                        let name_json = name
+                            .as_ref()
+                            .map(|n| format!("\"{}\"", n))
+                            .unwrap_or_else(|| "null".to_string());
+                        format!(r#"{{"name": {}, "count": {}}}"#, name_json, count)
+                    })
+                    .collect();
+                stat_parts.push(format!(
+                    r#""violations_by_invariant": [{}]"#,
+                    by_inv.join(", ")
+                ));
+            }
+
+            parts.push(format!(r#""stats": {{{}}}"#, stat_parts.join(", ")));
+
+            if !stats.property_stats.is_empty() {
+                let props: Vec<String> = stats
+                    .property_stats
+                    .iter()
+                    .map(|p| {
+                        let total = p.satisfied + p.violated + p.errors;
+                        let ratio = if total > 0 {
+                            p.satisfied as f64 / total as f64
+                        } else {
+                            0.0
+                        };
+                        let depth_entries: Vec<String> = p
+                            .depth_total
+                            .iter()
+                            .map(|(&d, &t)| {
+                                let s = p.depth_satisfied.get(&d).copied().unwrap_or(0);
+                                format!(
+                                    r#"{{"depth": {}, "satisfied": {}, "total": {}}}"#,
+                                    d, s, t
+                                )
+                            })
+                            .collect();
+                        format!(
+                            r#"{{"name": "{}", "satisfied": {}, "violated": {}, "errors": {}, "total": {}, "ratio": {:.3}, "depth_breakdown": [{}]}}"#,
+                            p.name, p.satisfied, p.violated, p.errors, total, ratio, depth_entries.join(", ")
+                        )
+                    })
+                    .collect();
+                parts.push(format!(r#""properties": [{}]"#, props.join(", ")));
+            }
+
+            format!("{{{}}}", parts.join(", "))
         }
         CheckResult::InvariantViolation(cex, stats) => {
             let inv_name = spec

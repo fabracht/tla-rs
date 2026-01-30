@@ -102,7 +102,7 @@ fn main() -> ExitCode {
 
     if args.len() < 2 {
         eprintln!(
-            "Usage: {} <spec.tla> [--constant NAME=VALUE] [--symmetry NAME] [--max-states N] [--export-dot FILE] [--allow-deadlock] [--check-liveness]",
+            "Usage: {} <spec.tla> [--constant NAME=VALUE] [--symmetry NAME] [--max-states N] [--export-dot FILE] [--allow-deadlock] [--check-liveness] [--continue] [--count-satisfying NAME]",
             args[0]
         );
         return ExitCode::FAILURE;
@@ -215,6 +215,17 @@ fn main() -> ExitCode {
             "--json" => {
                 config.json_output = true;
             }
+            "--continue" => {
+                config.continue_on_violation = true;
+            }
+            "--count-satisfying" | "--count" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--count-satisfying requires a definition name");
+                    return ExitCode::FAILURE;
+                }
+                config.count_properties.push(args[i].clone().into());
+            }
             "--validate" => {
                 validate_only = true;
             }
@@ -301,6 +312,9 @@ fn main() -> ExitCode {
                 println!("  --verbose, -v              Verbose output (show more details)");
                 println!("  -vv                        Debug output (show all details)");
                 println!("  --json                     Output results in JSON format");
+                println!("  --continue                 Continue past invariant violations");
+                println!("  --count-satisfying NAME    Count states satisfying a definition");
+                println!("                             (can be specified multiple times)");
                 println!(
                     "  --validate                 Parse and validate spec without model checking"
                 );
@@ -559,6 +573,7 @@ fn main() -> ExitCode {
             CheckResult::Ok(_) | CheckResult::MaxStatesExceeded(_) if config.quick_mode => {
                 ExitCode::SUCCESS
             }
+            CheckResult::Ok(stats) if stats.violation_count > 0 => ExitCode::FAILURE,
             CheckResult::Ok(_) => ExitCode::SUCCESS,
             _ => ExitCode::FAILURE,
         };
@@ -613,13 +628,86 @@ fn main() -> ExitCode {
 
     match result {
         CheckResult::Ok(stats) => {
-            println!("Model checking complete. No errors found.");
+            if stats.violation_count > 0 {
+                println!(
+                    "Model checking complete. {} invariant violation(s) found across {} states.",
+                    stats.violation_count, stats.states_explored
+                );
+                println!();
+                if !stats.violations_by_invariant.is_empty() {
+                    println!("  Violations by invariant:");
+                    for (name, count) in &stats.violations_by_invariant {
+                        let name_str = name.as_ref().map(|n| n.as_ref()).unwrap_or("(unnamed)");
+                        println!("    {}: {} violation(s)", name_str, count);
+                    }
+                    println!();
+                }
+                if let Some(first) = stats.violation_traces.first() {
+                    let inv_name = spec
+                        .invariant_names
+                        .get(first.violated_invariant)
+                        .and_then(|n| n.as_ref())
+                        .map(|n| n.as_ref())
+                        .unwrap_or("(unnamed)");
+                    println!(
+                        "  First violation trace ({}, {} states):",
+                        inv_name,
+                        first.trace.len()
+                    );
+                    println!();
+                    print!(
+                        "{}",
+                        format_trace_with_actions(&first.trace, &first.actions, &spec.vars)
+                    );
+                    println!();
+                }
+            } else {
+                println!("Model checking complete. No errors found.");
+            }
             println!();
+
+            if !stats.property_stats.is_empty() {
+                println!("Property statistics:");
+                for p in &stats.property_stats {
+                    let total = p.satisfied + p.violated + p.errors;
+                    if total > 0 {
+                        let pct = p.satisfied as f64 / total as f64 * 100.0;
+                        println!(
+                            "  {}: {}/{} satisfied ({:.1}%)",
+                            p.name, p.satisfied, total, pct
+                        );
+                    } else {
+                        println!("  {}: no states evaluated", p.name);
+                    }
+
+                    if config.verbosity >= 2 && !p.depth_total.is_empty() {
+                        println!("  {} by depth:", p.name);
+                        for (&depth, &total) in &p.depth_total {
+                            let sat = p.depth_satisfied.get(&depth).copied().unwrap_or(0);
+                            let pct = if total > 0 {
+                                sat as f64 / total as f64 * 100.0
+                            } else {
+                                0.0
+                            };
+                            println!(
+                                "    depth {:>3}: {:>6}/{:<6} ({:.1}%)",
+                                depth, sat, total, pct
+                            );
+                        }
+                    }
+                }
+                println!();
+            }
+
             println!("  Reachable states: {}", stats.states_explored);
             println!("  Transitions: {}", stats.transitions);
             println!("  Max depth: {}", stats.max_depth_reached);
             println!("  Time: {:.3}s", stats.elapsed_secs);
-            ExitCode::SUCCESS
+            if stats.violation_count > 0 {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
         }
         CheckResult::InvariantViolation(cex, stats) => {
             let inv_name = spec
