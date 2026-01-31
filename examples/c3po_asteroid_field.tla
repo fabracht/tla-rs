@@ -1,72 +1,100 @@
 ---- MODULE c3po_asteroid_field ----
 EXTENDS Naturals
 
-VARIABLES falcon, shields, hyperdrive, pursuit, hiding
+CONSTANT Asteroids
+
+VARIABLES falcon, shields, ties, slug
 
 Init ==
     /\ falcon = "flying"
-    /\ shields = 3
-    /\ hyperdrive = "broken"
-    /\ pursuit = "active"
-    /\ hiding = FALSE
+    /\ shields = 10
+    /\ ties = 4
+    /\ slug = "asleep"
 
-AsteroidImpact ==
+AsteroidStrike(dmg) ==
     /\ falcon = "flying"
-    /\ hiding = FALSE
-    /\ shields > 0
-    /\ shields' = shields - 1
-    /\ UNCHANGED <<falcon, hyperdrive, pursuit, hiding>>
+    /\ shields >= dmg
+    /\ shields' = shields - dmg
+    /\ UNCHANGED <<falcon, ties, slug>>
 
-AsteroidDestroysShip ==
+AsteroidDestroysShip(dmg) ==
     /\ falcon = "flying"
-    /\ hiding = FALSE
-    /\ shields = 0
+    /\ shields < dmg
     /\ falcon' = "destroyed"
-    /\ UNCHANGED <<shields, hyperdrive, pursuit, hiding>>
+    /\ UNCHANGED <<shields, ties, slug>>
 
-HideInCave ==
-    /\ falcon = "flying"
-    /\ hiding = FALSE
-    /\ hiding' = TRUE
-    /\ pursuit' = "lost_them"
-    /\ UNCHANGED <<falcon, shields, hyperdrive>>
-
-SlugAwakens ==
-    /\ hiding = TRUE
-    /\ falcon = "flying"
-    /\ hiding' = FALSE
-    /\ pursuit' = "active"
-    /\ UNCHANGED <<falcon, shields, hyperdrive>>
-
-R2FixesHyperdrive ==
-    /\ falcon = "flying"
-    /\ hyperdrive = "broken"
-    /\ hyperdrive' = "fixed"
-    /\ UNCHANGED <<falcon, shields, pursuit, hiding>>
-
-JumpToHyperspace ==
-    /\ falcon = "flying"
-    /\ hyperdrive = "fixed"
-    /\ falcon' = "escaped"
-    /\ pursuit' = "escaped"
-    /\ UNCHANGED <<shields, hyperdrive, hiding>>
+AsteroidDestroysTIE ==
+    /\ falcon \in {"flying", "hiding"}
+    /\ ties > 0
+    /\ ties' = ties - 1
+    /\ UNCHANGED <<falcon, shields, slug>>
 
 TIEFighterAttack ==
     /\ falcon = "flying"
-    /\ pursuit = "active"
-    /\ hiding = FALSE
+    /\ ties > 0
     /\ shields > 0
     /\ shields' = shields - 1
-    /\ UNCHANGED <<falcon, hyperdrive, pursuit, hiding>>
+    /\ UNCHANGED <<falcon, ties, slug>>
+
+HideInCave ==
+    /\ falcon = "flying"
+    /\ slug = "asleep"
+    /\ falcon' = "hiding"
+    /\ UNCHANGED <<shields, ties, slug>>
+
+MynockDamage ==
+    /\ falcon = "hiding"
+    /\ slug = "asleep"
+    /\ shields > 0
+    /\ shields' = shields - 1
+    /\ slug' = "disturbed"
+    /\ UNCHANGED <<falcon, ties>>
+
+ThisIsNoCave ==
+    /\ falcon = "hiding"
+    /\ slug = "disturbed"
+    /\ slug' = "attacking"
+    /\ UNCHANGED <<falcon, shields, ties>>
+
+EscapeSlugMouth ==
+    /\ falcon = "hiding"
+    /\ slug = "attacking"
+    /\ shields > 2
+    /\ falcon' = "flying"
+    /\ shields' = shields - 2
+    /\ slug' = "escaped"
+    /\ UNCHANGED <<ties>>
+
+SlugEatsShip ==
+    /\ falcon = "hiding"
+    /\ slug = "attacking"
+    /\ shields <= 2
+    /\ falcon' = "destroyed"
+    /\ UNCHANGED <<shields, ties, slug>>
+
+AttachToStarDestroyer ==
+    /\ falcon = "flying"
+    /\ ties = 0
+    /\ falcon' = "attached"
+    /\ UNCHANGED <<shields, ties, slug>>
+
+FloatAwayWithGarbage ==
+    /\ falcon = "attached"
+    /\ falcon' = "escaped"
+    /\ UNCHANGED <<shields, ties, slug>>
 
 Next ==
-    \/ AsteroidImpact
-    \/ AsteroidDestroysShip
-    \/ HideInCave
-    \/ SlugAwakens
-    \/ R2FixesHyperdrive
-    \/ JumpToHyperspace
+    \/ \E dmg \in Asteroids : AsteroidStrike(dmg)
+    \/ \E dmg \in Asteroids : AsteroidDestroysShip(dmg)
+    \/ AsteroidDestroysTIE
     \/ TIEFighterAttack
+    \/ HideInCave
+    \/ MynockDamage
+    \/ ThisIsNoCave
+    \/ EscapeSlugMouth
+    \/ SlugEatsShip
+    \/ AttachToStarDestroyer
+    \/ FloatAwayWithGarbage
 
 InvNeverTellMeTheOdds ==
     falcon /= "destroyed"
@@ -76,8 +104,5 @@ ShieldsHolding ==
 
 Escaped ==
     falcon = "escaped"
-
-HyperdriveLive ==
-    hyperdrive = "fixed"
 
 ====

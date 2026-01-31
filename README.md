@@ -181,32 +181,37 @@ Property statistics:
 ```
 This shows the TOCTOU bug (missing CAS on commit) starts causing violations at depth 6, and by depth 11 every reachable state is unsafe. The `--verbose` flag enables the per-depth breakdown.
 
-**A fun example** — C-3PO famously calculates "the possibility of successfully navigating an asteroid field is approximately 3,720 to 1." The spec `examples/c3po_asteroid_field.tla` models the Empire Strikes Back asteroid chase: the Falcon's shields degrade under asteroid impacts and TIE fighter attacks, Han can hide in the space slug's cave, and R2-D2 can fix the broken hyperdrive to escape.
+**A fun example** — C-3PO famously calculates "the possibility of successfully navigating an asteroid field is approximately 3,720 to 1." The spec `examples/c3po_asteroid_field.tla` models the Empire Strikes Back asteroid chase scene with lore-accurate events: variable-damage asteroid impacts, TIE fighter attacks, TIEs getting destroyed by asteroids, hiding in the space slug's cave, mynock damage, escaping the exogorth's mouth, and the only real escape — attaching to a Star Destroyer's hull and floating away with the garbage. No hyperspace: the hyperdrive is dead.
+
+The `Asteroids` constant controls asteroid damage values. Each value becomes an independent action, so `{1,2,3,4,5}` creates 5 strike actions and 5 kill actions competing with ~7 non-asteroid actions — biasing the state space toward destruction.
 
 ```bash
-tlc-executor examples/c3po_asteroid_field.tla --allow-deadlock --continue \
+tlc-executor examples/c3po_asteroid_field.tla -c 'Asteroids={1,2,3,4,5}' \
+  --allow-deadlock --continue \
   --count-satisfying InvNeverTellMeTheOdds \
-  --count-satisfying ShieldsHolding \
   --count-satisfying Escaped --verbose
 ```
 ```
-Model checking complete. 2 invariant violation(s) found across 26 states.
+Model checking complete. 65 invariant violation(s) found across 353 states.
 
 Property statistics:
-  InvNeverTellMeTheOdds: 24/26 satisfied (92.3%)
+  InvNeverTellMeTheOdds: 288/353 satisfied (81.6%)
   InvNeverTellMeTheOdds by depth:
     depth   1:      1/1      (100.0%)
+    depth   2:      7/7      (100.0%)
+    depth   3:     18/18     (100.0%)
+    depth   4:     29/34     (85.3%)
     ...
-    depth   5:      5/6      (83.3%)
-    depth   6:      3/4      (75.0%)
-  ShieldsHolding: 18/26 satisfied (69.2%)
-  Escaped: 8/26 satisfied (30.8%)
+    depth  10:     12/20     (60.0%)
+    depth  11:      8/16     (50.0%)
+  Escaped: 19/353 satisfied (5.4%)
   Escaped by depth:
-    depth   1:      0/1      (0.0%)
-    depth   3:      1/5      (20.0%)
-    depth   7:      1/1      (100.0%)
+    depth   7:      1/60     (1.7%)
+    depth   8:      5/55     (9.1%)
+    depth  12:      5/9      (55.6%)
+    depth  13:      2/2      (100.0%)
 ```
-C-3PO's odds were pessimistic — 92.3% of reachable states have the Falcon intact. Shields degrade from 100% to 0% over depth, while escape probability rises as R2 gets time to fix the hyperdrive. The destruction trace shows three asteroid impacts draining shields, then a fourth destroying the ship.
+Only 5.4% of reachable states have the Falcon escaped — a long way from v1's 30.8%. Escape requires surviving the asteroid barrage, hiding in the cave, taking mynock damage, escaping the slug's closing mouth (2 shield damage), then waiting for asteroids to destroy all 4 TIE fighters before drifting onto a Star Destroyer's hull. C-3PO's 3,720:1 odds assume probability-weighted paths rather than state counting, but the depth breakdown tells the story: destruction starts at depth 4, escape is impossible before depth 7, and by depth 11 half the remaining states are destroyed.
 
 **JSON output** for programmatic use:
 ```bash
