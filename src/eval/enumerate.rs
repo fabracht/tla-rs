@@ -118,6 +118,18 @@ fn expand_and_enumerate(
             env.remove(&var);
             Ok(())
         }
+        Expr::Or(_, _) => {
+            let disjuncts = collect_disjuncts_with_labels(expr, ctx.defs);
+            for (disjunct, sub_action) in &disjuncts {
+                let effective_action = sub_action.clone().or(action.clone());
+                if let Expr::Exists(_, _, _) = disjunct {
+                    expand_and_enumerate(disjunct, env, ctx, effective_action, results)?;
+                } else {
+                    enumerate_next(disjunct, env, ctx, 0, effective_action, results)?;
+                }
+            }
+            Ok(())
+        }
         _ => enumerate_next(expr, env, ctx, 0, action, results),
     }
 }
