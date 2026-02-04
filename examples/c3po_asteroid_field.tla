@@ -1,106 +1,155 @@
 ---- MODULE c3po_asteroid_field ----
 EXTENDS Naturals
 
-CONSTANT Asteroids
+CONSTANT Density
 
-VARIABLES falcon, shields, ties, slug
+VARIABLES falcon, shields, hull, ties, slug, systems
 
 Init ==
     /\ falcon = "flying"
     /\ shields = 10
+    /\ hull = 5
     /\ ties = 4
     /\ slug = "asleep"
+    /\ systems = [sensors |-> "ok", weapons |-> "ok", engines |-> "ok"]
 
-AsteroidStrike(dmg) ==
-    /\ falcon = "flying"
-    /\ shields >= dmg
-    /\ shields' = shields - dmg
-    /\ UNCHANGED <<falcon, ties, slug>>
+TakeDamage(dmg, newFalcon) ==
+    LET absorbed == IF shields >= dmg THEN dmg ELSE shields
+        overflow == dmg - absorbed
+        stress == dmg \div 3
+        hullDmg == overflow + stress
+    IN IF hull > hullDmg
+       THEN /\ shields' = shields - absorbed
+            /\ hull' = hull - hullDmg
+            /\ falcon' = newFalcon
+       ELSE /\ falcon' = "destroyed"
+            /\ UNCHANGED <<shields, hull>>
 
-AsteroidDestroysShip(dmg) ==
+Fly(dmg) ==
     /\ falcon = "flying"
-    /\ shields < dmg
-    /\ falcon' = "destroyed"
-    /\ UNCHANGED <<shields, ties, slug>>
+    /\ TakeDamage(dmg, "flying")
+    /\ UNCHANGED <<ties, slug, systems>>
+
+TIEFighterAttack(dmg) ==
+    /\ falcon = "flying"
+    /\ ties > 0
+    /\ TakeDamage(dmg + 1, "flying")
+    /\ UNCHANGED <<ties, slug, systems>>
 
 AsteroidDestroysTIE ==
     /\ falcon \in {"flying", "hiding"}
     /\ ties > 0
     /\ ties' = ties - 1
-    /\ UNCHANGED <<falcon, shields, slug>>
+    /\ UNCHANGED <<falcon, shields, hull, slug, systems>>
 
-TIEFighterAttack ==
+SensorDamage(dmg) ==
     /\ falcon = "flying"
-    /\ ties > 0
-    /\ shields > 0
-    /\ shields' = shields - 1
-    /\ UNCHANGED <<falcon, ties, slug>>
+    /\ systems.sensors = "ok"
+    /\ TakeDamage(dmg, "flying")
+    /\ systems' = [systems EXCEPT !.sensors = "damaged"]
+    /\ UNCHANGED <<ties, slug>>
 
-HideInCave ==
+EngineDamage(dmg) ==
+    /\ falcon = "flying"
+    /\ systems.engines = "ok"
+    /\ TakeDamage(dmg, "flying")
+    /\ systems' = [systems EXCEPT !.engines = "damaged"]
+    /\ UNCHANGED <<ties, slug>>
+
+WeaponsDamage(dmg) ==
+    /\ falcon = "flying"
+    /\ systems.weapons = "ok"
+    /\ TakeDamage(dmg, "flying")
+    /\ systems' = [systems EXCEPT !.weapons = "damaged"]
+    /\ UNCHANGED <<ties, slug>>
+
+BlindFly(dmg) ==
+    /\ falcon = "flying"
+    /\ systems.sensors = "damaged"
+    /\ TakeDamage(dmg + 2, "flying")
+    /\ UNCHANGED <<ties, slug, systems>>
+
+SluggishDodge(dmg) ==
+    /\ falcon = "flying"
+    /\ systems.engines = "damaged"
+    /\ TakeDamage(dmg + 1, "flying")
+    /\ UNCHANGED <<ties, slug, systems>>
+
+HideInCave(dmg) ==
     /\ falcon = "flying"
     /\ slug = "asleep"
-    /\ falcon' = "hiding"
-    /\ UNCHANGED <<shields, ties, slug>>
+    /\ systems.sensors = "ok"
+    /\ TakeDamage(dmg, "hiding")
+    /\ UNCHANGED <<ties, slug, systems>>
 
-MynockDamage ==
+MynockDamage(sys) ==
     /\ falcon = "hiding"
     /\ slug = "asleep"
     /\ shields > 0
+    /\ hull > 0
     /\ shields' = shields - 1
+    /\ hull' = hull - 1
     /\ slug' = "disturbed"
+    /\ systems' = [systems EXCEPT ![sys] = "damaged"]
     /\ UNCHANGED <<falcon, ties>>
 
 ThisIsNoCave ==
     /\ falcon = "hiding"
     /\ slug = "disturbed"
     /\ slug' = "attacking"
-    /\ UNCHANGED <<falcon, shields, ties>>
+    /\ UNCHANGED <<falcon, shields, hull, ties, systems>>
 
 EscapeSlugMouth ==
     /\ falcon = "hiding"
     /\ slug = "attacking"
+    /\ systems.engines = "ok"
     /\ shields > 2
+    /\ hull > 1
     /\ falcon' = "flying"
     /\ shields' = shields - 2
+    /\ hull' = hull - 1
     /\ slug' = "escaped"
-    /\ UNCHANGED <<ties>>
+    /\ UNCHANGED <<ties, systems>>
 
 SlugEatsShip ==
     /\ falcon = "hiding"
     /\ slug = "attacking"
-    /\ shields <= 2
+    /\ (shields <= 2 \/ hull <= 1 \/ systems.engines = "damaged")
     /\ falcon' = "destroyed"
-    /\ UNCHANGED <<shields, ties, slug>>
+    /\ UNCHANGED <<shields, hull, ties, slug, systems>>
 
-AttachToStarDestroyer ==
+AttachToStarDestroyer(dmg) ==
     /\ falcon = "flying"
     /\ ties = 0
-    /\ falcon' = "attached"
-    /\ UNCHANGED <<shields, ties, slug>>
+    /\ systems.engines = "ok"
+    /\ TakeDamage(dmg, "attached")
+    /\ UNCHANGED <<ties, slug, systems>>
 
 FloatAwayWithGarbage ==
     /\ falcon = "attached"
     /\ falcon' = "escaped"
-    /\ UNCHANGED <<shields, ties, slug>>
+    /\ UNCHANGED <<shields, hull, ties, slug, systems>>
 
 Next ==
-    \/ \E dmg \in Asteroids : AsteroidStrike(dmg)
-    \/ \E dmg \in Asteroids : AsteroidDestroysShip(dmg)
+    \/ \E dmg \in 1..Density:
+        \/ Fly(dmg)
+        \/ TIEFighterAttack(dmg)
+        \/ HideInCave(dmg)
+        \/ AttachToStarDestroyer(dmg)
+        \/ SensorDamage(dmg)
+        \/ EngineDamage(dmg)
+        \/ WeaponsDamage(dmg)
+        \/ BlindFly(dmg)
+        \/ SluggishDodge(dmg)
     \/ AsteroidDestroysTIE
-    \/ TIEFighterAttack
-    \/ HideInCave
-    \/ MynockDamage
+    \/ \E sys \in {"sensors", "engines", "weapons"}: MynockDamage(sys)
     \/ ThisIsNoCave
     \/ EscapeSlugMouth
     \/ SlugEatsShip
-    \/ AttachToStarDestroyer
     \/ FloatAwayWithGarbage
 
 InvNeverTellMeTheOdds ==
     falcon /= "destroyed"
-
-ShieldsHolding ==
-    shields > 0
 
 Escaped ==
     falcon = "escaped"

@@ -101,6 +101,25 @@ impl Parser {
         Ok(result)
     }
 
+    fn parse_and_item(&mut self, list_col: u32) -> Result<Expr> {
+        let start_line = self.current_line();
+        let mut item = self.parse_and_conjunct(Some(list_col))?;
+        while *self.peek() == Token::Or {
+            if self.paren_depth == 0
+                && self.current_line() != start_line
+                && self.current_column() <= list_col
+            {
+                break;
+            }
+            self.advance();
+            let label = self.consume_label();
+            let right = self.parse_and_conjunct(Some(list_col))?;
+            let right = wrap_with_label(right, label);
+            item = Expr::Or(Box::new(item), Box::new(right));
+        }
+        Ok(item)
+    }
+
     fn parse_and(&mut self) -> Result<Expr> {
         let mut list_anchor = None;
         if *self.peek() == Token::And {
@@ -108,7 +127,11 @@ impl Parser {
             self.advance();
             self.consume_label();
         }
-        let mut left = self.parse_and_conjunct(list_anchor.map(|(c, _)| c))?;
+        let mut left = if let Some((lc, _)) = list_anchor {
+            self.parse_and_item(lc)?
+        } else {
+            self.parse_and_conjunct(None)?
+        };
         loop {
             match self.peek() {
                 Token::And => {
@@ -121,7 +144,11 @@ impl Parser {
                     }
                     self.advance();
                     let label = self.consume_label();
-                    let right = self.parse_and_conjunct(list_anchor.map(|(c, _)| c))?;
+                    let right = if let Some((lc, _)) = list_anchor {
+                        self.parse_and_item(lc)?
+                    } else {
+                        self.parse_and_conjunct(None)?
+                    };
                     let right = wrap_with_label(right, label);
                     left = Expr::And(Box::new(left), Box::new(right));
                 }

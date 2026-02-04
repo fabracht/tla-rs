@@ -11,9 +11,9 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use tlc_executor::Source;
-use tlc_executor::ast::{Env, Value};
+use tlc_executor::ast::{Env, Spec, Value};
 use tlc_executor::checker::{
-    CheckResult, CheckerConfig, check, check_result_to_json, eval_error_to_diagnostic,
+    CheckResult, CheckStats, CheckerConfig, check, check_result_to_json, eval_error_to_diagnostic,
     format_eval_error, format_trace, format_trace_with_actions, format_trace_with_diffs,
     write_trace_json,
 };
@@ -94,6 +94,147 @@ fn is_likely_subcommand(arg: &str) -> bool {
     ["check", "run", "verify", "parse", "lint", "test"].contains(&arg.to_lowercase().as_str())
 }
 
+fn format_value_short(val: &Value) -> String {
+    match val {
+        Value::Set(s) => {
+            let elems: Vec<String> = s.iter().map(format_value_short).collect();
+            format!("{{{}}}", elems.join(","))
+        }
+        Value::Int(n) => n.to_string(),
+        Value::Bool(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
+        Value::Str(s) => format!("\"{}\"", s),
+        other => format!("{:?}", other),
+    }
+}
+
+fn extract_stats(result: &CheckResult) -> Option<&CheckStats> {
+    match result {
+        CheckResult::Ok(stats)
+        | CheckResult::MaxStatesExceeded(stats)
+        | CheckResult::MaxDepthExceeded(stats) => Some(stats),
+        CheckResult::InvariantViolation(_, stats) | CheckResult::LivenessViolation(_, stats) => {
+            Some(stats)
+        }
+        CheckResult::Deadlock(_, _, stats) => Some(stats),
+        _ => None,
+    }
+}
+
+fn run_sweep(
+    spec: &Spec,
+    base_domains: &Env,
+    config: &CheckerConfig,
+    sweep_name: &str,
+    sweep_values: &[Value],
+) -> ExitCode {
+    println!("Sweep: {} across {} values", sweep_name, sweep_values.len());
+    println!();
+
+    let mut results: Vec<(String, CheckResult)> = Vec::new();
+
+    for val in sweep_values {
+        let label = format_value_short(val);
+        let mut domains = base_domains.clone();
+        domains.insert(sweep_name.into(), val.clone());
+
+        println!("  {}={} ...", sweep_name, label);
+        let result = check(spec, &domains, config);
+
+        if let Some(stats) = extract_stats(&result) {
+            println!(
+                "    {} states, {} transitions, {:.1}s",
+                stats.states_explored, stats.transitions, stats.elapsed_secs
+            );
+        } else {
+            println!("    error (see below)");
+        }
+
+        results.push((label, result));
+    }
+
+    println!();
+
+    let prop_names: Vec<Arc<str>> = config.count_properties.clone();
+
+    let col_width = 14;
+    let name_width = results
+        .iter()
+        .map(|(label, _)| label.len())
+        .max()
+        .unwrap_or(5)
+        .max(sweep_name.len())
+        .max(5);
+
+    print!("{:>width$}", sweep_name, width = name_width);
+    print!(" | {:>w$}", "states", w = col_width);
+    print!(" | {:>w$}", "transitions", w = col_width);
+    print!(" | {:>w$}", "max_depth", w = col_width);
+    print!(" | {:>w$}", "time", w = col_width);
+    for prop in &prop_names {
+        print!(" | {:>w$}", prop.as_ref(), w = col_width);
+    }
+    println!();
+
+    let separator_width = name_width
+        + 3
+        + col_width
+        + 3
+        + col_width
+        + 3
+        + col_width
+        + 3
+        + col_width
+        + prop_names.len() * (3 + col_width);
+    println!("{}", "-".repeat(separator_width));
+
+    let mut any_error = false;
+    for (label, result) in &results {
+        if let Some(stats) = extract_stats(result) {
+            print!("{:>width$}", label, width = name_width);
+            print!(" | {:>w$}", stats.states_explored, w = col_width);
+            print!(" | {:>w$}", stats.transitions, w = col_width);
+            print!(" | {:>w$}", stats.max_depth_reached, w = col_width);
+            print!(" | {:>w$.3}s", stats.elapsed_secs, w = col_width - 1);
+
+            for prop in &prop_names {
+                if let Some(p) = stats.property_stats.iter().find(|p| p.name == *prop) {
+                    let total = p.satisfied + p.violated + p.errors;
+                    if total > 0 {
+                        let pct = p.satisfied as f64 / total as f64 * 100.0;
+                        print!(
+                            " | {:>w$}",
+                            format!("{}/{} ({:.1}%)", p.satisfied, total, pct),
+                            w = col_width
+                        );
+                    } else {
+                        print!(" | {:>w$}", "n/a", w = col_width);
+                    }
+                } else {
+                    print!(" | {:>w$}", "n/a", w = col_width);
+                }
+            }
+            println!();
+
+            if stats.violation_count > 0 {
+                any_error = true;
+            }
+        } else {
+            print!("{:>width$}", label, width = name_width);
+            print!(" | {:>w$}", "ERROR", w = col_width);
+            println!();
+            any_error = true;
+        }
+    }
+
+    println!();
+
+    if any_error {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
 fn main() -> ExitCode {
     #[cfg(feature = "dhat")]
     let _profiler = dhat::Profiler::new_heap();
@@ -114,6 +255,7 @@ fn main() -> ExitCode {
     let mut scenario_input: Option<String> = None;
     let mut validate_only = false;
     let mut list_invariants = false;
+    let mut sweep: Option<(Arc<str>, Vec<Value>)> = None;
     #[cfg(not(target_arch = "wasm32"))]
     let mut interactive_mode = false;
     #[cfg(not(target_arch = "wasm32"))]
@@ -282,6 +424,37 @@ fn main() -> ExitCode {
                 }
                 replay_path = Some(PathBuf::from(&args[i]));
             }
+            "--sweep" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--sweep requires NAME=VAL1;VAL2;VAL3");
+                    return ExitCode::FAILURE;
+                }
+                let arg = &args[i];
+                if let Some(eq_pos) = arg.find('=') {
+                    let name: Arc<str> = arg[..eq_pos].into();
+                    let rest = &arg[eq_pos + 1..];
+                    let parts = split_top_level(rest, ';');
+                    if parts.len() < 2 {
+                        eprintln!("--sweep requires at least 2 values separated by semicolons");
+                        return ExitCode::FAILURE;
+                    }
+                    let mut values = Vec::new();
+                    for part in &parts {
+                        match parse_constant_value(part) {
+                            Some(val) => values.push(val),
+                            None => {
+                                eprintln!("invalid sweep value: {}", part);
+                                return ExitCode::FAILURE;
+                            }
+                        }
+                    }
+                    sweep = Some((name, values));
+                } else {
+                    eprintln!("--sweep requires NAME=VAL1;VAL2;VAL3 format");
+                    return ExitCode::FAILURE;
+                }
+            }
             "--help" | "-h" => {
                 println!("tlc-executor - TLA+ model checker");
                 println!();
@@ -315,6 +488,7 @@ fn main() -> ExitCode {
                 println!("  --continue                 Continue past invariant violations");
                 println!("  --count-satisfying NAME    Count states satisfying a definition");
                 println!("                             (can be specified multiple times)");
+                println!("  --sweep NAME=V1;V2;V3     Sweep a constant across values and compare");
                 println!(
                     "  --validate                 Parse and validate spec without model checking"
                 );
@@ -559,6 +733,11 @@ fn main() -> ExitCode {
     println!();
 
     config.spec_path = Some(PathBuf::from(&spec_path));
+
+    if let Some((sweep_name, sweep_values)) = sweep {
+        return run_sweep(&spec, &domains, &config, &sweep_name, &sweep_values);
+    }
+
     let result = check(&spec, &domains, &config);
 
     #[cfg(feature = "profiling")]
