@@ -9,3 +9,7 @@ profile.json
 CLAUDE.md
 .claude/
 trace.json
+.cleanup/
+.local_only/
+GEMINI.md
+pkg/

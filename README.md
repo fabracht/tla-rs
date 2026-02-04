@@ -128,58 +128,23 @@ These features are designed for understanding *how* a protocol fails, not just *
 
 **Continue past violations** to explore the full state space of a buggy spec:
 ```bash
-tlc-executor test_cases/mqdb/bugs/MQDBOwnershipTOCTOU_BugNoCAS.tla \
-  -c 'Users={"u1","u2"}' -c 'Requests={"r1","r2"}' -c 'DataValues={"d1","d2"}' \
-  --allow-deadlock --continue
+tlc-executor spec.tla -c 'Procs={"p1","p2"}' --allow-deadlock --continue
 ```
-```
-Model checking complete. 640 invariant violation(s) found across 1668 states.
-
-  Violations by invariant:
-    InvOwnershipSafety: 640 violation(s)
-
-  First violation trace (InvOwnershipSafety, 6 states):
-    ...
-
-  Reachable states: 1668
-  Transitions: 3748
-  Max depth: 13
-```
-Without `--continue`, the checker would stop at the first of those 640 violations after exploring only 239 states.
+Without `--continue`, the checker stops at the first violation. With it, all violations are collected and counted per-invariant across the full state space.
 
 **Count property satisfaction** to measure what fraction of reachable states satisfy a predicate:
 ```bash
-tlc-executor test_cases/mqdb/MQDBOwnershipTOCTOU.tla \
-  -c 'Users={"u1","u2"}' -c 'Requests={"r1","r2"}' -c 'DataValues={"d1","d2"}' \
-  --allow-deadlock \
-  --count-satisfying InvOwnershipSafety \
-  --count-satisfying InvCheckedImpliesOwner
+tlc-executor spec.tla -c 'Procs={"p1","p2"}' --allow-deadlock \
+  --count-satisfying InvSafety --count-satisfying InvLiveness
 ```
-```
-Property statistics:
-  InvOwnershipSafety: 1316/1316 satisfied (100.0%)
-  InvCheckedImpliesOwner: 1316/1316 satisfied (100.0%)
-```
+Reports how many reachable states satisfy each named boolean definition.
 
-**Combine `--continue` with `--count-satisfying`** to see how a bug degrades safety across the state space:
+**Combine `--continue` with `--count-satisfying` and `--verbose`** to see how a bug degrades safety by depth:
 ```bash
-tlc-executor test_cases/mqdb/bugs/MQDBOwnershipTOCTOU_BugNoCAS.tla \
-  -c 'Users={"u1","u2"}' -c 'Requests={"r1","r2"}' -c 'DataValues={"d1","d2"}' \
-  --allow-deadlock --continue \
-  --count-satisfying InvOwnershipSafety --verbose
+tlc-executor spec.tla --allow-deadlock --continue \
+  --count-satisfying InvSafety --verbose
 ```
-```
-Property statistics:
-  InvOwnershipSafety: 1028/1668 satisfied (61.6%)
-  InvOwnershipSafety by depth:
-    depth   1:      4/4      (100.0%)
-    depth   2:     16/16     (100.0%)
-    ...
-    depth   6:    160/176    (90.9%)
-    depth   9:    160/336    (47.6%)
-    depth  11:      0/104    (0.0%)
-```
-This shows the TOCTOU bug (missing CAS on commit) starts causing violations at depth 6, and by depth 11 every reachable state is unsafe. The `--verbose` flag enables the per-depth breakdown.
+The `--verbose` flag enables per-depth breakdowns showing at which exploration depth violations start appearing.
 
 **A fun example** — C-3PO famously calculates "the possibility of successfully navigating an asteroid field is approximately 3,720 to 1." The spec `examples/c3po_asteroid_field.tla` models the Empire Strikes Back asteroid chase scene with lore-accurate events: variable-damage asteroid impacts, TIE fighter attacks, TIEs getting destroyed by asteroids, hiding in the space slug's cave, mynock damage, escaping the exogorth's mouth, and the only real escape — attaching to a Star Destroyer's hull and floating away with the garbage. No hyperspace: the hyperdrive is dead.
 
@@ -211,7 +176,7 @@ Property statistics:
     depth  12:      5/9      (55.6%)
     depth  13:      2/2      (100.0%)
 ```
-Only 5.4% of reachable states have the Falcon escaped — a long way from v1's 30.8%. Escape requires surviving the asteroid barrage, hiding in the cave, taking mynock damage, escaping the slug's closing mouth (2 shield damage), then waiting for asteroids to destroy all 4 TIE fighters before drifting onto a Star Destroyer's hull. C-3PO's 3,720:1 odds assume probability-weighted paths rather than state counting, but the depth breakdown tells the story: destruction starts at depth 4, escape is impossible before depth 7, and by depth 11 half the remaining states are destroyed.
+Only 5.4% of reachable states have the Falcon escaped. Escape requires surviving the asteroid barrage, hiding in the cave, taking mynock damage, escaping the slug's closing mouth (2 shield damage), then waiting for asteroids to destroy all 4 TIE fighters before drifting onto a Star Destroyer's hull. C-3PO's 3,720:1 odds assume probability-weighted paths rather than state counting, but the depth breakdown tells the story: destruction starts at depth 4, escape is impossible before depth 7, and by depth 11 half the remaining states are destroyed.
 
 **JSON output** for programmatic use:
 ```bash
@@ -371,19 +336,6 @@ Error states are highlighted in red in the generated graph.
 - `Nat` and `Int` are bounded (-100 to 100 by default)
 - Limited temporal properties (liveness with `--check-liveness`, but not full TLA+ temporal logic)
 - Recursive operators must be declared with RECURSIVE
-
-## Design Notes
-
-### Why No Parallel Mode
-
-Parallel state exploration was implemented and removed after benchmarking showed it provided no benefit. The implementation used level-by-level BFS with parallel state evaluation and concurrent deduplication.
-
-**Why it doesn't help:**
-- State deduplication and parent pointer maintenance must remain sequential
-- Per-state evaluation is fast; most time is spent on state graph management
-- Level synchronization overhead exceeds parallelization gains
-
-Benchmarks showed parallel mode was 1.5-2x slower than sequential across all tested specs.
 
 ## License
 
