@@ -1,8 +1,8 @@
-# tlc-executor
+# tla-rs
 
 A fast TLA+ model checker written in Rust.
 
-tlc-executor performs explicit-state model checking of TLA+ specifications, exploring all reachable states to verify that invariants hold. It's designed as a lightweight alternative to the official TLC model checker for specs that fit its supported subset.
+tla-rs performs explicit-state model checking of TLA+ specifications, exploring all reachable states to verify that invariants hold. It's designed as a lightweight alternative to the official TLC model checker for specs that fit its supported subset.
 
 ## Features
 
@@ -40,12 +40,12 @@ If you have metrics showing "processed 139984 of 140000 events" and the fix is c
 cargo build --release
 ```
 
-The binary will be at `target/release/tlc-executor`.
+The binary will be at `target/release/tla`.
 
 ## Usage
 
 ```bash
-tlc-executor <spec.tla> [options]
+tla <spec.tla> [options]
 ```
 
 ### Options
@@ -77,22 +77,22 @@ tlc-executor <spec.tla> [options]
 
 Check a simple counter spec:
 ```bash
-tlc-executor examples/counter.tla
+tla examples/counter.tla
 ```
 
 Check with constants:
 ```bash
-tlc-executor spec.tla --constant 'N=5' --constant 'Procs={"p1","p2","p3"}'
+tla spec.tla --constant 'N=5' --constant 'Procs={"p1","p2","p3"}'
 ```
 
 Enable symmetry reduction for a set of processes:
 ```bash
-tlc-executor spec.tla -c 'Proc={"a","b","c"}' --symmetry Proc
+tla spec.tla -c 'Proc={"a","b","c"}' --symmetry Proc
 ```
 
 Export state graph for visualization:
 ```bash
-tlc-executor spec.tla --export-dot graph.dot
+tla spec.tla --export-dot graph.dot
 dot -Tpng graph.dot -o graph.png
 ```
 
@@ -101,14 +101,14 @@ dot -Tpng graph.dot -o graph.png
 Explore specific execution paths using TLA+ expressions to match transitions:
 
 ```bash
-tlc-executor spec.tla --scenario "step: count' = count + 1
+tla spec.tla --scenario "step: count' = count + 1
 step: count' = count + 1
 step: count' = count + 1"
 ```
 
 Or load from a file:
 ```bash
-tlc-executor spec.tla --scenario @scenario.txt
+tla spec.tla --scenario @scenario.txt
 ```
 
 Scenario file format:
@@ -128,20 +128,20 @@ These features are designed for understanding *how* a protocol fails, not just *
 
 **Continue past violations** to explore the full state space of a buggy spec:
 ```bash
-tlc-executor spec.tla -c 'Procs={"p1","p2"}' --allow-deadlock --continue
+tla spec.tla -c 'Procs={"p1","p2"}' --allow-deadlock --continue
 ```
 Without `--continue`, the checker stops at the first violation. With it, all violations are collected and counted per-invariant across the full state space.
 
 **Count property satisfaction** to measure what fraction of reachable states satisfy a predicate:
 ```bash
-tlc-executor spec.tla -c 'Procs={"p1","p2"}' --allow-deadlock \
+tla spec.tla -c 'Procs={"p1","p2"}' --allow-deadlock \
   --count-satisfying InvSafety --count-satisfying InvLiveness
 ```
 Reports how many reachable states satisfy each named boolean definition.
 
 **Combine `--continue` with `--count-satisfying` and `--verbose`** to see how a bug degrades safety by depth:
 ```bash
-tlc-executor spec.tla --allow-deadlock --continue \
+tla spec.tla --allow-deadlock --continue \
   --count-satisfying InvSafety --verbose
 ```
 The `--verbose` flag enables per-depth breakdowns showing at which exploration depth violations start appearing.
@@ -151,7 +151,7 @@ The `--verbose` flag enables per-depth breakdowns showing at which exploration d
 The `Asteroids` constant controls asteroid damage values. Each value becomes an independent action, so `{1,2,3,4,5}` creates 5 strike actions and 5 kill actions competing with ~7 non-asteroid actions — biasing the state space toward destruction.
 
 ```bash
-tlc-executor examples/c3po_asteroid_field.tla -c 'Asteroids={1,2,3,4,5}' \
+tla examples/c3po_asteroid_field.tla -c 'Asteroids={1,2,3,4,5}' \
   --allow-deadlock --continue \
   --count-satisfying InvNeverTellMeTheOdds \
   --count-satisfying Escaped --verbose
@@ -180,7 +180,7 @@ Only 5.4% of reachable states have the Falcon escaped. Escape requires surviving
 
 **JSON output** for programmatic use:
 ```bash
-tlc-executor spec.tla --count-satisfying InvSafety --json
+tla spec.tla --count-satisfying InvSafety --json
 ```
 Returns structured data including `properties` array with `depth_breakdown` per property.
 
@@ -299,7 +299,7 @@ Progress is reported early and frequently to provide feedback:
 
 For quick exploration without waiting for full verification:
 ```bash
-tlc-executor spec.tla --quick
+tla spec.tla --quick
 ```
 This limits exploration to 10,000 states and exits with success if no violations are found.
 
@@ -325,7 +325,7 @@ error: evaluating Next
 Export with `--export-dot` and render with Graphviz:
 
 ```bash
-tlc-executor spec.tla --export-dot graph.dot
+tla spec.tla --export-dot graph.dot
 dot -Tpng graph.dot -o graph.png
 ```
 

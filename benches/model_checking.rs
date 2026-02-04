@@ -3,11 +3,11 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use tlc_executor::ast::{Env, Expr, State, Value};
-use tlc_executor::checker::{CheckResult, CheckerConfig, check};
-use tlc_executor::eval::{Definitions, eval};
-use tlc_executor::parser::parse;
-use tlc_executor::symmetry::SymmetryConfig;
+use tla_rs::ast::{Env, Expr, State, Value};
+use tla_rs::checker::{CheckResult, CheckerConfig, check};
+use tla_rs::eval::{Definitions, eval};
+use tla_rs::parser::parse;
+use tla_rs::symmetry::SymmetryConfig;
 
 fn quiet_config() -> CheckerConfig {
     CheckerConfig {

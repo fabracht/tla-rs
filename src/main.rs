@@ -10,18 +10,18 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use tlc_executor::Source;
-use tlc_executor::ast::{Env, Spec, Value};
-use tlc_executor::checker::{
+use tla_rs::Source;
+use tla_rs::ast::{Env, Spec, Value};
+use tla_rs::checker::{
     CheckResult, CheckStats, CheckerConfig, check, check_result_to_json, eval_error_to_diagnostic,
     format_eval_error, format_trace, format_trace_with_actions, format_trace_with_diffs,
     write_trace_json,
 };
-use tlc_executor::diagnostic::{ColorConfig, Diagnostic};
+use tla_rs::diagnostic::{ColorConfig, Diagnostic};
 #[cfg(not(target_arch = "wasm32"))]
-use tlc_executor::interactive::{run_interactive, run_interactive_replay};
-use tlc_executor::parser::parse;
-use tlc_executor::scenario::{execute_scenario, format_scenario_result, parse_scenario};
+use tla_rs::interactive::{run_interactive, run_interactive_replay};
+use tla_rs::parser::parse;
+use tla_rs::scenario::{execute_scenario, format_scenario_result, parse_scenario};
 
 fn split_top_level(s: &str, delim: char) -> Vec<String> {
     let mut parts = Vec::new();
@@ -456,7 +456,7 @@ fn main() -> ExitCode {
                 }
             }
             "--help" | "-h" => {
-                println!("tlc-executor - TLA+ model checker");
+                println!("tla - TLA+ model checker");
                 println!();
                 println!("Usage: {} <spec.tla> [options]", args[0]);
                 println!();
@@ -518,7 +518,7 @@ fn main() -> ExitCode {
             path => {
                 if spec_path.is_none() && is_likely_subcommand(path) {
                     eprintln!(
-                        "error: '{}' looks like a subcommand, but tlc-executor doesn't use subcommands.",
+                        "error: '{}' looks like a subcommand, but tla doesn't use subcommands.",
                         path
                     );
                     eprintln!();
@@ -743,7 +743,7 @@ fn main() -> ExitCode {
     #[cfg(feature = "profiling")]
     {
         println!();
-        tlc_executor::report_profiling_stats();
+        tla_rs::report_profiling_stats();
     }
 
     if config.json_output {
@@ -788,7 +788,7 @@ fn main() -> ExitCode {
             .get(cex.violated_invariant)
             .and_then(|n| n.as_ref())
             .map(|n| n.as_ref());
-        if let Err(e) = tlc_executor::checker::write_counterexample_json(
+        if let Err(e) = tla_rs::checker::write_counterexample_json(
             cex_path,
             cex,
             Some(&spec_path),

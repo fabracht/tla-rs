@@ -144,7 +144,7 @@ Cross-checked against:
 | `TLCGet(i)` | Get TLC state value at index i, or stats with string keys |
 | `TLCSet(i, v)` | Set TLC state value at index i |
 | `Any` | Special constant where `v \in Any` for all v |
-| `TLCEval(v)` | Force eager evaluation (no-op in tlc-executor) |
+| `TLCEval(v)` | Force eager evaluation (no-op in tla-rs) |
 
 **TLCGet String Keys:** `"distinct"`, `"level"`, `"diameter"`, `"queue"`, `"duration"`, `"generated"`
 

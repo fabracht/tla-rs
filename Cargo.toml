@@ -1,15 +1,15 @@
 [package]
-name = "tlc-executor"
+name = "tla-rs"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "tlc_executor"
+name = "tla_rs"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "tlc-executor"
+name = "tla"
 path = "src/main.rs"
 
 [features]
