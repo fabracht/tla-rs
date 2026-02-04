@@ -62,7 +62,9 @@ tla <spec.tla> [options]
 | `--check-liveness` | Check liveness and fairness properties |
 | `--continue` | Continue past invariant violations (explore full state space) |
 | `--count-satisfying NAME` | Count states satisfying a definition (repeatable) |
+| `--sweep NAME=V1;V2;...` | Sweep a constant across values, compare results |
 | `--scenario TEXT` | Explore a specific scenario (or @file) |
+| `--interactive, -i` | Interactive TUI exploration mode |
 | `--json` | Output results in JSON format |
 | `--verbose, -v` | Verbose output (depth breakdowns, etc.) |
 
@@ -148,35 +150,16 @@ The `--verbose` flag enables per-depth breakdowns showing at which exploration d
 
 **A fun example** — C-3PO famously calculates "the possibility of successfully navigating an asteroid field is approximately 3,720 to 1." The spec `examples/c3po_asteroid_field.tla` models the Empire Strikes Back asteroid chase scene with lore-accurate events: variable-damage asteroid impacts, TIE fighter attacks, TIEs getting destroyed by asteroids, hiding in the space slug's cave, mynock damage, escaping the exogorth's mouth, and the only real escape — attaching to a Star Destroyer's hull and floating away with the garbage. No hyperspace: the hyperdrive is dead.
 
-The `Asteroids` constant controls asteroid damage values. Each value becomes an independent action, so `{1,2,3,4,5}` creates 5 strike actions and 5 kill actions competing with ~7 non-asteroid actions — biasing the state space toward destruction.
+The `Density` constant controls the asteroid damage range (1..Density). Higher values create more damage variants per action, biasing the state space toward destruction. The spec includes hull integrity, system damage (sensors, engines, weapons), and system-dependent actions like blind flying and sluggish dodging.
 
 ```bash
-tla examples/c3po_asteroid_field.tla -c 'Asteroids={1,2,3,4,5}' \
+tla examples/c3po_asteroid_field.tla -c 'Density=3' \
   --allow-deadlock --continue \
   --count-satisfying InvNeverTellMeTheOdds \
   --count-satisfying Escaped --verbose
 ```
-```
-Model checking complete. 65 invariant violation(s) found across 353 states.
 
-Property statistics:
-  InvNeverTellMeTheOdds: 288/353 satisfied (81.6%)
-  InvNeverTellMeTheOdds by depth:
-    depth   1:      1/1      (100.0%)
-    depth   2:      7/7      (100.0%)
-    depth   3:     18/18     (100.0%)
-    depth   4:     29/34     (85.3%)
-    ...
-    depth  10:     12/20     (60.0%)
-    depth  11:      8/16     (50.0%)
-  Escaped: 19/353 satisfied (5.4%)
-  Escaped by depth:
-    depth   7:      1/60     (1.7%)
-    depth   8:      5/55     (9.1%)
-    depth  12:      5/9      (55.6%)
-    depth  13:      2/2      (100.0%)
-```
-Only 5.4% of reachable states have the Falcon escaped. Escape requires surviving the asteroid barrage, hiding in the cave, taking mynock damage, escaping the slug's closing mouth (2 shield damage), then waiting for asteroids to destroy all 4 TIE fighters before drifting onto a Star Destroyer's hull. C-3PO's 3,720:1 odds assume probability-weighted paths rather than state counting, but the depth breakdown tells the story: destruction starts at depth 4, escape is impossible before depth 7, and by depth 11 half the remaining states are destroyed.
+The depth breakdown shows destruction starting early and escape requiring a long sequence of correct decisions — surviving asteroids, hiding in the cave, taking mynock damage, escaping the slug, then waiting for all TIE fighters to be destroyed before drifting onto a Star Destroyer's hull.
 
 **JSON output** for programmatic use:
 ```bash
@@ -188,11 +171,13 @@ Returns structured data including `properties` array with `depth_breakdown` per 
 
 ### Modules
 
-- `Naturals` - Natural numbers (Nat, 0..100)
-- `Integers` - Integers (Int, -100..100)
-- `Sequences` - Sequence operators
-- `FiniteSets` - Finite set operators (Cardinality, IsFiniteSet)
-- `TLC` - TLC-specific operators
+- `Naturals` - Natural numbers (Nat, bounded 0..100)
+- `Integers` - Integers (Int, bounded -100..100)
+- `Sequences` - Len, Head, Tail, Append, \o, SubSeq, SelectSeq, Seq(S)
+- `FiniteSets` - Cardinality, IsFiniteSet
+- `TLC` - Print, PrintT, Assert, ToString, TLCGet/TLCSet, Permutations, SortSeq, RandomElement, Any
+- `Bags` - IsABag, BagToSet, SetToBag, BagIn, EmptyBag, \oplus, \ominus, BagUnion, SubBag, BagOfAll, BagCardinality, CopiesIn
+- `Bits` - BitAnd, BitOr, BitXor, BitNot, ShiftLeft, ShiftRight
 
 ### Operators
 
@@ -334,7 +319,9 @@ Error states are highlighted in red in the generated graph.
 ## Limitations
 
 - `Nat` and `Int` are bounded (-100 to 100 by default)
-- Limited temporal properties (liveness with `--check-liveness`, but not full TLA+ temporal logic)
+- Limited temporal logic (fairness/liveness with `--check-liveness`, but `[]`, `<>`, `~>` cannot be evaluated directly)
+- Unbounded quantifiers (`\E x : P` without `\in S`) are not supported
+- `Seq(S)` supports membership tests only (infinite set, cannot be enumerated)
 - Recursive operators must be declared with RECURSIVE
 
 ## License

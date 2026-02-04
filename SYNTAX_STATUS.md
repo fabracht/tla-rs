@@ -29,8 +29,8 @@ Cross-checked against:
 | `/=`, `#` | ≠ | Inequality |
 | `<` | | Less than |
 | `>` | | Greater than |
-| `<=`, `=<` | ≤ | Less than or equal |
-| `>=` | ≥ | Greater than or equal |
+| `<=`, `=<`, `\leq` | ≤ | Less than or equal |
+| `>=`, `\geq` | ≥ | Greater than or equal |
 
 ### Arithmetic Operators
 | ASCII | Unicode | Description |
@@ -64,8 +64,8 @@ Cross-checked against:
 | `UNION` | | Distributed union |
 | `{x \in S : P}` | | Set filter |
 | `{e : x \in S}` | | Set map |
-| `Cardinality(S)` | | Set cardinality |
-| `IsFiniteSet(S)` | | Finiteness test |
+| `Cardinality(S)` | | Set cardinality (FiniteSets) |
+| `IsFiniteSet(S)` | | Finiteness test (FiniteSets) |
 
 ### Quantifiers
 | ASCII | Unicode | Description |
@@ -98,10 +98,10 @@ Cross-checked against:
 | `Head(s)` | First element |
 | `Tail(s)` | All but first |
 | `Append(s, e)` | Append element |
-| `\o` | Concatenation |
+| `\o` | Concatenation (disambiguated from octal by context) |
 | `SubSeq(s, m, n)` | Subsequence |
-| `SelectSeq(s, Test)` | Filter sequence |
-| `Seq(S)` | Set of all sequences (membership only) |
+| `SelectSeq(s, Test)` | Filter sequence by predicate |
+| `Seq(S)` | Set of all sequences (membership tests only, not enumerable) |
 
 ### Record Operators
 | ASCII | Description |
@@ -160,7 +160,7 @@ Cross-checked against:
 | `B1 \ominus B2` | ⊖ | Bag subtraction (subtract counts) |
 | `BagUnion(S)` | | Union of all bags in set S |
 | `B1 \sqsubseteq B2` | ⊑ | Bag subset (counts in B1 <= counts in B2) |
-| `SubBag(B)` | | Set of all sub-bags of B |
+| `SubBag(B)` | | Set of all sub-bags of B (max 20 total copies) |
 | `BagOfAll(F, B)` | | Map function over bag |
 | `BagCardinality(B)` | | Sum of all counts |
 | `CopiesIn(e, B)` | | Number of copies of e in B |
@@ -172,8 +172,8 @@ Cross-checked against:
 | `BitOr(a, b)` | Bitwise OR |
 | `BitXor(a, b)` | Bitwise XOR |
 | `BitNot(a)` | Bitwise NOT (complement) |
-| `ShiftLeft(a, n)` | Left shift by n bits (also `LeftShift`) |
-| `ShiftRight(a, n)` | Right shift by n bits (also `RightShift`) |
+| `ShiftLeft(a, n)` | Left shift by n bits (also `LeftShift`, max 63) |
+| `ShiftRight(a, n)` | Right shift by n bits (also `RightShift`, max 63) |
 
 ### Module Structure
 | Keyword | Description |
@@ -182,53 +182,41 @@ Cross-checked against:
 | `EXTENDS` | Import module |
 | `VARIABLE(S)` | State variables |
 | `CONSTANT(S)` | Constants |
-| `ASSUME` | Constraint on constants |
-| `RECURSIVE` | Recursive operator |
-| `Label::` | Proof labels (skipped) |
-
----
-
-## Partially Implemented ⚠️
-
-### `INSTANCE` Module Instantiation
-- **Status:** Implemented for qualified calls (`Instance!Operator`)
-- **Example:** `INSTANCE ModuleName WITH param <- value`
-- **Note:** Requires module file to be in same directory as spec
-
-### `RECURSIVE` Operator Definitions
-- **Status:** Parsed, works via lazy evaluation
-- **Limitation:** No cycle detection
+| `ASSUME` | Evaluated at startup; aborts if any constraint is FALSE |
+| `RECURSIVE` | Recursive operator (stack overflow protected via `stacker`) |
+| `INSTANCE` | Module instantiation with `WITH param <- value` substitutions |
+| `LOCAL` | Local definitions and instances (not exported) |
+| `Label::` | Action labels (consumed by parser, used for action naming) |
 
 ### Standard Library Modules
 | Module | Status |
 |--------|--------|
-| `Naturals` | ✓ Nat set (bounded 0..100) |
-| `Integers` | ✓ Int set (bounded -100..100) |
-| `Sequences` | ✓ All ops including `Seq(S)`, `SelectSeq` |
-| `FiniteSets` | ✓ `Cardinality`, `IsFiniteSet` |
-| `TLC` | ✓ All 13 operators implemented |
-| `Bags` | ✓ All 13 operators implemented |
-| `Bits` | ✓ All 6 operators implemented |
+| `Naturals` | ✓ Nat set (bounded 0..100), arithmetic operators built-in |
+| `Integers` | ✓ Int set (bounded -100..100), includes Nat |
+| `Sequences` | ✓ All 8 operators: Len, Head, Tail, Append, \o, SubSeq, SelectSeq, Seq(S) |
+| `FiniteSets` | ✓ Cardinality, IsFiniteSet |
+| `TLC` | ✓ All 13 operators |
+| `Bags` | ✓ All 13 operators |
+| `Bits` | ✓ All 6 operators |
 
 ---
 
 ## Parsed But Not Evaluated ⚠️
 
 ### Temporal Operators
-These operators are parsed into the AST but error at evaluation time. They can appear in skipped definitions (like `Spec`) without causing errors.
+These operators are parsed into the AST but error at evaluation time. They can appear in skipped definitions (like `Spec`) without causing errors. Fairness operators are handled by the liveness checker (`--check-liveness`).
 
 | ASCII | Unicode | Description | Status |
 |-------|---------|-------------|--------|
-| `[]P` | | Always | Parsed, errors if evaluated |
-| `<>P` | | Eventually | Parsed, errors if evaluated |
-| `~>` | | Leads-to | Parsed, errors if evaluated |
-| `WF_v(A)` | | Weak fairness | ✓ Used in liveness checking |
-| `SF_v(A)` | | Strong fairness | ✓ Used in liveness checking |
+| `[]P` | □ | Always | Parsed, errors if evaluated directly |
+| `<>P` | ◇ | Eventually | Parsed, errors if evaluated directly |
+| `~>` | | Leads-to | Parsed, errors if evaluated directly |
+| `WF_v(A)` | | Weak fairness | ✓ Used in liveness checking via SCC analysis |
+| `SF_v(A)` | | Strong fairness | ✓ Used in liveness checking via SCC analysis |
 | `ENABLED A` | | Action enabled | ✓ Used in liveness checking |
-| `[A]_v` | | Box action | Parsed, errors if evaluated |
-| `<<A>>_v` | | Diamond action | Parsed, errors if evaluated |
-
-**Liveness Checking:** Use `--check-liveness` to verify fairness properties. The checker computes SCCs and verifies WF/SF constraints are satisfied.
+| `[A]_v` | | Box action | Parsed, errors if evaluated directly |
+| `<<A>>_v` | | Diamond action | Parsed, errors if evaluated directly |
+| `\cdot` | | Action composition | Parsed, errors if evaluated directly |
 
 ---
 
@@ -242,7 +230,6 @@ These operators are parsed into the AST but error at evaluation time. They can a
 ### Other Missing
 | Feature | Description |
 |---------|-------------|
-| `\cdot` | Action composition |
 | Unbounded quantifiers | `\E x : P` without domain |
 
 ---
@@ -274,7 +261,6 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | ⊕ | `\oplus` |
 | ⊖ | `\ominus` |
 | ⊑ | `\sqsubseteq` |
-
 | ≡ | `<=>` |
 | ↦ | `\|->` |
 | → | `->` |
@@ -302,7 +288,8 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | TLC Module | 100% ✓ |
 | Bags Module | 100% ✓ |
 | Bits Module | 100% ✓ |
-| Module System | 90% ⚠ |
+| Standard Library | 100% ✓ |
+| Module System | 95% ⚠ |
 | Temporal/Liveness | 60% ⚠ |
 | Proofs | 0% ✗ |
 | Number Formats | 100% ✓ |
@@ -321,17 +308,20 @@ These operators are parsed into the AST but error at evaluation time. They can a
 
 | Spec | Status | Notes |
 |------|--------|-------|
+| CarTalkPuzzle | ✓ | Logic puzzle |
 | DieHard | ✓ | Finds solution (11 states) |
-| HourClock | ✓ | 12 states |
 | EWD840 | ✓ | Termination detection (64 states, N=2) |
-| TwoPhase | ✓ | Two-phase commit (56 states, RM=2) |
-| TCommit | ✓ | Transaction commit (12 states) |
+| Hanoi | ✓ | Tower of Hanoi puzzle |
+| HourClock | ✓ | 12 states |
 | MissionariesAndCannibals | ✓ | Classic puzzle (64 states) |
-| SimpleAllocator | ✓ | 64 states |
-| Voting | ✓ | Needs bounded Nat |
 | Paxos | ✓ | Large state space |
 | Prisoners | ✓ | 74 states |
-| Hanoi | ✓ | Tower of Hanoi puzzle |
+| Queens | ✓ | N-Queens constraint satisfaction |
+| Reachability | ✓ | Graph reachability |
+| SimpleAllocator | ✓ | 64 states |
+| TCommit | ✓ | Transaction commit (12 states) |
+| TwoPhase | ✓ | Two-phase commit (56 states, RM=2) |
+| Voting | ✓ | Needs bounded Nat |
 
 ---
 
