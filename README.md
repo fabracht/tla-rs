@@ -1,38 +1,8 @@
 # tla-rs
 
-A fast TLA+ model checker written in Rust.
+A TLA+ model checker and interactive exploration tool written in Rust.
 
-tla-rs performs explicit-state model checking of TLA+ specifications, exploring all reachable states to verify that invariants hold. It's designed as a lightweight alternative to the official TLC model checker for specs that fit its supported subset.
-
-## Features
-
-- **Explicit-state model checking** with breadth-first exploration
-- **Symmetry reduction** to collapse equivalent states and reduce state space
-- **Counterexample traces** with state diffs showing what changed between steps
-- **State graph export** to DOT format for visualization
-- **Progress reporting** with exploration rate and ETA
-- **Helpful error messages** with source locations and suggestions
-- **Continue-past-violation mode** to explore the full state space and count all violations
-- **Property satisfaction statistics** with depth-stratified breakdowns
-- **JSON output** for programmatic consumption of all results
-
-## When to Use
-
-TLA+ model checking is most valuable for:
-
-- **Distributed protocol bugs** where message ordering and interleaving matter
-- **Concurrency issues** that are hard to reproduce deterministically
-- **Verifying invariants** across many possible execution paths
-- **Design validation** before implementing complex state machines
-- **Documenting protocols** in a precise, executable format
-
-You probably don't need it for:
-
-- **Straightforward logic errors** (wrong data structure operation, off-by-one)
-- **Bugs with obvious root causes** from reading the code or logs
-- **Issues confirmable with runtime tests** or instrumentation
-
-If you have metrics showing "processed 139984 of 140000 events" and the fix is changing `map.remove()` to `map.contains()`, just fix it. Save TLA+ for when you're unsure if your fix handles all the edge cases, or when the bug involves subtle timing between concurrent processes.
+tla-rs verifies TLA+ specifications by exploring all reachable states, checking invariants, and reporting counterexamples. Beyond pass/fail checking, it provides an interactive TUI for stepping through state spaces, scenario-driven exploration, property satisfaction analytics with depth breakdowns, and parameter sweeps for sensitivity analysis. The core library compiles to WebAssembly, so it can be embedded in browser applications. It's designed as a lightweight alternative to the official TLC model checker for specs that fit its supported subset.
 
 ## Installation
 
@@ -42,65 +12,41 @@ cargo build --release
 
 The binary will be at `target/release/tla`.
 
-## Usage
+## Quick Start
 
 ```bash
-tla <spec.tla> [options]
+tla spec.tla
+tla spec.tla -c 'N=5' -c 'Procs={"p1","p2","p3"}'
+tla spec.tla -c 'Proc={"a","b","c"}' --symmetry Proc
+tla spec.tla --quick    # limit to 10,000 states
+tla spec.tla -i         # interactive TUI
 ```
 
-### Options
+Constants accept integers (`42`), booleans (`TRUE`), strings (`"hello"`), and sets (`{1,2,3}`).
+
+## Options
 
 | Option | Description |
 |--------|-------------|
-| `--constant, -c NAME=VALUE` | Set a constant value |
-| `--symmetry, -s CONST` | Enable symmetry reduction for a constant |
+| `-c NAME=VALUE` | Set a constant value |
+| `-s CONST` | Enable symmetry reduction for a constant |
 | `--max-states N` | Maximum states to explore (default: 1000000) |
 | `--max-depth N` | Maximum trace depth (default: 100) |
-| `--quick, -q` | Quick exploration (limit: 10,000 states) |
+| `-q` | Quick exploration (limit: 10,000 states) |
 | `--export-dot FILE` | Export state graph to DOT format |
 | `--allow-deadlock` | Allow states with no successors |
 | `--check-liveness` | Check liveness and fairness properties |
-| `--continue` | Continue past invariant violations (explore full state space) |
+| `--continue` | Continue past invariant violations |
 | `--count-satisfying NAME` | Count states satisfying a definition (repeatable) |
 | `--sweep NAME=V1;V2;...` | Sweep a constant across values, compare results |
-| `--scenario TEXT` | Explore a specific scenario (or @file) |
-| `--interactive, -i` | Interactive TUI exploration mode |
-| `--json` | Output results in JSON format |
-| `--verbose, -v` | Verbose output (depth breakdowns, etc.) |
+| `--scenario TEXT` | Explore a specific scenario (or `@file`) |
+| `-i` | Interactive TUI exploration mode |
+| `--json` | JSON output |
+| `-v` | Verbose output (depth breakdowns, etc.) |
 
-### Constant Value Formats
+## Scenarios
 
-- Integers: `42`, `-7`
-- Booleans: `TRUE`, `FALSE`
-- Strings: `"hello"`
-- Sets: `{1,2,3}`, `{"a","b"}`
-
-### Examples
-
-Check a simple counter spec:
-```bash
-tla examples/counter.tla
-```
-
-Check with constants:
-```bash
-tla spec.tla --constant 'N=5' --constant 'Procs={"p1","p2","p3"}'
-```
-
-Enable symmetry reduction for a set of processes:
-```bash
-tla spec.tla -c 'Proc={"a","b","c"}' --symmetry Proc
-```
-
-Export state graph for visualization:
-```bash
-tla spec.tla --export-dot graph.dot
-dot -Tpng graph.dot -o graph.png
-```
-
-### Scenario Exploration
-
-Explore specific execution paths using TLA+ expressions to match transitions:
+Drive the checker along specific execution paths using TLA+ expressions:
 
 ```bash
 tla spec.tla --scenario "step: count' = count + 1
@@ -108,49 +54,44 @@ step: count' = count + 1
 step: count' = count + 1"
 ```
 
-Or load from a file:
-```bash
-tla spec.tla --scenario @scenario.txt
-```
+Or load from a file with `--scenario @scenario.txt`. Each `step:` line is a TLA+ predicate over current (unprimed) and next (primed) state variables.
 
-Scenario file format:
 ```
-# Comments start with #
 step: x' > x                    # x increases
 step: "s1" \in active'          # s1 becomes active
 step: pc'["p1"] = "critical"    # p1 enters critical section
-step: count' = count + 1        # count increments by 1
 ```
 
-Each `step:` line specifies a TLA+ expression that must be TRUE for the transition. Unprimed variables refer to the current state, primed variables refer to the next state.
+## Analytics
 
-### Analytics & Property Statistics
+These flags are for understanding *how* a protocol fails, not just *whether* it fails.
 
-These features are designed for understanding *how* a protocol fails, not just *whether* it fails. They answer questions like "how many states violate safety?" and "at what depth do violations start appearing?"
+Without `--continue`, the checker stops at the first violation. With it, all violations are collected and counted per-invariant across the full state space:
 
-**Continue past violations** to explore the full state space of a buggy spec:
 ```bash
-tla spec.tla -c 'Procs={"p1","p2"}' --allow-deadlock --continue
+tla spec.tla --allow-deadlock --continue
 ```
-Without `--continue`, the checker stops at the first violation. With it, all violations are collected and counted per-invariant across the full state space.
 
-**Count property satisfaction** to measure what fraction of reachable states satisfy a predicate:
-```bash
-tla spec.tla -c 'Procs={"p1","p2"}' --allow-deadlock \
-  --count-satisfying InvSafety --count-satisfying InvLiveness
-```
-Reports how many reachable states satisfy each named boolean definition.
+`--count-satisfying` measures what fraction of reachable states satisfy a predicate. Add `--verbose` to get per-depth breakdowns showing at which exploration depth violations start appearing:
 
-**Combine `--continue` with `--count-satisfying` and `--verbose`** to see how a bug degrades safety by depth:
 ```bash
 tla spec.tla --allow-deadlock --continue \
   --count-satisfying InvSafety --verbose
 ```
-The `--verbose` flag enables per-depth breakdowns showing at which exploration depth violations start appearing.
 
-**A fun example** — C-3PO famously calculates "the possibility of successfully navigating an asteroid field is approximately 3,720 to 1." The spec `examples/c3po_asteroid_field.tla` models the Empire Strikes Back asteroid chase scene with lore-accurate events: variable-damage asteroid impacts, TIE fighter attacks, TIEs getting destroyed by asteroids, hiding in the space slug's cave, mynock damage, escaping the exogorth's mouth, and the only real escape — attaching to a Star Destroyer's hull and floating away with the garbage. No hyperspace: the hyperdrive is dead.
+`--sweep` varies a constant across multiple values and produces a comparison table, useful for sensitivity analysis:
 
-The `Density` constant controls the asteroid damage range (1..Density). Higher values create more damage variants per action, biasing the state space toward destruction. The spec includes hull integrity, system damage (sensors, engines, weapons), and system-dependent actions like blind flying and sluggish dodging.
+```bash
+tla spec.tla --sweep 'N=2;3;4;5' --count-satisfying Inv --allow-deadlock
+```
+
+`--json` returns structured data including `properties` array with `depth_breakdown` per property.
+
+### The C-3PO Example
+
+C-3PO famously calculates "the possibility of successfully navigating an asteroid field is approximately 3,720 to 1." The spec `examples/c3po_asteroid_field.tla` models the Empire Strikes Back asteroid chase: variable-damage asteroid impacts, TIE fighter attacks, TIEs getting destroyed by asteroids, hiding in the space slug's cave, mynock damage, escaping the exogorth's mouth, and the only real escape — attaching to a Star Destroyer's hull and floating away with the garbage. No hyperspace: the hyperdrive is dead.
+
+The `Density` constant controls asteroid damage range (1..Density). Higher values create more damage variants per action, biasing the state space toward destruction.
 
 ```bash
 tla examples/c3po_asteroid_field.tla -c 'Density=3' \
@@ -161,47 +102,23 @@ tla examples/c3po_asteroid_field.tla -c 'Density=3' \
 
 The depth breakdown shows destruction starting early and escape requiring a long sequence of correct decisions — surviving asteroids, hiding in the cave, taking mynock damage, escaping the slug, then waiting for all TIE fighters to be destroyed before drifting onto a Star Destroyer's hull.
 
-**JSON output** for programmatic use:
+## Interactive Mode
+
+Launch the TUI with `-i` to step through state spaces manually. You can select and take transitions, backtrack, evaluate expressions in a REPL, trace variable changes across history, test hypotheses against all visited states, and toggle guard condition display. Actions with many variable changes expand inline so you can see exactly what each transition does.
+
+![Interactive mode — navigating the C-3PO asteroid field spec](falcon-escape.gif)
+
+Key bindings: `↑`/`↓` select actions, `Enter` takes the selected action, `→`/`Space` expands grouped changes, `←` collapses, `b` backtracks, `e` opens the REPL, `t` shows variable trace, `h` tests a hypothesis, `g` toggles guards, `w` random walks N steps, `u` steps until a condition holds, `s`/`l` save/load traces, `r` resets to initial state, `q` quits.
+
 ```bash
-tla spec.tla --count-satisfying InvSafety --json
+tla examples/c3po_asteroid_field.tla -c 'Density=3' --allow-deadlock -i
 ```
-Returns structured data including `properties` array with `depth_breakdown` per property.
 
 ## Supported TLA+ Subset
 
-### Modules
+tla-rs implements the Naturals, Integers, Sequences, FiniteSets, TLC, Bags, and Bits standard modules. See `SYNTAX_STATUS.md` for the full operator-by-operator coverage table.
 
-- `Naturals` - Natural numbers (Nat, bounded 0..100)
-- `Integers` - Integers (Int, bounded -100..100)
-- `Sequences` - Len, Head, Tail, Append, \o, SubSeq, SelectSeq, Seq(S)
-- `FiniteSets` - Cardinality, IsFiniteSet
-- `TLC` - Print, PrintT, Assert, ToString, TLCGet/TLCSet, Permutations, SortSeq, RandomElement, Any
-- `Bags` - IsABag, BagToSet, SetToBag, BagIn, EmptyBag, \oplus, \ominus, BagUnion, SubBag, BagOfAll, BagCardinality, CopiesIn
-- `Bits` - BitAnd, BitOr, BitXor, BitNot, ShiftLeft, ShiftRight
-
-### Operators
-
-**Logic:** `/\`, `\/`, `~`, `=>`, `<=>`, `TRUE`, `FALSE`
-
-**Comparison:** `=`, `#`, `/=`, `<`, `>`, `<=`, `>=`
-
-**Arithmetic:** `+`, `-`, `*`, `\div`, `%`, `^`
-
-**Sets:** `\in`, `\notin`, `\union`, `\intersect`, `\`, `\subseteq`, `\subset`, `SUBSET`, `UNION`, `Cardinality`, `IsFiniteSet`
-
-**Functions:** `[x \in S |-> expr]`, `f[x]`, `DOMAIN`, `[S -> T]`, `@@`, `EXCEPT`
-
-**Quantifiers:** `\E`, `\A`, `CHOOSE`
-
-**Records:** `[field |-> value]`, `r.field`, `[field: Set]`
-
-**Tuples/Sequences:** `<<a, b, c>>`, `t[i]`, `Len`, `Head`, `Tail`, `Append`, `\o`, `SubSeq`
-
-**Control:** `IF-THEN-ELSE`, `CASE`, `LET-IN`
-
-**State:** `x'` (primed variables), `UNCHANGED`
-
-**Unicode:** `∧`, `∨`, `¬`, `⇒`, `≡`, `∈`, `∉`, `≤`, `≥`, `≠`, `∪`, `∩`, `⊆`, `⊂`, `∃`, `∀`
+The supported operator categories: logic (`/\`, `\/`, `~`, `=>`), comparison, arithmetic, sets (`\in`, `\union`, `\intersect`, `SUBSET`, `UNION`), functions (`[x \in S |-> e]`, `DOMAIN`, `EXCEPT`, `@@`), quantifiers (`\E`, `\A`, `CHOOSE`), records, tuples/sequences, `IF-THEN-ELSE`, `CASE`, `LET-IN`, primed variables, `UNCHANGED`, transitive closure, and Unicode equivalents for all operators.
 
 ### Spec Structure
 
@@ -223,14 +140,11 @@ Inv == x + y <= 2 * N
 ====
 ```
 
-Invariants are detected by naming convention:
-- Names starting with `Inv`
-- Names starting with `TypeOK`
-- Names starting with `NotSolved`
+Invariants are detected by naming convention: definitions starting with `Inv`, `TypeOK`, or `NotSolved` are automatically checked.
 
 ## Output
 
-### Successful Check
+On success:
 ```
 Model checking complete. No errors found.
 
@@ -240,89 +154,20 @@ Model checking complete. No errors found.
   Time: 0.019s
 ```
 
-### Invariant Violation
-```
-Invariant 0 (Inv) violated!
-
-Counterexample trace (5 states):
-  (* marks changed variables)
-
-State 0
-  count = 0
-State 1
-  count = 1 *
-State 2
-  count = 2 *
-...
-```
-
-### Deadlock Detection
-```
-Deadlock detected!
-
-Trace to deadlock state (3 states):
-  (* marks changed variables)
-
-State 0
-  x = 0
-State 1
-  x = 1 *
-State 2
-  x = 2 *
-
-Use --allow-deadlock to suppress this error.
-```
-
-### Progress Reporting
-Progress is reported early and frequently to provide feedback:
-```
-  Exploring states...
-  Progress: 10 states explored, queue: 23
-  Progress: 100 states explored, queue: 156
-  Progress: 1000 states (52341/s), queue: 1247, depth: 15, limit ETA: 18.9s
-```
-
-For quick exploration without waiting for full verification:
-```bash
-tla spec.tla --quick
-```
-This limits exploration to 10,000 states and exits with success if no violations are found.
-
-### Error Messages
-Parse errors show the source location:
-```
-error: expected identifier, found Eof
-  --> spec.tla:5:12
-   |
- 5 | Next == x' =
-   |            ^ expected identifier, found Eof
-```
-
-Undefined variables suggest similar names:
-```
-error: evaluating Next
-  undefined variable `coutn`
-  help: did you mean `count`?
-```
+On invariant violation, you get a counterexample trace with state diffs marking changed variables. On deadlock, a trace to the deadlock state with a suggestion to use `--allow-deadlock`. Parse errors show source locations, and undefined variables suggest similar names.
 
 ## State Graph Visualization
-
-Export with `--export-dot` and render with Graphviz:
 
 ```bash
 tla spec.tla --export-dot graph.dot
 dot -Tpng graph.dot -o graph.png
 ```
 
-Error states are highlighted in red in the generated graph.
+Error states are highlighted in red.
 
 ## Limitations
 
-- `Nat` and `Int` are bounded (-100 to 100 by default)
-- Limited temporal logic (fairness/liveness with `--check-liveness`, but `[]`, `<>`, `~>` cannot be evaluated directly)
-- Unbounded quantifiers (`\E x : P` without `\in S`) are not supported
-- `Seq(S)` supports membership tests only (infinite set, cannot be enumerated)
-- Recursive operators must be declared with RECURSIVE
+`Nat` and `Int` are bounded (-100 to 100 by default). Temporal operators `[]`, `<>`, `~>` are parsed but cannot be evaluated directly — use `--check-liveness` for fairness/liveness properties via SCC analysis. Unbounded quantifiers (`\E x : P` without `\in S`) and `Seq(S)` enumeration are not supported. Recursive operators must be declared with `RECURSIVE`.
 
 ## License
 
