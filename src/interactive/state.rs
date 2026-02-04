@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -37,6 +38,7 @@ pub(crate) struct ExplorerState {
     pub(crate) walk_input: String,
     pub(crate) step_until_input: String,
     pub(crate) show_guards: bool,
+    pub(crate) expanded_actions: HashSet<usize>,
     pub(crate) replay_mode: bool,
     pub(crate) replay_trace: Vec<(State, Option<Arc<str>>)>,
     pub(crate) replay_position: usize,
@@ -66,10 +68,23 @@ impl ExplorerState {
             walk_input: String::new(),
             step_until_input: String::new(),
             show_guards: false,
+            expanded_actions: HashSet::new(),
             replay_mode: false,
             replay_trace: Vec::new(),
             replay_position: 0,
         }
+    }
+
+    pub(crate) fn toggle_expand(&mut self) {
+        if self.expanded_actions.contains(&self.selected_action) {
+            self.expanded_actions.remove(&self.selected_action);
+        } else {
+            self.expanded_actions.insert(self.selected_action);
+        }
+    }
+
+    pub(crate) fn collapse_selected(&mut self) {
+        self.expanded_actions.remove(&self.selected_action);
     }
 
     pub(crate) fn take_action(&mut self, spec: &Spec, env: &mut Env, defs: &Definitions) {
@@ -112,6 +127,7 @@ impl ExplorerState {
         self.history.push((prev_state, action_name));
         self.current = transition.state.clone();
         self.selected_action = 0;
+        self.expanded_actions.clear();
 
         self.refresh_actions(spec, env, defs);
     }
@@ -252,6 +268,7 @@ impl ExplorerState {
 
             self.current = prev_state;
             self.selected_action = 0;
+            self.expanded_actions.clear();
 
             self.refresh_actions(spec, env, defs);
         }
@@ -268,6 +285,7 @@ impl ExplorerState {
         self.available_actions = actions;
         self.available_actions_with_guards = actions_with_guards;
         self.selected_action = 0;
+        self.expanded_actions.clear();
         self.status_message = None;
         self.var_changes.clear();
         self.trace_output = None;
@@ -468,6 +486,7 @@ impl ExplorerState {
             walk_input: String::new(),
             step_until_input: String::new(),
             show_guards: false,
+            expanded_actions: HashSet::new(),
             replay_mode: false,
             replay_trace: Vec::new(),
             replay_position: 0,

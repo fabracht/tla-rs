@@ -176,6 +176,8 @@ pub(super) fn run_app(
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                     KeyCode::Down | KeyCode::Char('j') => explorer.select_next(),
                     KeyCode::Up | KeyCode::Char('k') => explorer.select_prev(),
+                    KeyCode::Right | KeyCode::Char(' ') => explorer.toggle_expand(),
+                    KeyCode::Left => explorer.collapse_selected(),
                     KeyCode::Enter => explorer.take_action(ctx.spec, ctx.env, ctx.defs),
                     KeyCode::Char('b') => explorer.backtrack(ctx.spec, ctx.env, ctx.defs),
                     KeyCode::Char('r') => {

@@ -293,9 +293,12 @@ fn render_actions(f: &mut Frame, area: Rect, explorer: &ExplorerState, vars: &[A
             }
         }
 
+        let is_expanded = i == explorer.selected_action || explorer.expanded_actions.contains(&i);
+        let is_grouped = all_changes.len() > 3;
+
         let change_str = if all_changes.is_empty() {
             "(no changes)".to_string()
-        } else if all_changes.len() <= 3 {
+        } else if !is_grouped {
             all_changes
                 .iter()
                 .map(|(path, old, new)| {
@@ -309,8 +312,10 @@ fn render_actions(f: &mut Frame, area: Rect, explorer: &ExplorerState, vars: &[A
                 })
                 .collect::<Vec<_>>()
                 .join(", ")
+        } else if is_expanded {
+            format!("▾ {} changes", all_changes.len())
         } else {
-            format!("{} changes", all_changes.len())
+            format!("▸ {} changes", all_changes.len())
         };
 
         let style = if i == explorer.selected_action {
@@ -336,6 +341,19 @@ fn render_actions(f: &mut Frame, area: Rect, explorer: &ExplorerState, vars: &[A
             ))
             .style(style),
         );
+
+        if is_grouped && is_expanded {
+            for (path, old, new) in &all_changes {
+                let detail = if old.is_empty() {
+                    format!("       {}': {}", path, new)
+                } else if new.is_empty() {
+                    format!("       {}': (removed)", path)
+                } else {
+                    format!("       {}': {} -> {}", path, old, new)
+                };
+                items.push(ListItem::new(detail).style(Style::default().fg(Color::DarkGray)));
+            }
+        }
 
         if explorer.show_guards
             && let Some(transition_with_guards) = explorer.available_actions_with_guards.get(i)
@@ -738,6 +756,8 @@ fn render_status(f: &mut Frame, area: Rect, explorer: &ExplorerState) {
                 Span::raw("act "),
                 Span::styled("↑↓", Style::default().fg(Color::Cyan)),
                 Span::raw("sel "),
+                Span::styled("→", Style::default().fg(Color::Cyan)),
+                Span::raw("xpand "),
                 Span::styled("b", Style::default().fg(Color::Cyan)),
                 Span::raw("ack "),
                 Span::styled("r", Style::default().fg(Color::Cyan)),
