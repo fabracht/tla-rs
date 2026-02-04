@@ -1,0 +1,3 @@
+[tasks.install]
+command = "cargo"
+args = ["install", "--path", "."]
