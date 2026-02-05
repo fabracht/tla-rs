@@ -341,7 +341,10 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         let mut actions = Vec::new();
         let mut idx = Some(state_idx);
         while let Some(i) = idx {
-            trace.push(states.get_index(i).unwrap().clone());
+            let Some(state) = states.get_index(i) else {
+                break;
+            };
+            trace.push(state.clone());
             actions.push(parent_action[i].clone());
             idx = parent[i];
         }
@@ -422,7 +425,15 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             return CheckResult::MaxDepthExceeded(stats);
         }
 
-        let current = states.get_index(current_idx).unwrap();
+        let Some(current) = states.get_index(current_idx) else {
+            return CheckResult::NextError(
+                EvalError::DomainError {
+                    message: format!("internal: invalid state index {}", current_idx),
+                    span: None,
+                },
+                vec![],
+            );
+        };
         let mut env = base_env.clone();
         for (i, var) in spec.vars.iter().enumerate() {
             if let Some(val) = current.values.get(i) {
@@ -505,7 +516,9 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             }
         }
 
-        let current = states.get_index(current_idx).unwrap();
+        let Some(current) = states.get_index(current_idx) else {
+            continue;
+        };
         let successors = match next_states(
             &spec.next,
             current,

@@ -73,8 +73,19 @@ pub(crate) fn next_states_impl(
         primed_vars,
         defs,
     };
-    if let Expr::Or(_, _) = next {
-        let disjuncts = collect_disjuncts_with_labels(next, defs);
+    let effective = resolve_next(next, defs);
+    if let Expr::Exists(_, _, _) = effective {
+        let action = infer_action_name(effective, defs);
+        let mut all_results = indexmap::IndexSet::new();
+        let mut results = Vec::new();
+        expand_and_enumerate(effective, base_env, &ctx, action, &mut results)?;
+        for transition in results {
+            all_results.insert(transition);
+        }
+        return Ok(all_results.into_iter().collect());
+    }
+    if let Expr::Or(_, _) = effective {
+        let disjuncts = collect_disjuncts_with_labels(effective, defs);
         let mut all_results = indexmap::IndexSet::new();
         for (disjunct, action) in &disjuncts {
             if let Expr::Exists(_, _, _) = disjunct {
@@ -94,10 +105,21 @@ pub(crate) fn next_states_impl(
         return Ok(all_results.into_iter().collect());
     }
 
-    let action = infer_action_name(next, defs);
+    let action = infer_action_name(effective, defs);
     let mut results = Vec::new();
-    enumerate_next(next, base_env, &ctx, 0, action, &mut results)?;
+    enumerate_next(effective, base_env, &ctx, 0, action, &mut results)?;
     Ok(results)
+}
+
+fn resolve_next<'a>(expr: &'a Expr, defs: &'a Definitions) -> &'a Expr {
+    if let Expr::FnCall(name, args) = expr
+        && args.is_empty()
+        && let Some((params, body)) = defs.get(name)
+        && params.is_empty()
+    {
+        return resolve_next(body, defs);
+    }
+    expr
 }
 
 fn expand_and_enumerate(

@@ -41,7 +41,7 @@ impl ModuleRegistry {
         }
 
         if self.modules.contains_key(&name) {
-            return Ok(self.modules.get(&name).expect("checked contains_key"));
+            return self.modules.get(&name).ok_or(ModuleError::NotFound(name));
         }
 
         let file_path = self.find_module(&name, base_path)?;
@@ -55,7 +55,7 @@ impl ModuleRegistry {
 
         self.loading_stack.pop();
         self.modules.insert(name.clone(), spec);
-        Ok(self.modules.get(&name).expect("just inserted"))
+        self.modules.get(&name).ok_or(ModuleError::NotFound(name))
     }
 
     fn find_module(&self, name: &str, base_path: &Path) -> Result<PathBuf, ModuleError> {
