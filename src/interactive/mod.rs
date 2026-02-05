@@ -184,7 +184,13 @@ pub fn run_interactive_replay(spec: &Spec, domains: &Env, replay_file: &Path) ->
 
     let defs: Definitions = spec.definitions.clone();
 
-    let (initial, _) = replay_trace.first().unwrap().clone();
+    let Some(first) = replay_trace.first() else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "empty replay trace",
+        ));
+    };
+    let (initial, _) = first.clone();
     let primed_vars = make_primed_names(&spec.vars);
     let initial_actions = match next_states(
         &spec.next,

@@ -67,15 +67,16 @@ fn strongconnect(graph: &StateGraph, v: usize, state: &mut TarjanState) {
         if state.indices[w].is_none() {
             strongconnect(graph, w, state);
             state.lowlinks[v] = state.lowlinks[v].min(state.lowlinks[w]);
-        } else if state.on_stack[w] {
-            state.lowlinks[v] = state.lowlinks[v].min(state.indices[w].unwrap());
+        } else if state.on_stack[w]
+            && let Some(w_index) = state.indices[w]
+        {
+            state.lowlinks[v] = state.lowlinks[v].min(w_index);
         }
     }
 
-    if state.lowlinks[v] == state.indices[v].unwrap() {
+    if Some(state.lowlinks[v]) == state.indices[v] {
         let mut scc_states = Vec::new();
-        loop {
-            let w = state.stack.pop().unwrap();
+        while let Some(w) = state.stack.pop() {
             state.on_stack[w] = false;
             scc_states.push(w);
             if w == v {

@@ -217,15 +217,11 @@ fn format_nested_changes(
                     _ => {}
                 }
             }
-            for k in old_map.keys() {
+            for (k, v) in old_map {
                 if !new_map.contains_key(k) {
                     let key_str = format_value(k);
                     let new_path = format!("{}[{}]", path, key_str);
-                    changes.push((
-                        new_path,
-                        format_value(old_map.get(k).unwrap()),
-                        String::new(),
-                    ));
+                    changes.push((new_path, format_value(v), String::new()));
                 }
             }
         }
