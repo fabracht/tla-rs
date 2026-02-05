@@ -10,18 +10,18 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use tla_rs::Source;
-use tla_rs::ast::{Env, Spec, Value};
-use tla_rs::checker::{
+use tla_checker::Source;
+use tla_checker::ast::{Env, Spec, Value};
+use tla_checker::checker::{
     CheckResult, CheckStats, CheckerConfig, check, check_result_to_json, eval_error_to_diagnostic,
     format_eval_error, format_trace, format_trace_with_actions, format_trace_with_diffs,
     write_trace_json,
 };
-use tla_rs::diagnostic::{ColorConfig, Diagnostic};
+use tla_checker::diagnostic::{ColorConfig, Diagnostic};
 #[cfg(not(target_arch = "wasm32"))]
-use tla_rs::interactive::{run_interactive, run_interactive_replay};
-use tla_rs::parser::parse;
-use tla_rs::scenario::{execute_scenario, format_scenario_result, parse_scenario};
+use tla_checker::interactive::{run_interactive, run_interactive_replay};
+use tla_checker::parser::parse;
+use tla_checker::scenario::{execute_scenario, format_scenario_result, parse_scenario};
 
 fn split_top_level(s: &str, delim: char) -> Vec<String> {
     let mut parts = Vec::new();
@@ -743,7 +743,7 @@ fn main() -> ExitCode {
     #[cfg(feature = "profiling")]
     {
         println!();
-        tla_rs::report_profiling_stats();
+        tla_checker::report_profiling_stats();
     }
 
     if config.json_output {
@@ -788,7 +788,7 @@ fn main() -> ExitCode {
             .get(cex.violated_invariant)
             .and_then(|n| n.as_ref())
             .map(|n| n.as_ref());
-        if let Err(e) = tla_rs::checker::write_counterexample_json(
+        if let Err(e) = tla_checker::checker::write_counterexample_json(
             cex_path,
             cex,
             Some(&spec_path),

@@ -3,9 +3,9 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use tla_rs::ast::{Env, Value};
-use tla_rs::checker::{CheckResult, CheckerConfig, check};
-use tla_rs::parser::parse;
+use tla_checker::ast::{Env, Value};
+use tla_checker::checker::{CheckResult, CheckerConfig, check};
+use tla_checker::parser::parse;
 
 fn check_spec_file(path: &Path) -> CheckResult {
     check_spec_file_with_config(path, CheckerConfig::default())

@@ -1,10 +1,15 @@
 [package]
-name = "tla-rs"
+name = "tla-checker"
 version = "0.1.0"
 edition = "2024"
+description = "A TLA+ model checker written in Rust"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/fabracht/tla-rs"
+keywords = ["tla", "model-checking", "formal-verification"]
+categories = ["command-line-utilities", "development-tools"]
 
 [lib]
-name = "tla_rs"
+name = "tla_checker"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
