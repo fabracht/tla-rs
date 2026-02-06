@@ -14,7 +14,8 @@ use indexmap::IndexSet;
 use crate::ast::{Env, Expr, Spec, State, Value};
 use crate::eval::{
     CheckerStats as EvalCheckerStats, Definitions, EvalContext, EvalError, eval, eval_with_context,
-    init_states, make_primed_names, next_states, set_resolved_instances, update_checker_stats,
+    init_states, make_primed_names, next_states, set_parameterized_instances,
+    set_resolved_instances, update_checker_stats,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::export::export_dot;
@@ -133,12 +134,21 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         domains.insert(k, v);
     }
 
+    for inst in &spec.instances {
+        if stdlib::is_stdlib_module(&inst.module_name) {
+            stdlib::load_module(&inst.module_name, &mut domains);
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     if !spec.instances.is_empty()
         && let Some(ref spec_path) = config.spec_path
     {
         let mut registry = ModuleRegistry::new();
         for inst in &spec.instances {
+            if stdlib::is_stdlib_module(&inst.module_name) {
+                continue;
+            }
             match registry.load(&inst.module_name, spec_path) {
                 Ok(_) => {}
                 Err(e) => {
@@ -152,11 +162,13 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             }
         }
         match resolve_instances(spec, &registry) {
-            Ok(instances) => {
-                if !instances.is_empty() && !config.quiet {
-                    eprintln!("  Resolved {} instance(s)", instances.len());
+            Ok((static_instances, param_instances)) => {
+                let total = static_instances.len() + param_instances.len();
+                if total > 0 && !config.quiet {
+                    eprintln!("  Resolved {} instance(s)", total);
                 }
-                set_resolved_instances(instances);
+                set_resolved_instances(static_instances);
+                set_parameterized_instances(param_instances);
             }
             Err(e) => {
                 if !config.quiet {
@@ -233,10 +245,32 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         generated: 0,
     });
 
+    let init_expr = match spec.init.as_ref() {
+        Some(e) => e,
+        None => {
+            return CheckResult::InitError(EvalError::DomainError {
+                message: "missing Init definition".to_string(),
+                span: None,
+            });
+        }
+    };
+    let next_expr = match spec.next.as_ref() {
+        Some(e) => e,
+        None => {
+            return CheckResult::NextError(
+                EvalError::DomainError {
+                    message: "missing Next definition".to_string(),
+                    span: None,
+                },
+                vec![],
+            );
+        }
+    };
+
     if !config.quiet {
         eprintln!("  Computing initial states...");
     }
-    let initial = match init_states(&spec.init, &spec.vars, &domains, &spec.definitions) {
+    let initial = match init_states(init_expr, &spec.vars, &domains, &spec.definitions) {
         Ok(states) => states,
         Err(e) => return CheckResult::InitError(e),
     };
@@ -520,7 +554,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             continue;
         };
         let successors = match next_states(
-            &spec.next,
+            next_expr,
             current,
             &spec.vars,
             &primed_vars,
@@ -609,11 +643,15 @@ fn check_liveness_properties(
     if !config.quiet {
         eprintln!("  Building forward edges for {} states...", states.len());
     }
+    let next_expr = spec.next.as_ref().ok_or_else(|| EvalError::DomainError {
+        message: "missing Next definition".to_string(),
+        span: None,
+    })?;
     let primed_vars = make_primed_names(&spec.vars);
     let mut reusable_env = domains.clone();
     for (state_idx, state) in states.iter().enumerate() {
         let successors = next_states(
-            &spec.next,
+            next_expr,
             state,
             &spec.vars,
             &primed_vars,
@@ -1258,11 +1296,11 @@ mod tests {
             definitions: BTreeMap::new(),
             assumes: vec![],
             instances: vec![],
-            init: eq(var_expr("count"), lit_int(0)),
-            next: and(
+            init: Some(eq(var_expr("count"), lit_int(0))),
+            next: Some(and(
                 in_set(var_expr("count"), set_range(lit_int(0), lit_int(2))),
                 eq(prime_expr("count"), add(var_expr("count"), lit_int(1))),
-            ),
+            )),
             invariants: vec![le(var_expr("count"), lit_int(3))],
             invariant_names: vec![None],
             fairness: vec![],
@@ -1294,11 +1332,11 @@ mod tests {
             definitions: BTreeMap::new(),
             assumes: vec![],
             instances: vec![],
-            init: eq(var_expr("count"), lit_int(0)),
-            next: and(
+            init: Some(eq(var_expr("count"), lit_int(0))),
+            next: Some(and(
                 in_set(var_expr("count"), set_range(lit_int(0), lit_int(4))),
                 eq(prime_expr("count"), add(var_expr("count"), lit_int(1))),
-            ),
+            )),
             invariants: vec![le(var_expr("count"), lit_int(3))],
             invariant_names: vec![None],
             fairness: vec![],
@@ -1314,7 +1352,7 @@ mod tests {
                 assert_eq!(cex.violated_invariant, 0);
                 assert_eq!(cex.trace.len(), 5);
                 let final_state = cex.trace.last().unwrap();
-                assert_eq!(final_state.values.get(0), Some(&Value::Int(4)));
+                assert_eq!(final_state.values.first(), Some(&Value::Int(4)));
             }
             other => panic!("expected InvariantViolation, got {:?}", other),
         }
@@ -1329,11 +1367,11 @@ mod tests {
             definitions: BTreeMap::new(),
             assumes: vec![],
             instances: vec![],
-            init: and(
+            init: Some(and(
                 eq(var_expr("lo"), lit_int(0)),
                 eq(var_expr("hi"), lit_int(0)),
-            ),
-            next: or(
+            )),
+            next: Some(or(
                 and(
                     lt(var_expr("lo"), lit_int(1)),
                     and(
@@ -1348,7 +1386,7 @@ mod tests {
                         eq(prime_expr("hi"), add(var_expr("hi"), lit_int(1))),
                     ),
                 ),
-            ),
+            )),
             invariants: vec![
                 le(var_expr("lo"), lit_int(1)),
                 le(var_expr("hi"), lit_int(1)),
@@ -1381,11 +1419,11 @@ mod tests {
             definitions: BTreeMap::new(),
             assumes: vec![],
             instances: vec![],
-            init: eq(var_expr("x"), lit_int(0)),
-            next: and(
+            init: Some(eq(var_expr("x"), lit_int(0))),
+            next: Some(and(
                 eq(var_expr("x"), lit_int(99)),
                 eq(prime_expr("x"), lit_int(100)),
-            ),
+            )),
             invariants: vec![lit_bool(true)],
             invariant_names: vec![None],
             fairness: vec![],
@@ -1417,11 +1455,11 @@ mod tests {
             definitions: BTreeMap::new(),
             assumes: vec![],
             instances: vec![],
-            init: eq(var_expr("x"), lit_int(0)),
-            next: and(
+            init: Some(eq(var_expr("x"), lit_int(0))),
+            next: Some(and(
                 lt(var_expr("x"), lit_int(2)),
                 eq(prime_expr("x"), add(var_expr("x"), lit_int(1))),
-            ),
+            )),
             invariants: vec![lit_bool(true)],
             invariant_names: vec![None],
             fairness: vec![],
@@ -1433,7 +1471,7 @@ mod tests {
             CheckResult::Deadlock(trace, _, _) => {
                 assert_eq!(trace.len(), 3);
                 let final_state = trace.last().unwrap();
-                assert_eq!(final_state.values.get(0), Some(&Value::Int(2)));
+                assert_eq!(final_state.values.first(), Some(&Value::Int(2)));
             }
             other => panic!("expected Deadlock, got {:?}", other),
         }

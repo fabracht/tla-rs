@@ -133,9 +133,10 @@ impl ExplorerState {
     }
 
     fn refresh_actions(&mut self, spec: &Spec, env: &mut Env, defs: &Definitions) {
+        let next_expr = spec.next.as_ref().expect("interactive mode requires Next");
         let primed_vars = make_primed_names(&spec.vars);
         match next_states(
-            &spec.next,
+            next_expr,
             &self.current,
             &spec.vars,
             &primed_vars,
@@ -145,7 +146,7 @@ impl ExplorerState {
             Ok(actions) => {
                 self.available_actions = actions.clone();
                 match next_states_with_guards(
-                    &spec.next,
+                    next_expr,
                     &self.current,
                     &spec.vars,
                     &primed_vars,
@@ -451,12 +452,13 @@ impl ExplorerState {
         }
 
         let current = prev_state;
+        let next_expr = spec.next.as_ref().expect("interactive mode requires Next");
         let primed_vars = make_primed_names(&spec.vars);
         let available_actions =
-            next_states(&spec.next, &current, &spec.vars, &primed_vars, env, defs)
+            next_states(next_expr, &current, &spec.vars, &primed_vars, env, defs)
                 .map_err(|e| io::Error::other(format!("{:?}", e)))?;
         let available_actions_with_guards =
-            next_states_with_guards(&spec.next, &current, &spec.vars, &primed_vars, env, defs)
+            next_states_with_guards(next_expr, &current, &spec.vars, &primed_vars, env, defs)
                 .unwrap_or_else(|_| {
                     available_actions
                         .iter()

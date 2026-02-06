@@ -861,6 +861,23 @@ impl Parser {
                     self.advance();
                     expr = Expr::ReflexiveTransitiveClosure(Box::new(expr));
                 }
+                Token::Bang => {
+                    self.advance();
+                    let op_name = self.expect_ident()?;
+                    let mut args = Vec::new();
+                    if *self.peek() == Token::LParen {
+                        self.advance();
+                        if *self.peek() != Token::RParen {
+                            args.push(self.parse_expr()?);
+                            while *self.peek() == Token::Comma {
+                                self.advance();
+                                args.push(self.parse_expr()?);
+                            }
+                        }
+                        self.expect(Token::RParen)?;
+                    }
+                    expr = Expr::QualifiedCall(Box::new(expr), op_name, args);
+                }
                 _ => break,
             }
         }

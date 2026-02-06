@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::ast::{Expr, Spec};
-use crate::eval::Definitions;
+use crate::eval::{Definitions, ParameterizedInstance, ParameterizedInstances};
 use crate::parser;
 
 #[derive(Debug)]
@@ -96,7 +96,17 @@ pub fn apply_substitutions(module_defs: &Definitions, subs: &[(Arc<str>, Expr)])
     result
 }
 
-fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
+fn prime_expr(expr: &Expr) -> Expr {
+    match expr {
+        Expr::Var(name) => Expr::Prime(name.clone()),
+        Expr::FnApp(f, arg) => Expr::FnApp(Box::new(prime_expr(f)), Box::new(prime_expr(arg))),
+        Expr::RecordAccess(r, field) => Expr::RecordAccess(Box::new(prime_expr(r)), field.clone()),
+        Expr::TupleAccess(t, idx) => Expr::TupleAccess(Box::new(prime_expr(t)), *idx),
+        other => other.clone(),
+    }
+}
+
+pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
     match expr {
         Expr::Var(name) => {
             for (param, replacement) in subs {
@@ -394,7 +404,14 @@ fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
         ),
 
         Expr::Unchanged(vars) => Expr::Unchanged(vars.clone()),
-        Expr::Prime(var) => Expr::Prime(var.clone()),
+        Expr::Prime(var) => {
+            for (param, replacement) in subs {
+                if param == var {
+                    return prime_expr(replacement);
+                }
+            }
+            Expr::Prime(var.clone())
+        }
 
         Expr::Always(e) => Expr::Always(Box::new(substitute_expr(e, subs))),
         Expr::Eventually(e) => Expr::Eventually(Box::new(substitute_expr(e, subs))),
@@ -417,7 +434,7 @@ fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
         Expr::EnabledOp(e) => Expr::EnabledOp(Box::new(substitute_expr(e, subs))),
 
         Expr::QualifiedCall(inst, op, args) => Expr::QualifiedCall(
-            inst.clone(),
+            Box::new(substitute_expr(inst, subs)),
             op.clone(),
             args.iter().map(|a| substitute_expr(a, subs)).collect(),
         ),
@@ -460,8 +477,9 @@ fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
 pub fn resolve_instances(
     spec: &Spec,
     registry: &ModuleRegistry,
-) -> std::result::Result<BTreeMap<Arc<str>, Definitions>, ModuleError> {
+) -> std::result::Result<(BTreeMap<Arc<str>, Definitions>, ParameterizedInstances), ModuleError> {
     let mut resolved = BTreeMap::new();
+    let mut parameterized = BTreeMap::new();
 
     for inst in &spec.instances {
         let alias = match &inst.alias {
@@ -470,12 +488,23 @@ pub fn resolve_instances(
         };
 
         if let Some(module) = registry.get(&inst.module_name) {
-            let substituted = apply_substitutions(&module.definitions, &inst.substitutions);
-            resolved.insert(alias, substituted);
+            if inst.params.is_empty() {
+                let substituted = apply_substitutions(&module.definitions, &inst.substitutions);
+                resolved.insert(alias, substituted);
+            } else {
+                parameterized.insert(
+                    alias,
+                    ParameterizedInstance {
+                        params: inst.params.clone(),
+                        module_defs: module.definitions.clone(),
+                        substitutions: inst.substitutions.clone(),
+                    },
+                );
+            }
         }
     }
 
-    Ok(resolved)
+    Ok((resolved, parameterized))
 }
 
 #[cfg(test)]

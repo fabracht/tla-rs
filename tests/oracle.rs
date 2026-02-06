@@ -12,24 +12,22 @@ fn check_spec_file(path: &Path) -> CheckResult {
 }
 
 fn check_spec_file_allow_deadlock(path: &Path) -> CheckResult {
-    let mut config = CheckerConfig::default();
-    config.allow_deadlock = true;
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
     check_spec_file_with_config(path, config)
 }
 
-fn check_spec_file_with_config(path: &Path, config: CheckerConfig) -> CheckResult {
+fn check_spec_file_with_config(path: &Path, mut config: CheckerConfig) -> CheckResult {
     let input = fs::read_to_string(path).expect("failed to read spec file");
     let spec = match parse(&input) {
         Ok(s) => s,
         Err(e) => panic!("parse error in {}: {}", path.display(), e.message),
     };
+    config.spec_path = Some(path.to_path_buf());
     let domains = Env::new();
     check(&spec, &domains, &config)
-}
-
-fn try_parse_spec_file(path: &Path) -> Result<(), String> {
-    let input = fs::read_to_string(path).expect("failed to read spec file");
-    parse(&input).map(|_| ()).map_err(|e| e.message)
 }
 
 #[test]
@@ -95,10 +93,10 @@ fn test_should_violate_two_bit_overflow() {
 #[test]
 fn test_should_error_no_init() {
     let path = Path::new("test_cases/should_error/no_init.tla");
-    let result = try_parse_spec_file(path);
+    let result = check_spec_file(path);
     assert!(
-        result.is_err() && result.as_ref().unwrap_err().contains("Init"),
-        "no_init.tla should fail to parse with missing Init, got: {:?}",
+        matches!(result, CheckResult::InitError(_)),
+        "no_init.tla should produce InitError for missing Init, got: {:?}",
         result
     );
 }
@@ -106,10 +104,10 @@ fn test_should_error_no_init() {
 #[test]
 fn test_should_error_no_next() {
     let path = Path::new("test_cases/should_error/no_next.tla");
-    let result = try_parse_spec_file(path);
+    let result = check_spec_file(path);
     assert!(
-        result.is_err() && result.as_ref().unwrap_err().contains("Next"),
-        "no_next.tla should fail to parse with missing Next, got: {:?}",
+        matches!(result, CheckResult::NextError(_, _)),
+        "no_next.tla should produce NextError for missing Next, got: {:?}",
         result
     );
 }
@@ -123,8 +121,10 @@ fn test_should_pass_counter_with_constant() {
     let mut domains = Env::new();
     domains.insert(Arc::from("MAX"), Value::Int(5));
 
-    let mut config = CheckerConfig::default();
-    config.allow_deadlock = true;
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
     let result = check(&spec, &domains, &config);
 
     assert!(
@@ -227,8 +227,10 @@ fn test_should_pass_assume_constraint() {
     let mut domains = Env::new();
     domains.insert(Arc::from("N"), Value::Int(5));
 
-    let mut config = CheckerConfig::default();
-    config.allow_deadlock = true;
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
     let result = check(&spec, &domains, &config);
 
     assert!(
@@ -536,6 +538,30 @@ fn test_should_error_deadlock() {
     assert!(
         matches!(result, CheckResult::Deadlock(_, _, _)),
         "deadlock.tla should produce Deadlock, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_pass_pingpong() {
+    let path = Path::new("test_cases/should_pass/pingpong.tla");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let spec = parse(&input).expect("failed to parse spec");
+
+    let mut domains = Env::new();
+    domains.insert(Arc::from("NumberOfClients"), Value::Int(1));
+    domains.insert(Arc::from("NumberOfPings"), Value::Int(1));
+
+    let mut config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
+    config.spec_path = Some(path.to_path_buf());
+    let result = check(&spec, &domains, &config);
+
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "pingpong.tla should pass, got: {:?}",
         result
     );
 }

@@ -20,13 +20,22 @@ use crate::ast::Expr;
 pub type Definitions = BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>;
 pub type ResolvedInstances = BTreeMap<Arc<str>, Definitions>;
 
+#[derive(Debug, Clone)]
+pub struct ParameterizedInstance {
+    pub params: Vec<Arc<str>>,
+    pub module_defs: Definitions,
+    pub substitutions: Vec<(Arc<str>, Expr)>,
+}
+
+pub type ParameterizedInstances = BTreeMap<Arc<str>, ParameterizedInstance>;
+
 pub use self::context::{eval_with_context, eval_with_instances};
 pub use self::core::eval;
 pub use self::diagnostics::explain_invariant_failure;
 pub use self::error::EvalError;
 pub use self::global_state::{
     CheckerStats, EvalContext, clear_resolved_instances, reset_tlc_state, set_checker_level,
-    set_random_seed, set_resolved_instances, update_checker_stats,
+    set_parameterized_instances, set_random_seed, set_resolved_instances, update_checker_stats,
 };
 #[cfg(feature = "profiling")]
 pub use self::global_state::{

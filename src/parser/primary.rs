@@ -48,23 +48,6 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.advance();
-                if *self.peek() == Token::Bang {
-                    self.advance();
-                    let op_name = self.expect_ident()?;
-                    let mut args = Vec::new();
-                    if *self.peek() == Token::LParen {
-                        self.advance();
-                        if *self.peek() != Token::RParen {
-                            args.push(self.parse_expr()?);
-                            while *self.peek() == Token::Comma {
-                                self.advance();
-                                args.push(self.parse_expr()?);
-                            }
-                        }
-                        self.expect(Token::RParen)?;
-                    }
-                    return Ok(Expr::QualifiedCall(name, op_name, args));
-                }
                 if *self.peek() == Token::LParen {
                     let is_recursive = self.recursive_names.contains(&name);
                     if !is_recursive
@@ -577,7 +560,11 @@ impl Parser {
         Ok(())
     }
 
-    pub(super) fn parse_instance(&mut self, alias: Option<Arc<str>>) -> Result<InstanceDecl> {
+    pub(super) fn parse_instance(
+        &mut self,
+        alias: Option<Arc<str>>,
+        params: Vec<Arc<str>>,
+    ) -> Result<InstanceDecl> {
         let module_name = self.expect_ident()?;
         let mut substitutions = Vec::new();
         if *self.peek() == Token::With {
@@ -595,6 +582,7 @@ impl Parser {
         }
         Ok(InstanceDecl {
             alias,
+            params,
             module_name,
             substitutions,
         })

@@ -109,8 +109,6 @@ Model these as separate actions in your Next relation. A timeout is just an acti
 
 When you suspect a bug in an existing system but can't reproduce it, model the system as-is — including the suspected flaw. If the model confirms the violation, the counterexample trace shows you the exact interleaving that triggers it. If it doesn't, your model is missing something (which is also useful information).
 
-The MQDB outbox double-delivery bug was found this way. The spec modeled `dispatch_idx` as an explicit state variable. When `DispatchEventFailure` fired, the action reset `dispatch_idx` to 0 without recording progress. The next `StartDispatch` restarted from event 1, re-delivering events that had already succeeded. The invariant `\A key \in EventKey : delivery_count[key] <= 1` immediately flagged it.
-
 After finding the bug, write the fix into the spec and verify it passes. Then write the bug variant (the original behavior) and verify it still fails. Now you have a regression test that lives at the design level.
 
 ## Parameter Sweeps

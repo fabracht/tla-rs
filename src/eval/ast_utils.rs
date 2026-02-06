@@ -223,13 +223,14 @@ pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
                         || contains_prime_ref(val, defs)
                 })
         }
-        Expr::FnCall(name, args) | Expr::QualifiedCall(_, name, args) => {
+        Expr::FnCall(name, args) => {
             if let Some((_, body)) = defs.get(name) {
                 contains_prime_ref(body, defs)
             } else {
                 args.iter().any(|a| contains_prime_ref(a, defs))
             }
         }
+        Expr::QualifiedCall(_, _, _) => true,
         Expr::Lambda(_, body) => contains_prime_ref(body, defs),
         Expr::Let(_, binding, body) => {
             contains_prime_ref(binding, defs) || contains_prime_ref(body, defs)

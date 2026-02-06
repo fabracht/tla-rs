@@ -133,7 +133,7 @@ pub enum Expr {
     DiamondAction(Box<Expr>, Arc<str>),
     EnabledOp(Box<Expr>),
 
-    QualifiedCall(Arc<str>, Arc<str>, Vec<Expr>),
+    QualifiedCall(Box<Expr>, Arc<str>, Vec<Expr>),
 
     LabeledAction(Arc<str>, Box<Expr>),
 }
@@ -148,6 +148,7 @@ pub struct State {
 #[derive(Debug, Clone)]
 pub struct InstanceDecl {
     pub alias: Option<Arc<str>>,
+    pub params: Vec<Arc<str>>,
     pub module_name: Arc<str>,
     pub substitutions: Vec<(Arc<str>, Expr)>,
 }
@@ -171,8 +172,8 @@ pub struct Spec {
     pub definitions: BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>,
     pub assumes: Vec<Expr>,
     pub instances: Vec<InstanceDecl>,
-    pub init: Expr,
-    pub next: Expr,
+    pub init: Option<Expr>,
+    pub next: Option<Expr>,
     pub invariants: Vec<Expr>,
     pub invariant_names: Vec<Option<Arc<str>>>,
     pub fairness: Vec<FairnessConstraint>,

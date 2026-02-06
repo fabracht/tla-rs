@@ -36,7 +36,10 @@ pub fn run_interactive(spec: &Spec, domains: &Env) -> io::Result<()> {
 
     let defs: Definitions = spec.definitions.clone();
 
-    let initial_states = match init_states(&spec.init, &spec.vars, &env, &defs) {
+    let init_expr = spec.init.as_ref().expect("interactive mode requires Init");
+    let next_expr = spec.next.as_ref().expect("interactive mode requires Next");
+
+    let initial_states = match init_states(init_expr, &spec.vars, &env, &defs) {
         Ok(states) => states,
         Err(e) => {
             let diag = crate::checker::eval_error_to_diagnostic(&e)
@@ -67,7 +70,7 @@ pub fn run_interactive(spec: &Spec, domains: &Env) -> io::Result<()> {
 
     let primed_vars = make_primed_names(&spec.vars);
     let initial_actions = match next_states(
-        &spec.next,
+        next_expr,
         &initial,
         &spec.vars,
         &primed_vars,
@@ -84,7 +87,7 @@ pub fn run_interactive(spec: &Spec, domains: &Env) -> io::Result<()> {
     };
 
     let initial_actions_with_guards = match next_states_with_guards(
-        &spec.next,
+        next_expr,
         &initial,
         &spec.vars,
         &primed_vars,
@@ -183,6 +186,7 @@ pub fn run_interactive_replay(spec: &Spec, domains: &Env, replay_file: &Path) ->
     }
 
     let defs: Definitions = spec.definitions.clone();
+    let next_expr = spec.next.as_ref().expect("replay mode requires Next");
 
     let Some(first) = replay_trace.first() else {
         return Err(io::Error::new(
@@ -193,7 +197,7 @@ pub fn run_interactive_replay(spec: &Spec, domains: &Env, replay_file: &Path) ->
     let (initial, _) = first.clone();
     let primed_vars = make_primed_names(&spec.vars);
     let initial_actions = match next_states(
-        &spec.next,
+        next_expr,
         &initial,
         &spec.vars,
         &primed_vars,
@@ -210,7 +214,7 @@ pub fn run_interactive_replay(spec: &Spec, domains: &Env, replay_file: &Path) ->
     };
 
     let initial_actions_with_guards = match next_states_with_guards(
-        &spec.next,
+        next_expr,
         &initial,
         &spec.vars,
         &primed_vars,
