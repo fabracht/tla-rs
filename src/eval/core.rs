@@ -16,7 +16,6 @@ use super::helpers::{
 use super::recursive::eval_fn_def_recursive;
 use crate::ast::{Env, Expr, Value};
 use crate::checker::format_value;
-use crate::modules::apply_substitutions;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -1618,26 +1617,8 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                         inst_arg_vals.push(eval(arg_expr, env, defs)?);
                     }
 
-                    let param_subs: Vec<(Arc<str>, Expr)> = param_inst
-                        .params
-                        .iter()
-                        .zip(inst_arg_vals)
-                        .map(|(param, val)| (param.clone(), Expr::Lit(val)))
-                        .collect();
-
-                    use crate::modules::substitute_expr;
-                    let substituted_subs: Vec<(Arc<str>, Expr)> = param_inst
-                        .substitutions
-                        .iter()
-                        .map(|(name, expr)| {
-                            let substituted = substitute_expr(expr, &param_subs);
-                            (name.clone(), substituted)
-                        })
-                        .collect();
-
-                    let mut all_subs = param_subs;
-                    all_subs.extend(substituted_subs);
-                    let instance_defs = apply_substitutions(&param_inst.module_defs, &all_subs);
+                    let instance_defs =
+                        super::resolve_parameterized_defs(param_inst, inst_arg_vals);
 
                     let (params, body) = instance_defs.get(op).ok_or_else(|| {
                         EvalError::domain_error(format!(

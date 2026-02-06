@@ -270,7 +270,6 @@ fn collect_candidates(
 
         Expr::QualifiedCall(instance_expr, op, args) => {
             use super::global_state::{PARAMETERIZED_INSTANCES, RESOLVED_INSTANCES};
-            use crate::modules::{apply_substitutions, substitute_expr};
 
             match instance_expr.as_ref() {
                 Expr::Var(instance_name) => {
@@ -319,25 +318,8 @@ fn collect_candidates(
                                 .collect();
 
                             if let Some(inst_arg_vals) = inst_arg_vals {
-                                let param_subs: Vec<(Arc<str>, Expr)> = param_inst
-                                    .params
-                                    .iter()
-                                    .zip(inst_arg_vals)
-                                    .map(|(param, val)| (param.clone(), Expr::Lit(val)))
-                                    .collect();
-
-                                let substituted_subs: Vec<(Arc<str>, Expr)> = param_inst
-                                    .substitutions
-                                    .iter()
-                                    .map(|(name, expr)| {
-                                        (name.clone(), substitute_expr(expr, &param_subs))
-                                    })
-                                    .collect();
-
-                                let mut all_subs = param_subs;
-                                all_subs.extend(substituted_subs);
                                 let instance_defs =
-                                    apply_substitutions(&param_inst.module_defs, &all_subs);
+                                    super::resolve_parameterized_defs(param_inst, inst_arg_vals);
 
                                 if let Some((params, body)) = instance_defs.get(op)
                                     && params.len() == args.len()

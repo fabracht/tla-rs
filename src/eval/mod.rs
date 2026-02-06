@@ -48,6 +48,30 @@ pub use self::state::{
 
 pub(crate) use self::ast_utils::contains_prime_ref;
 
+pub(crate) fn resolve_parameterized_defs(
+    param_inst: &ParameterizedInstance,
+    inst_arg_vals: Vec<crate::ast::Value>,
+) -> Definitions {
+    use crate::modules::{apply_substitutions, substitute_expr};
+
+    let param_subs: Vec<(Arc<str>, Expr)> = param_inst
+        .params
+        .iter()
+        .zip(inst_arg_vals)
+        .map(|(param, val)| (param.clone(), Expr::Lit(val)))
+        .collect();
+
+    let substituted_subs: Vec<(Arc<str>, Expr)> = param_inst
+        .substitutions
+        .iter()
+        .map(|(name, expr)| (name.clone(), substitute_expr(expr, &param_subs)))
+        .collect();
+
+    let mut all_subs = param_subs;
+    all_subs.extend(substituted_subs);
+    apply_substitutions(&param_inst.module_defs, &all_subs)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
