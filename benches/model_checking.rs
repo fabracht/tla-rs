@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::path::Path;
 use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
@@ -121,7 +122,6 @@ fn bench_tcommit(c: &mut Criterion) {
     group.finish();
 }
 
-#[allow(dead_code)]
 fn validate_benchmarks() {
     let large_counter_text = include_str!("../test_cases/benchmark/large_counter.tla");
     let large_counter = parse(large_counter_text).expect("failed to parse large_counter.tla");
@@ -153,6 +153,67 @@ fn validate_benchmarks() {
             assert_eq!(stats.states_explored, 16);
         }
         other => panic!("diehard should pass, got {:?}", other),
+    }
+
+    let param_path = Path::new("test_cases/should_pass/parameterized_instance.tla");
+    let param_text =
+        std::fs::read_to_string(param_path).expect("failed to read parameterized_instance.tla");
+    let param_spec = parse(&param_text).expect("failed to parse parameterized_instance.tla");
+    let id_set: BTreeSet<Value> = ["a", "b"]
+        .iter()
+        .map(|s| Value::Str(Arc::from(*s)))
+        .collect();
+    let mut env = Env::new();
+    env.insert(Arc::from("Ids"), Value::Set(id_set));
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        quiet: true,
+        spec_path: Some(param_path.to_path_buf()),
+        ..CheckerConfig::default()
+    };
+    let result = check(&param_spec, &env, &config);
+    match result {
+        CheckResult::Ok(stats) => {
+            assert_eq!(stats.states_explored, 9);
+        }
+        other => panic!("parameterized_instance should pass, got {:?}", other),
+    }
+
+    let pingpong_path = Path::new("test_cases/should_pass/pingpong.tla");
+    let pingpong_text =
+        std::fs::read_to_string(pingpong_path).expect("failed to read pingpong.tla");
+    let pingpong_spec = parse(&pingpong_text).expect("failed to parse pingpong.tla");
+    let mut env = Env::new();
+    env.insert(Arc::from("NumberOfClients"), Value::Int(1));
+    env.insert(Arc::from("NumberOfPings"), Value::Int(1));
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        quiet: true,
+        spec_path: Some(pingpong_path.to_path_buf()),
+        ..CheckerConfig::default()
+    };
+    let result = check(&pingpong_spec, &env, &config);
+    match result {
+        CheckResult::Ok(stats) => {
+            assert_eq!(stats.states_explored, 4);
+        }
+        other => panic!("pingpong should pass, got {:?}", other),
+    }
+
+    let inline_text = include_str!("../test_cases/benchmark/inline_channels.tla");
+    let inline_spec = parse(inline_text).expect("failed to parse inline_channels.tla");
+    let env = Env::new();
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        quiet: true,
+        ..CheckerConfig::default()
+    };
+    let result = check(&inline_spec, &env, &config);
+    match result {
+        CheckResult::Ok(stats) => {
+            assert_eq!(stats.states_explored, 9);
+        }
+        other => panic!("inline_channels should pass, got {:?}", other),
     }
 }
 
@@ -405,6 +466,114 @@ fn bench_queens(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_parameterized_instance(c: &mut Criterion) {
+    let path = Path::new("test_cases/should_pass/parameterized_instance.tla");
+    let spec_text =
+        std::fs::read_to_string(path).expect("failed to read parameterized_instance.tla");
+    let spec = parse(&spec_text).expect("failed to parse parameterized_instance.tla");
+
+    let mut group = c.benchmark_group("parameterized_instance");
+
+    let configs: &[(&[&str], &str)] = &[
+        (&["a"], "1_channel"),
+        (&["a", "b"], "2_channels"),
+        (&["a", "b", "c"], "3_channels"),
+    ];
+
+    for (ids, label) in configs {
+        let id_set: BTreeSet<Value> = ids.iter().map(|s| Value::Str(Arc::from(*s))).collect();
+        let mut env = Env::new();
+        env.insert(Arc::from("Ids"), Value::Set(id_set));
+
+        group.bench_with_input(BenchmarkId::new("ids", label), &env, |b, env| {
+            b.iter(|| {
+                let config = CheckerConfig {
+                    allow_deadlock: true,
+                    spec_path: Some(path.to_path_buf()),
+                    ..quiet_config()
+                };
+                check(&spec, env, &config)
+            });
+        });
+    }
+    group.finish();
+}
+
+fn bench_pingpong(c: &mut Criterion) {
+    let path = Path::new("test_cases/should_pass/pingpong.tla");
+    let spec_text = std::fs::read_to_string(path).expect("failed to read pingpong.tla");
+    let spec = parse(&spec_text).expect("failed to parse pingpong.tla");
+
+    let mut group = c.benchmark_group("pingpong");
+
+    for (clients, pings) in [(1, 1), (2, 1), (2, 2)] {
+        let mut env = Env::new();
+        env.insert(Arc::from("NumberOfClients"), Value::Int(clients));
+        env.insert(Arc::from("NumberOfPings"), Value::Int(pings));
+
+        group.bench_with_input(
+            BenchmarkId::new("clients_pings", format!("{clients}c_{pings}p")),
+            &env,
+            |b, env| {
+                b.iter(|| {
+                    let config = CheckerConfig {
+                        allow_deadlock: true,
+                        spec_path: Some(path.to_path_buf()),
+                        ..quiet_config()
+                    };
+                    check(&spec, env, &config)
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
+fn bench_instance_overhead(c: &mut Criterion) {
+    let instance_path = Path::new("test_cases/should_pass/parameterized_instance.tla");
+    let instance_text =
+        std::fs::read_to_string(instance_path).expect("failed to read parameterized_instance.tla");
+    let instance_spec = parse(&instance_text).expect("failed to parse parameterized_instance.tla");
+
+    let inline_text = include_str!("../test_cases/benchmark/inline_channels.tla");
+    let inline_spec = parse(inline_text).expect("failed to parse inline_channels.tla");
+
+    let id_set: BTreeSet<Value> = ["a", "b"]
+        .iter()
+        .map(|s| Value::Str(Arc::from(*s)))
+        .collect();
+
+    let mut instance_env = Env::new();
+    instance_env.insert(Arc::from("Ids"), Value::Set(id_set));
+
+    let inline_env = Env::new();
+
+    let mut group = c.benchmark_group("instance_overhead");
+
+    group.bench_function("inline_2ch", |b| {
+        b.iter(|| {
+            let config = CheckerConfig {
+                allow_deadlock: true,
+                ..quiet_config()
+            };
+            check(&inline_spec, &inline_env, &config)
+        });
+    });
+
+    group.bench_function("instance_2ch", |b| {
+        b.iter(|| {
+            let config = CheckerConfig {
+                allow_deadlock: true,
+                spec_path: Some(instance_path.to_path_buf()),
+                ..quiet_config()
+            };
+            check(&instance_spec, &instance_env, &config)
+        });
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_large_counter,
@@ -418,6 +587,9 @@ criterion_group!(
     bench_symmetry_canonicalize,
     bench_btreeset_operations,
     bench_state_indexset,
+    bench_parameterized_instance,
+    bench_pingpong,
+    bench_instance_overhead,
 );
 
 criterion_main!(benches);
