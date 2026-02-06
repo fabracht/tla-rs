@@ -230,7 +230,21 @@ pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
                 args.iter().any(|a| contains_prime_ref(a, defs))
             }
         }
-        Expr::QualifiedCall(_, _, _) => true,
+        Expr::QualifiedCall(instance_expr, op, _) => match instance_expr.as_ref() {
+            Expr::Var(instance_name) => {
+                use super::global_state::RESOLVED_INSTANCES;
+                RESOLVED_INSTANCES.with(|inst_ref| {
+                    let instances = inst_ref.borrow();
+                    if let Some(instance_defs) = instances.get(instance_name)
+                        && let Some((_, body)) = instance_defs.get(op)
+                    {
+                        return contains_prime_ref(body, defs);
+                    }
+                    true
+                })
+            }
+            _ => true,
+        },
         Expr::Lambda(_, body) => contains_prime_ref(body, defs),
         Expr::Let(_, binding, body) => {
             contains_prime_ref(binding, defs) || contains_prime_ref(body, defs)

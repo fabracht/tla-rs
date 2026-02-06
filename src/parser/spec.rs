@@ -163,8 +163,7 @@ impl Parser {
 
                     if *self.peek() == Token::Instance {
                         self.advance();
-                        let inst =
-                            self.parse_instance(Some(name), params.clone().unwrap_or_default())?;
+                        let inst = self.parse_instance(Some(name), params.unwrap_or_default())?;
                         self.instances.push(inst);
                         continue;
                     }

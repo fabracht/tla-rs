@@ -94,10 +94,10 @@ fn apply_update(base: &Value, keys: &[Value], new_val: Value) -> Option<Value> {
         }
         Value::Tuple(tup) => {
             if let Value::Int(idx) = &keys[0] {
-                let idx = *idx as usize;
-                if idx == 0 || idx > tup.len() {
+                if *idx <= 0 || *idx as usize > tup.len() {
                     return None;
                 }
+                let idx = *idx as usize;
                 if keys.len() == 1 {
                     let mut new_tup = tup.clone();
                     new_tup[idx - 1] = new_val;

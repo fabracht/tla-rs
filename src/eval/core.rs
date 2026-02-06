@@ -29,6 +29,7 @@ pub(crate) fn expand_unchanged_vars(vars: &[Arc<str>], defs: &Definitions) -> Ve
         if let Some((params, body)) = defs.get(var)
             && params.is_empty()
             && let Expr::TupleLit(elems) = body
+            && elems.iter().all(|e| matches!(e, Expr::Var(_)))
         {
             for elem in elems {
                 if let Expr::Var(name) = elem {
