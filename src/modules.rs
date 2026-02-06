@@ -97,12 +97,160 @@ pub fn apply_substitutions(module_defs: &Definitions, subs: &[(Arc<str>, Expr)])
 }
 
 fn prime_expr(expr: &Expr) -> Expr {
+    let p = |e: &Expr| Box::new(prime_expr(e));
     match expr {
         Expr::Var(name) => Expr::Prime(name.clone()),
-        Expr::FnApp(f, arg) => Expr::FnApp(Box::new(prime_expr(f)), Box::new(prime_expr(arg))),
-        Expr::RecordAccess(r, field) => Expr::RecordAccess(Box::new(prime_expr(r)), field.clone()),
-        Expr::TupleAccess(t, idx) => Expr::TupleAccess(Box::new(prime_expr(t)), *idx),
-        other => other.clone(),
+
+        Expr::Lit(_)
+        | Expr::Prime(_)
+        | Expr::OldValue
+        | Expr::JavaTime
+        | Expr::SystemTime
+        | Expr::Any
+        | Expr::EmptyBag => expr.clone(),
+
+        Expr::FnApp(f, a) => Expr::FnApp(p(f), p(a)),
+        Expr::RecordAccess(r, field) => Expr::RecordAccess(p(r), field.clone()),
+        Expr::TupleAccess(t, idx) => Expr::TupleAccess(p(t), *idx),
+
+        Expr::And(l, r) => Expr::And(p(l), p(r)),
+        Expr::Or(l, r) => Expr::Or(p(l), p(r)),
+        Expr::Not(e) => Expr::Not(p(e)),
+        Expr::Implies(l, r) => Expr::Implies(p(l), p(r)),
+        Expr::Equiv(l, r) => Expr::Equiv(p(l), p(r)),
+        Expr::Eq(l, r) => Expr::Eq(p(l), p(r)),
+        Expr::Neq(l, r) => Expr::Neq(p(l), p(r)),
+        Expr::In(l, r) => Expr::In(p(l), p(r)),
+        Expr::NotIn(l, r) => Expr::NotIn(p(l), p(r)),
+
+        Expr::Add(l, r) => Expr::Add(p(l), p(r)),
+        Expr::Sub(l, r) => Expr::Sub(p(l), p(r)),
+        Expr::Mul(l, r) => Expr::Mul(p(l), p(r)),
+        Expr::Div(l, r) => Expr::Div(p(l), p(r)),
+        Expr::Mod(l, r) => Expr::Mod(p(l), p(r)),
+        Expr::Exp(l, r) => Expr::Exp(p(l), p(r)),
+        Expr::Neg(e) => Expr::Neg(p(e)),
+        Expr::BitwiseAnd(l, r) => Expr::BitwiseAnd(p(l), p(r)),
+        Expr::TransitiveClosure(e) => Expr::TransitiveClosure(p(e)),
+        Expr::ReflexiveTransitiveClosure(e) => Expr::ReflexiveTransitiveClosure(p(e)),
+        Expr::ActionCompose(l, r) => Expr::ActionCompose(p(l), p(r)),
+        Expr::Lt(l, r) => Expr::Lt(p(l), p(r)),
+        Expr::Le(l, r) => Expr::Le(p(l), p(r)),
+        Expr::Gt(l, r) => Expr::Gt(p(l), p(r)),
+        Expr::Ge(l, r) => Expr::Ge(p(l), p(r)),
+
+        Expr::SetEnum(elems) => Expr::SetEnum(elems.iter().map(prime_expr).collect()),
+        Expr::SetRange(l, r) => Expr::SetRange(p(l), p(r)),
+        Expr::SetFilter(var, domain, pred) => Expr::SetFilter(var.clone(), p(domain), p(pred)),
+        Expr::SetMap(var, domain, body) => Expr::SetMap(var.clone(), p(domain), p(body)),
+        Expr::Union(l, r) => Expr::Union(p(l), p(r)),
+        Expr::Intersect(l, r) => Expr::Intersect(p(l), p(r)),
+        Expr::SetMinus(l, r) => Expr::SetMinus(p(l), p(r)),
+        Expr::Cartesian(l, r) => Expr::Cartesian(p(l), p(r)),
+        Expr::Subset(l, r) => Expr::Subset(p(l), p(r)),
+        Expr::ProperSubset(l, r) => Expr::ProperSubset(p(l), p(r)),
+        Expr::Powerset(e) => Expr::Powerset(p(e)),
+        Expr::Cardinality(e) => Expr::Cardinality(p(e)),
+        Expr::IsFiniteSet(e) => Expr::IsFiniteSet(p(e)),
+        Expr::BigUnion(e) => Expr::BigUnion(p(e)),
+
+        Expr::Exists(var, domain, body) => Expr::Exists(var.clone(), p(domain), p(body)),
+        Expr::Forall(var, domain, body) => Expr::Forall(var.clone(), p(domain), p(body)),
+        Expr::Choose(var, domain, body) => Expr::Choose(var.clone(), p(domain), p(body)),
+
+        Expr::FnDef(var, domain, body) => Expr::FnDef(var.clone(), p(domain), p(body)),
+        Expr::FnCall(name, args) => {
+            Expr::FnCall(name.clone(), args.iter().map(prime_expr).collect())
+        }
+        Expr::Lambda(params, body) => Expr::Lambda(params.clone(), p(body)),
+        Expr::FnMerge(l, r) => Expr::FnMerge(p(l), p(r)),
+        Expr::SingleFn(l, r) => Expr::SingleFn(p(l), p(r)),
+        Expr::CustomOp(name, l, r) => Expr::CustomOp(name.clone(), p(l), p(r)),
+        Expr::Except(base, updates) => {
+            let new_updates: Vec<_> = updates
+                .iter()
+                .map(|(keys, val)| {
+                    let new_keys: Vec<_> = keys.iter().map(prime_expr).collect();
+                    (new_keys, prime_expr(val))
+                })
+                .collect();
+            Expr::Except(p(base), new_updates)
+        }
+        Expr::Domain(e) => Expr::Domain(p(e)),
+        Expr::FunctionSet(l, r) => Expr::FunctionSet(p(l), p(r)),
+
+        Expr::RecordLit(fields) => Expr::RecordLit(
+            fields
+                .iter()
+                .map(|(name, val)| (name.clone(), prime_expr(val)))
+                .collect(),
+        ),
+        Expr::RecordSet(fields) => Expr::RecordSet(
+            fields
+                .iter()
+                .map(|(name, val)| (name.clone(), prime_expr(val)))
+                .collect(),
+        ),
+
+        Expr::TupleLit(elems) => Expr::TupleLit(elems.iter().map(prime_expr).collect()),
+
+        Expr::Len(e) => Expr::Len(p(e)),
+        Expr::Head(e) => Expr::Head(p(e)),
+        Expr::Tail(e) => Expr::Tail(p(e)),
+        Expr::Append(l, r) => Expr::Append(p(l), p(r)),
+        Expr::Concat(l, r) => Expr::Concat(p(l), p(r)),
+        Expr::SubSeq(seq, lo, hi) => Expr::SubSeq(p(seq), p(lo), p(hi)),
+        Expr::SelectSeq(seq, test) => Expr::SelectSeq(p(seq), p(test)),
+        Expr::SeqSet(e) => Expr::SeqSet(p(e)),
+        Expr::Print(a, b) => Expr::Print(p(a), p(b)),
+        Expr::PrintT(e) => Expr::PrintT(p(e)),
+        Expr::Assert(a, b) => Expr::Assert(p(a), p(b)),
+        Expr::Permutations(e) => Expr::Permutations(p(e)),
+        Expr::SortSeq(a, b) => Expr::SortSeq(p(a), p(b)),
+        Expr::TLCToString(e) => Expr::TLCToString(p(e)),
+        Expr::RandomElement(e) => Expr::RandomElement(p(e)),
+        Expr::TLCGet(e) => Expr::TLCGet(p(e)),
+        Expr::TLCSet(a, b) => Expr::TLCSet(p(a), p(b)),
+        Expr::TLCEval(e) => Expr::TLCEval(p(e)),
+
+        Expr::IsABag(e) => Expr::IsABag(p(e)),
+        Expr::BagToSet(e) => Expr::BagToSet(p(e)),
+        Expr::SetToBag(e) => Expr::SetToBag(p(e)),
+        Expr::BagIn(l, r) => Expr::BagIn(p(l), p(r)),
+        Expr::BagAdd(l, r) => Expr::BagAdd(p(l), p(r)),
+        Expr::BagSub(l, r) => Expr::BagSub(p(l), p(r)),
+        Expr::BagUnion(e) => Expr::BagUnion(p(e)),
+        Expr::SqSubseteq(l, r) => Expr::SqSubseteq(p(l), p(r)),
+        Expr::SubBag(e) => Expr::SubBag(p(e)),
+        Expr::BagOfAll(l, r) => Expr::BagOfAll(p(l), p(r)),
+        Expr::BagCardinality(e) => Expr::BagCardinality(p(e)),
+        Expr::CopiesIn(l, r) => Expr::CopiesIn(p(l), p(r)),
+
+        Expr::If(cond, then_br, else_br) => Expr::If(p(cond), p(then_br), p(else_br)),
+        Expr::Let(var, binding, body) => Expr::Let(var.clone(), p(binding), p(body)),
+        Expr::Case(branches) => Expr::Case(
+            branches
+                .iter()
+                .map(|(cond, result)| (prime_expr(cond), prime_expr(result)))
+                .collect(),
+        ),
+
+        Expr::Unchanged(_) => expr.clone(),
+
+        Expr::Always(e) => Expr::Always(p(e)),
+        Expr::Eventually(e) => Expr::Eventually(p(e)),
+        Expr::LeadsTo(l, r) => Expr::LeadsTo(p(l), p(r)),
+        Expr::WeakFairness(var, action) => Expr::WeakFairness(var.clone(), p(action)),
+        Expr::StrongFairness(var, action) => Expr::StrongFairness(var.clone(), p(action)),
+        Expr::BoxAction(action, var) => Expr::BoxAction(p(action), var.clone()),
+        Expr::DiamondAction(action, var) => Expr::DiamondAction(p(action), var.clone()),
+        Expr::EnabledOp(e) => Expr::EnabledOp(p(e)),
+
+        Expr::QualifiedCall(inst, op, args) => {
+            Expr::QualifiedCall(p(inst), op.clone(), args.iter().map(prime_expr).collect())
+        }
+
+        Expr::LabeledAction(label, action) => Expr::LabeledAction(label.clone(), p(action)),
     }
 }
 
@@ -700,6 +848,77 @@ mod tests {
             Box::new(Expr::Lit(Value::Bool(true))),
             Box::new(lit_int(1)),
             Box::new(lit_int(2)),
+        );
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn prime_simple_var() {
+        let result = prime_expr(&var_expr("x"));
+        assert_eq!(result, Expr::Prime(var("x")));
+    }
+
+    #[test]
+    fn prime_fn_app() {
+        let expr = Expr::FnApp(Box::new(var_expr("channels")), Box::new(lit_int(1)));
+        let result = prime_expr(&expr);
+        let expected = Expr::FnApp(Box::new(Expr::Prime(var("channels"))), Box::new(lit_int(1)));
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn prime_binary_add() {
+        let expr = Expr::Add(Box::new(var_expr("a")), Box::new(var_expr("b")));
+        let result = prime_expr(&expr);
+        let expected = Expr::Add(
+            Box::new(Expr::Prime(var("a"))),
+            Box::new(Expr::Prime(var("b"))),
+        );
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn prime_if_then_else() {
+        let expr = Expr::If(
+            Box::new(var_expr("cond")),
+            Box::new(var_expr("a")),
+            Box::new(var_expr("b")),
+        );
+        let result = prime_expr(&expr);
+        let expected = Expr::If(
+            Box::new(Expr::Prime(var("cond"))),
+            Box::new(Expr::Prime(var("a"))),
+            Box::new(Expr::Prime(var("b"))),
+        );
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn prime_literal_unchanged() {
+        let expr = lit_int(42);
+        let result = prime_expr(&expr);
+        assert_eq!(result, lit_int(42));
+    }
+
+    #[test]
+    fn prime_record_access() {
+        let expr = Expr::RecordAccess(Box::new(var_expr("state")), var("field"));
+        let result = prime_expr(&expr);
+        let expected = Expr::RecordAccess(Box::new(Expr::Prime(var("state"))), var("field"));
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn substitute_prime_with_binary_replacement() {
+        let subs = vec![(
+            var("x"),
+            Expr::Add(Box::new(var_expr("a")), Box::new(var_expr("b"))),
+        )];
+        let expr = Expr::Prime(var("x"));
+        let result = substitute_expr(&expr, &subs);
+        let expected = Expr::Add(
+            Box::new(Expr::Prime(var("a"))),
+            Box::new(Expr::Prime(var("b"))),
         );
         assert_eq!(result, expected);
     }
