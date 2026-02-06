@@ -133,7 +133,12 @@ impl ExplorerState {
     }
 
     fn refresh_actions(&mut self, spec: &Spec, env: &mut Env, defs: &Definitions) {
-        let next_expr = spec.next.as_ref().expect("interactive mode requires Next");
+        let Some(next_expr) = spec.next.as_ref() else {
+            self.available_actions = Vec::new();
+            self.available_actions_with_guards = Vec::new();
+            self.status_message = Some(("missing Next definition".into(), true));
+            return;
+        };
         let primed_vars = make_primed_names(&spec.vars);
         match next_states(
             next_expr,
@@ -452,7 +457,12 @@ impl ExplorerState {
         }
 
         let current = prev_state;
-        let next_expr = spec.next.as_ref().expect("interactive mode requires Next");
+        let next_expr = spec.next.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "interactive mode requires Next definition",
+            )
+        })?;
         let primed_vars = make_primed_names(&spec.vars);
         let available_actions =
             next_states(next_expr, &current, &spec.vars, &primed_vars, env, defs)

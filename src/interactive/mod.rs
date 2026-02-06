@@ -36,8 +36,18 @@ pub fn run_interactive(spec: &Spec, domains: &Env) -> io::Result<()> {
 
     let defs: Definitions = spec.definitions.clone();
 
-    let init_expr = spec.init.as_ref().expect("interactive mode requires Init");
-    let next_expr = spec.next.as_ref().expect("interactive mode requires Next");
+    let init_expr = spec.init.as_ref().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "interactive mode requires Init definition",
+        )
+    })?;
+    let next_expr = spec.next.as_ref().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "interactive mode requires Next definition",
+        )
+    })?;
 
     let initial_states = match init_states(init_expr, &spec.vars, &env, &defs) {
         Ok(states) => states,
@@ -186,7 +196,12 @@ pub fn run_interactive_replay(spec: &Spec, domains: &Env, replay_file: &Path) ->
     }
 
     let defs: Definitions = spec.definitions.clone();
-    let next_expr = spec.next.as_ref().expect("replay mode requires Next");
+    let next_expr = spec.next.as_ref().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "replay mode requires Next definition",
+        )
+    })?;
 
     let Some(first) = replay_trace.first() else {
         return Err(io::Error::new(
