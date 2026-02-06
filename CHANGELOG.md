@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Parameterized INSTANCE declarations (`Alias(p) == INSTANCE M WITH ...`)
+- Qualified calls to instance operators (`Alias!Op(args)`, `Alias(v)!Op(args)`)
+- Library module support (modules without Init/Next can be used as INSTANCE targets)
+- Stdlib modules (Naturals, Sequences, TLC, etc.) work with `LOCAL INSTANCE`
+- `UNCHANGED<<vars>>` now expands tuple-valued definitions (e.g., `vars == <<x, y>>`)
+
 ## [0.1.1] - 2026-02-05
 
 ### Fixed
