@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::Write;
 use std::sync::Arc;
 
@@ -9,6 +10,7 @@ use crate::checker::format_value;
 pub fn export_dot<W: Write>(
     states: &IndexSet<State>,
     parents: &[Option<usize>],
+    state_successors: &[HashSet<usize>],
     vars: &[Arc<str>],
     error_state: Option<usize>,
     out: &mut W,
@@ -27,9 +29,17 @@ pub fn export_dot<W: Write>(
         writeln!(out, "  s{} [label=\"{}\"{}];", idx, label, style)?;
     }
 
-    for (idx, parent) in parents.iter().enumerate() {
-        if let Some(p) = parent {
-            writeln!(out, "  s{} -> s{};", p, idx)?;
+    for (idx, successors) in state_successors.iter().enumerate() {
+        for succ in successors {
+            let is_bfs_edge = parents[*succ] == Some(idx);
+
+            let attributes = if is_bfs_edge {
+                " [penwidth=3.0, color=\"black\"]"
+            } else {
+                " [color=\"gray50\"]"
+            };
+
+            writeln!(out, "  s{} -> s{}{};", idx, succ, attributes)?;
         }
     }
 

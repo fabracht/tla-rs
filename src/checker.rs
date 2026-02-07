@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
 #[cfg(not(target_arch = "wasm32"))]
@@ -269,6 +269,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     let elapsed_secs_i64 = || 0_i64;
 
     let mut states: IndexSet<State> = IndexSet::new();
+    let mut state_successors: Vec<HashSet<usize>> = Vec::new();
     let mut parent: Vec<Option<usize>> = Vec::new();
     let mut parent_action: Vec<Option<Arc<str>>> = Vec::new();
     let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
@@ -328,6 +329,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         if is_new {
             parent.push(None);
             parent_action.push(None);
+            state_successors.push(HashSet::new());
             queue.push_back((idx, 1));
         }
     }
@@ -355,14 +357,21 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
     #[cfg(not(target_arch = "wasm32"))]
     let do_export = |states: &IndexSet<State>,
-                     parent: &[Option<usize>],
+                     parents: &[Option<usize>],
+                     state_successors: &Vec<HashSet<usize>>,
                      error_state: Option<usize>| {
         if let Some(ref path) = config.export_dot_path {
             match File::create(path) {
                 Ok(file) => {
                     let mut writer = BufWriter::new(file);
-                    if let Err(e) = export_dot(states, parent, &spec.vars, error_state, &mut writer)
-                    {
+                    if let Err(e) = export_dot(
+                        states,
+                        parents,
+                        state_successors,
+                        &spec.vars,
+                        error_state,
+                        &mut writer,
+                    ) {
                         eprintln!("  Failed to write DOT export: {}", e);
                     } else {
                         eprintln!("  Exported state graph to {}", path.display());
@@ -415,13 +424,13 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
         if stats.states_explored > config.max_states {
             stats.elapsed_secs = elapsed_secs();
-            do_export(&states, &parent, None);
+            do_export(&states, &parent, &state_successors, None);
             return CheckResult::MaxStatesExceeded(stats);
         }
 
         if depth > config.max_depth {
             stats.elapsed_secs = elapsed_secs();
-            do_export(&states, &parent, None);
+            do_export(&states, &parent, &state_successors, None);
             return CheckResult::MaxDepthExceeded(stats);
         }
 
@@ -467,7 +476,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                         let (trace, actions) =
                             reconstruct_trace(current_idx, &states, &parent, &parent_action);
                         stats.elapsed_secs = elapsed_secs();
-                        do_export(&states, &parent, Some(current_idx));
+                        do_export(&states, &parent, &state_successors, Some(current_idx));
                         return CheckResult::InvariantViolation(
                             Counterexample {
                                 trace,
@@ -481,7 +490,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 Ok(_) => {
                     let (trace, _actions) =
                         reconstruct_trace(current_idx, &states, &parent, &parent_action);
-                    do_export(&states, &parent, Some(current_idx));
+                    do_export(&states, &parent, &state_successors, Some(current_idx));
                     return CheckResult::InvariantError(
                         EvalError::TypeMismatch {
                             expected: "Bool",
@@ -495,7 +504,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 Err(e) => {
                     let (trace, _actions) =
                         reconstruct_trace(current_idx, &states, &parent, &parent_action);
-                    do_export(&states, &parent, Some(current_idx));
+                    do_export(&states, &parent, &state_successors, Some(current_idx));
                     return CheckResult::InvariantError(e, trace);
                 }
             }
@@ -531,7 +540,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             Err(e) => {
                 let (trace, _actions) =
                     reconstruct_trace(current_idx, &states, &parent, &parent_action);
-                do_export(&states, &parent, Some(current_idx));
+                do_export(&states, &parent, &state_successors, Some(current_idx));
                 return CheckResult::NextError(e, trace);
             }
         };
@@ -539,7 +548,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         if successors.is_empty() && !config.allow_deadlock {
             let (trace, actions) = reconstruct_trace(current_idx, &states, &parent, &parent_action);
             stats.elapsed_secs = elapsed_secs();
-            do_export(&states, &parent, Some(current_idx));
+            do_export(&states, &parent, &state_successors, Some(current_idx));
             return CheckResult::Deadlock(trace, actions, stats);
         }
 
@@ -550,13 +559,15 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             if is_new {
                 parent.push(Some(current_idx));
                 parent_action.push(transition.action);
+                state_successors.push(HashSet::new());
                 queue.push_back((succ_idx, depth + 1));
             }
+            let _ = state_successors[current_idx].insert(succ_idx);
         }
     }
 
     stats.elapsed_secs = elapsed_secs();
-    do_export(&states, &parent, None);
+    do_export(&states, &parent, &state_successors, None);
 
     if config.continue_on_violation {
         stats.violations_by_invariant = violation_counts_by_inv
