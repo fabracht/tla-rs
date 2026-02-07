@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
 #[cfg(not(target_arch = "wasm32"))]
@@ -38,7 +38,7 @@ pub struct StateMetadata {
     pub via: Option<TransitionSource>,
 
     /// Successor states found from this state
-    pub successors: HashSet<usize>,
+    pub successors: HashMap<usize, Option<Arc<str>>>,
 }
 
 #[derive(Debug)]
@@ -343,7 +343,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         if is_new {
             metadata.push(StateMetadata {
                 via: None,
-                successors: HashSet::new(),
+                successors: HashMap::new(),
             });
             queue.push_back((idx, 1));
         }
@@ -571,14 +571,14 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 metadata.push(StateMetadata {
                     via: Some(TransitionSource {
                         state_idx: current_idx,
-                        action: transition.action,
+                        action: transition.action.clone(),
                     }),
-                    successors: HashSet::new(),
+                    successors: HashMap::new(),
                 });
                 queue.push_back((succ_idx, depth + 1));
             }
             if let Some(meta) = metadata.get_mut(current_idx) {
-                meta.successors.insert(succ_idx);
+                meta.successors.insert(succ_idx, transition.action);
             }
         }
     }

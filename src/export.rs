@@ -56,15 +56,23 @@ pub fn export_dot<W: Write>(
 
     for (idx, meta) in metadata.iter().enumerate() {
         for succ in &meta.successors {
-            let is_trace_edge = trace_edges.contains(&(idx, *succ));
+            let is_trace_edge = trace_edges.contains(&(idx, *succ.0));
 
-            let attributes = if is_trace_edge {
-                " [penwidth=3.0, color=\"black\"]"
+            let style = if is_trace_edge {
+                "penwidth=3.0, color=\"black\""
             } else {
-                " [color=\"gray50\"]"
+                "color=\"gray50\""
             };
 
-            writeln!(out, "  s{} -> s{}{};", idx, succ, attributes)?;
+            let label = match succ.1 {
+                None => String::from(""),
+                Some(label) => {
+                    let escaped = format_str_escaped(label);
+                    format!(", label=\"{escaped}\"")
+                }
+            };
+
+            writeln!(out, "  s{} -> s{} [{}{}];", idx, succ.0, style, label)?;
         }
     }
 
@@ -85,6 +93,10 @@ fn format_state_label(state: &State, vars: &[Arc<str>]) -> String {
         .join("\\n")
 }
 
+fn format_str_escaped(str: &str) -> String {
+    str.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 fn format_value_escaped(val: &Value) -> String {
-    format_value(val).replace('\\', "\\\\").replace('"', "\\\"")
+    format_str_escaped(&format_value(val))
 }
