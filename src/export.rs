@@ -1,16 +1,14 @@
-use std::collections::HashSet;
 use std::io::Write;
 use std::sync::Arc;
 
 use indexmap::IndexSet;
 
 use crate::ast::{State, Value};
-use crate::checker::format_value;
+use crate::checker::{StateMetadata, format_value};
 
 pub fn export_dot<W: Write>(
     states: &IndexSet<State>,
-    parents: &[Option<usize>],
-    state_successors: &[HashSet<usize>],
+    metadata: &[StateMetadata],
     vars: &[Arc<str>],
     error_state: Option<usize>,
     out: &mut W,
@@ -29,9 +27,13 @@ pub fn export_dot<W: Write>(
         writeln!(out, "  s{} [label=\"{}\"{}];", idx, label, style)?;
     }
 
-    for (idx, successors) in state_successors.iter().enumerate() {
-        for succ in successors {
-            let is_bfs_edge = parents[*succ] == Some(idx);
+    for (idx, meta) in metadata.iter().enumerate() {
+        for succ in &meta.successors {
+            let is_bfs_edge = metadata
+                .get(*succ)
+                .and_then(|m| m.via.as_ref())
+                .map(|s| s.state_idx)
+                == Some(idx);
 
             let attributes = if is_bfs_edge {
                 " [penwidth=3.0, color=\"black\"]"
