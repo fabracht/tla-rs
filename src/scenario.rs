@@ -71,7 +71,15 @@ pub fn execute_scenario(
     let defs = build_definitions(spec);
     let mut env = constants.clone();
 
-    let init_states = crate::eval::init_states(&spec.init, &spec.vars, &env, &defs)?;
+    let init_expr = spec
+        .init
+        .as_ref()
+        .ok_or_else(|| EvalError::domain_error("scenario mode requires Init definition"))?;
+    let next_expr = spec
+        .next
+        .as_ref()
+        .ok_or_else(|| EvalError::domain_error("scenario mode requires Next definition"))?;
+    let init_states = crate::eval::init_states(init_expr, &spec.vars, &env, &defs)?;
     let Some(mut current_state) = init_states.into_iter().next() else {
         return Err(EvalError::domain_error("no initial states"));
     };
@@ -92,7 +100,7 @@ pub fn execute_scenario(
         }
 
         let successors = next_states(
-            &spec.next,
+            next_expr,
             &current_state,
             &spec.vars,
             &primed_vars,

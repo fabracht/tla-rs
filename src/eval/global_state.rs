@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use super::ResolvedInstances;
+use super::{ParameterizedInstances, ResolvedInstances};
 use crate::ast::{Env, State, Value};
 
 #[derive(Clone)]
@@ -71,6 +71,7 @@ thread_local! {
     pub(super) static TLC_STATE: RefCell<BTreeMap<i64, Value>> = const { RefCell::new(BTreeMap::new()) };
     pub(super) static CHECKER_STATS: RefCell<CheckerStats> = const { RefCell::new(CheckerStats::new()) };
     pub(super) static RESOLVED_INSTANCES: RefCell<ResolvedInstances> = const { RefCell::new(BTreeMap::new()) };
+    pub(super) static PARAMETERIZED_INSTANCES: RefCell<ParameterizedInstances> = const { RefCell::new(BTreeMap::new()) };
     #[cfg(feature = "profiling")]
     pub(super) static PROFILING_STATS: RefCell<ProfilingStats> = const { RefCell::new(ProfilingStats::new()) };
 }
@@ -97,6 +98,11 @@ pub fn set_resolved_instances(instances: ResolvedInstances) {
 
 pub fn clear_resolved_instances() {
     RESOLVED_INSTANCES.with(|inst| inst.borrow_mut().clear());
+    PARAMETERIZED_INSTANCES.with(|inst| inst.borrow_mut().clear());
+}
+
+pub fn set_parameterized_instances(instances: ParameterizedInstances) {
+    PARAMETERIZED_INSTANCES.with(|inst| *inst.borrow_mut() = instances);
 }
 
 #[cfg(feature = "profiling")]

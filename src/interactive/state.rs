@@ -133,9 +133,15 @@ impl ExplorerState {
     }
 
     fn refresh_actions(&mut self, spec: &Spec, env: &mut Env, defs: &Definitions) {
+        let Some(next_expr) = spec.next.as_ref() else {
+            self.available_actions = Vec::new();
+            self.available_actions_with_guards = Vec::new();
+            self.status_message = Some(("missing Next definition".into(), true));
+            return;
+        };
         let primed_vars = make_primed_names(&spec.vars);
         match next_states(
-            &spec.next,
+            next_expr,
             &self.current,
             &spec.vars,
             &primed_vars,
@@ -145,7 +151,7 @@ impl ExplorerState {
             Ok(actions) => {
                 self.available_actions = actions.clone();
                 match next_states_with_guards(
-                    &spec.next,
+                    next_expr,
                     &self.current,
                     &spec.vars,
                     &primed_vars,
@@ -451,12 +457,18 @@ impl ExplorerState {
         }
 
         let current = prev_state;
+        let next_expr = spec.next.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "interactive mode requires Next definition",
+            )
+        })?;
         let primed_vars = make_primed_names(&spec.vars);
         let available_actions =
-            next_states(&spec.next, &current, &spec.vars, &primed_vars, env, defs)
+            next_states(next_expr, &current, &spec.vars, &primed_vars, env, defs)
                 .map_err(|e| io::Error::other(format!("{:?}", e)))?;
         let available_actions_with_guards =
-            next_states_with_guards(&spec.next, &current, &spec.vars, &primed_vars, env, defs)
+            next_states_with_guards(next_expr, &current, &spec.vars, &primed_vars, env, defs)
                 .unwrap_or_else(|_| {
                     available_actions
                         .iter()

@@ -20,13 +20,22 @@ use crate::ast::Expr;
 pub type Definitions = BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>;
 pub type ResolvedInstances = BTreeMap<Arc<str>, Definitions>;
 
+#[derive(Debug, Clone)]
+pub struct ParameterizedInstance {
+    pub params: Vec<Arc<str>>,
+    pub module_defs: Definitions,
+    pub substitutions: Vec<(Arc<str>, Expr)>,
+}
+
+pub type ParameterizedInstances = BTreeMap<Arc<str>, ParameterizedInstance>;
+
 pub use self::context::{eval_with_context, eval_with_instances};
 pub use self::core::eval;
 pub use self::diagnostics::explain_invariant_failure;
 pub use self::error::EvalError;
 pub use self::global_state::{
     CheckerStats, EvalContext, clear_resolved_instances, reset_tlc_state, set_checker_level,
-    set_random_seed, set_resolved_instances, update_checker_stats,
+    set_parameterized_instances, set_random_seed, set_resolved_instances, update_checker_stats,
 };
 #[cfg(feature = "profiling")]
 pub use self::global_state::{
@@ -38,6 +47,30 @@ pub use self::state::{
 };
 
 pub(crate) use self::ast_utils::contains_prime_ref;
+
+pub(crate) fn resolve_parameterized_defs(
+    param_inst: &ParameterizedInstance,
+    inst_arg_vals: Vec<crate::ast::Value>,
+) -> Definitions {
+    use crate::modules::{apply_substitutions, substitute_expr};
+
+    let param_subs: Vec<(Arc<str>, Expr)> = param_inst
+        .params
+        .iter()
+        .zip(inst_arg_vals)
+        .map(|(param, val)| (param.clone(), Expr::Lit(val)))
+        .collect();
+
+    let substituted_subs: Vec<(Arc<str>, Expr)> = param_inst
+        .substitutions
+        .iter()
+        .map(|(name, expr)| (name.clone(), substitute_expr(expr, &param_subs)))
+        .collect();
+
+    let mut all_subs = param_subs;
+    all_subs.extend(substituted_subs);
+    apply_substitutions(&param_inst.module_defs, &all_subs)
+}
 
 #[cfg(test)]
 mod tests {

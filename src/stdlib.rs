@@ -10,6 +10,13 @@ pub fn load_builtins(env: &mut Env) {
     env.insert(Arc::from("BOOLEAN"), Value::Set(boolean));
 }
 
+pub fn is_stdlib_module(name: &str) -> bool {
+    matches!(
+        name,
+        "Naturals" | "Integers" | "Sequences" | "FiniteSets" | "TLC" | "Bags" | "Bits"
+    )
+}
+
 pub fn load_module(name: &str, env: &mut Env) {
     match name {
         "Naturals" => load_naturals(env),

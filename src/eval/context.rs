@@ -14,22 +14,27 @@ pub fn eval_with_instances(
     instances: &ResolvedInstances,
 ) -> Result<Value> {
     match expr {
-        Expr::QualifiedCall(instance, op, args) => {
-            let instance_defs = instances.get(instance).ok_or_else(|| {
-                EvalError::domain_error(format!("instance {} not found", instance))
+        Expr::QualifiedCall(instance_expr, op, args) => {
+            let Expr::Var(instance_name) = instance_expr.as_ref() else {
+                return Err(EvalError::domain_error(
+                    "eval_with_instances only supports static instance names",
+                ));
+            };
+            let instance_defs = instances.get(instance_name).ok_or_else(|| {
+                EvalError::domain_error(format!("instance {} not found", instance_name))
             })?;
 
             let (params, body) = instance_defs.get(op).ok_or_else(|| {
                 EvalError::domain_error(format!(
                     "operator {} not found in instance {}",
-                    op, instance
+                    op, instance_name
                 ))
             })?;
 
             if args.len() != params.len() {
                 return Err(EvalError::domain_error(format!(
                     "{}!{} expects {} args, got {}",
-                    instance,
+                    instance_name,
                     op,
                     params.len(),
                     args.len()

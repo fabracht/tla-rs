@@ -184,9 +184,15 @@ Cross-checked against:
 | `CONSTANT(S)` | Constants |
 | `ASSUME` | Evaluated at startup; aborts if any constraint is FALSE |
 | `RECURSIVE` | Recursive operator (stack overflow protected via `stacker`) |
-| `INSTANCE` | Module instantiation with `WITH param <- value` substitutions |
+| `INSTANCE M WITH p <- e` | Static module instantiation with substitutions |
+| `A(x) == INSTANCE M WITH p <- e` | Parameterized module instantiation |
+| `A!Op(args)` | Qualified call to instance operator |
+| `A(x)!Op(args)` | Qualified call to parameterized instance operator |
 | `LOCAL` | Local definitions and instances (not exported) |
 | `Label::` | Action labels (consumed by parser, used for action naming) |
+
+Library modules (modules without Init/Next) are supported for use as instance targets.
+Stdlib modules (Naturals, Sequences, TLC, etc.) can be used with `LOCAL INSTANCE`.
 
 ### Standard Library Modules
 | Module | Status |
@@ -289,7 +295,7 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | Bags Module | 100% ✓ |
 | Bits Module | 100% ✓ |
 | Standard Library | 100% ✓ |
-| Module System | 95% ⚠ |
+| Module System | 100% ✓ |
 | Temporal/Liveness | 60% ⚠ |
 | Proofs | 0% ✗ |
 | Number Formats | 100% ✓ |

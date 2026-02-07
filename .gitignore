@@ -13,3 +13,4 @@ trace.json
 .local_only/
 GEMINI.md
 pkg/
+ARCHITECTURE.md

@@ -98,7 +98,7 @@ impl Parser {
                     self.advance();
                     if *self.peek() == Token::Instance {
                         self.advance();
-                        let inst = self.parse_instance(None)?;
+                        let inst = self.parse_instance(None, Vec::new())?;
                         self.instances.push(inst);
                     } else if let Token::Ident(_) = self.peek() {
                         self.skip_to_next_definition();
@@ -106,7 +106,7 @@ impl Parser {
                 }
                 Token::Instance => {
                     self.advance();
-                    let inst = self.parse_instance(None)?;
+                    let inst = self.parse_instance(None, Vec::new())?;
                     self.instances.push(inst);
                 }
                 Token::Lemma | Token::ProofStep => {
@@ -163,7 +163,7 @@ impl Parser {
 
                     if *self.peek() == Token::Instance {
                         self.advance();
-                        let inst = self.parse_instance(Some(name))?;
+                        let inst = self.parse_instance(Some(name), params.unwrap_or_default())?;
                         self.instances.push(inst);
                         continue;
                     }
@@ -227,9 +227,6 @@ impl Parser {
                 }
             }
         }
-
-        let init = init.ok_or("missing Init")?;
-        let next = next.ok_or("missing Next")?;
 
         let mut all_defs = self.fn_definitions.clone();
         for (name, expr) in &self.definitions {

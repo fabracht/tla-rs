@@ -6,7 +6,9 @@ use super::combinatorics::{
 use super::error::{EvalError, Result};
 #[cfg(feature = "profiling")]
 use super::global_state::PROFILING_STATS;
-use super::global_state::{CHECKER_STATS, RESOLVED_INSTANCES, RNG, TLC_STATE};
+use super::global_state::{
+    CHECKER_STATS, PARAMETERIZED_INSTANCES, RESOLVED_INSTANCES, RNG, TLC_STATE,
+};
 use super::helpers::{
     apply_fn_value, cartesian_product_records, eval_bool, eval_fn, eval_int, eval_record, eval_set,
     eval_tuple, flatten_fnapp_chain, fn_as_tuple, get_nested, in_set_symbolic, update_nested,
@@ -16,11 +18,29 @@ use crate::ast::{Env, Expr, Value};
 use crate::checker::format_value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-#[cfg(feature = "profiling")]
-use std::time::Instant;
 
 pub fn eval(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, || eval_inner(expr, env, defs))
+}
+
+pub(crate) fn expand_unchanged_vars(vars: &[Arc<str>], defs: &Definitions) -> Vec<Arc<str>> {
+    let mut result = Vec::new();
+    for var in vars {
+        if let Some((params, body)) = defs.get(var)
+            && params.is_empty()
+            && let Expr::TupleLit(elems) = body
+            && elems.iter().all(|e| matches!(e, Expr::Var(_)))
+        {
+            for elem in elems {
+                if let Expr::Var(name) = elem {
+                    result.push(name.clone());
+                }
+            }
+            continue;
+        }
+        result.push(var.clone());
+    }
+    result
 }
 
 fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
@@ -1476,7 +1496,8 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Unchanged(vars) => {
-            for var in vars {
+            let expanded = expand_unchanged_vars(vars, defs);
+            for var in &expanded {
                 let current = env
                     .get(var)
                     .ok_or_else(|| EvalError::undefined_var_with_env(var.clone(), env, defs))?;
@@ -1523,57 +1544,132 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             "ENABLED operator cannot be evaluated in explicit-state model checking",
         )),
 
-        Expr::QualifiedCall(instance, op, args) => RESOLVED_INSTANCES.with(|inst_ref| {
-            let instances = inst_ref.borrow();
-            if instances.is_empty() {
-                return Err(EvalError::domain_error(format!(
-                    "qualified call {}!{} requires resolved instances",
-                    instance, op
-                )));
-            }
+        Expr::QualifiedCall(instance_expr, op, args) => match instance_expr.as_ref() {
+            Expr::Var(instance_name) => RESOLVED_INSTANCES.with(|inst_ref| {
+                let instances = inst_ref.borrow();
+                let instance_defs = instances.get(instance_name).ok_or_else(|| {
+                    EvalError::domain_error(format!("instance {} not found", instance_name))
+                })?;
 
-            let instance_defs = instances.get(instance).ok_or_else(|| {
-                EvalError::domain_error(format!("instance {} not found", instance))
-            })?;
+                let (params, body) = instance_defs.get(op).ok_or_else(|| {
+                    EvalError::domain_error(format!(
+                        "operator {} not found in instance {}",
+                        op, instance_name
+                    ))
+                })?;
 
-            let (params, body) = instance_defs.get(op).ok_or_else(|| {
-                EvalError::domain_error(format!(
-                    "operator {} not found in instance {}",
-                    op, instance
-                ))
-            })?;
+                if args.len() != params.len() {
+                    return Err(EvalError::domain_error(format!(
+                        "{}!{} expects {} args, got {}",
+                        instance_name,
+                        op,
+                        params.len(),
+                        args.len()
+                    )));
+                }
 
-            if args.len() != params.len() {
-                return Err(EvalError::domain_error(format!(
-                    "{}!{} expects {} args, got {}",
-                    instance,
-                    op,
-                    params.len(),
-                    args.len()
-                )));
-            }
+                let mut merged_defs = defs.clone();
+                for (name, def) in instance_defs {
+                    merged_defs.insert(name.clone(), def.clone());
+                }
 
-            let mut arg_vals = Vec::with_capacity(args.len());
-            for arg_expr in args {
-                arg_vals.push(eval(arg_expr, env, defs)?);
-            }
-            let mut prevs = Vec::with_capacity(params.len());
-            for (param, val) in params.iter().zip(arg_vals) {
-                prevs.push((param.clone(), env.insert(param.clone(), val)));
-            }
-            let result = eval(body, env, defs);
-            for (param, prev) in prevs {
-                match prev {
-                    Some(old) => {
-                        env.insert(param, old);
-                    }
-                    None => {
-                        env.remove(&param);
+                let mut arg_vals = Vec::with_capacity(args.len());
+                for arg_expr in args {
+                    arg_vals.push(eval(arg_expr, env, defs)?);
+                }
+                let mut prevs = Vec::with_capacity(params.len());
+                for (param, val) in params.iter().zip(arg_vals) {
+                    prevs.push((param.clone(), env.insert(param.clone(), val)));
+                }
+                let result = eval(body, env, &merged_defs);
+                for (param, prev) in prevs {
+                    match prev {
+                        Some(old) => {
+                            env.insert(param, old);
+                        }
+                        None => {
+                            env.remove(&param);
+                        }
                     }
                 }
+                result
+            }),
+            Expr::FnCall(instance_name, instance_args) => {
+                PARAMETERIZED_INSTANCES.with(|inst_ref| {
+                    let instances = inst_ref.borrow();
+                    let param_inst = instances.get(instance_name).ok_or_else(|| {
+                        EvalError::domain_error(format!(
+                            "parameterized instance {} not found",
+                            instance_name
+                        ))
+                    })?;
+
+                    if instance_args.len() != param_inst.params.len() {
+                        return Err(EvalError::domain_error(format!(
+                            "parameterized instance {} expects {} args, got {}",
+                            instance_name,
+                            param_inst.params.len(),
+                            instance_args.len()
+                        )));
+                    }
+
+                    let mut inst_arg_vals = Vec::with_capacity(instance_args.len());
+                    for arg_expr in instance_args {
+                        inst_arg_vals.push(eval(arg_expr, env, defs)?);
+                    }
+
+                    let instance_defs =
+                        super::resolve_parameterized_defs(param_inst, inst_arg_vals);
+
+                    let (params, body) = instance_defs.get(op).ok_or_else(|| {
+                        EvalError::domain_error(format!(
+                            "operator {} not found in instance {}",
+                            op, instance_name
+                        ))
+                    })?;
+
+                    if args.len() != params.len() {
+                        return Err(EvalError::domain_error(format!(
+                            "{}(...)!{} expects {} args, got {}",
+                            instance_name,
+                            op,
+                            params.len(),
+                            args.len()
+                        )));
+                    }
+
+                    let mut merged_defs = defs.clone();
+                    for (name, def) in &instance_defs {
+                        merged_defs.insert(name.clone(), def.clone());
+                    }
+
+                    let mut arg_vals = Vec::with_capacity(args.len());
+                    for arg_expr in args {
+                        arg_vals.push(eval(arg_expr, env, defs)?);
+                    }
+                    let mut prevs = Vec::with_capacity(params.len());
+                    for (param, val) in params.iter().zip(arg_vals) {
+                        prevs.push((param.clone(), env.insert(param.clone(), val)));
+                    }
+                    let result = eval(body, env, &merged_defs);
+                    for (param, prev) in prevs {
+                        match prev {
+                            Some(old) => {
+                                env.insert(param, old);
+                            }
+                            None => {
+                                env.remove(&param);
+                            }
+                        }
+                    }
+                    result
+                })
             }
-            result
-        }),
+            _ => Err(EvalError::domain_error(format!(
+                "qualified call requires instance name or parameterized instance call, got {:?}",
+                instance_expr
+            ))),
+        },
 
         Expr::LabeledAction(_label, action) => eval(action, env, defs),
     }

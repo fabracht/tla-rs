@@ -118,7 +118,30 @@ tla examples/c3po_asteroid_field.tla -c 'Density=3' --allow-deadlock -i
 
 tla-rs implements the Naturals, Integers, Sequences, FiniteSets, TLC, Bags, and Bits standard modules. See `SYNTAX_STATUS.md` for the full operator-by-operator coverage table.
 
-The supported operator categories: logic (`/\`, `\/`, `~`, `=>`), comparison, arithmetic, sets (`\in`, `\union`, `\intersect`, `SUBSET`, `UNION`), functions (`[x \in S |-> e]`, `DOMAIN`, `EXCEPT`, `@@`), quantifiers (`\E`, `\A`, `CHOOSE`), records, tuples/sequences, `IF-THEN-ELSE`, `CASE`, `LET-IN`, primed variables, `UNCHANGED`, transitive closure, and Unicode equivalents for all operators.
+The supported operator categories: logic (`/\`, `\/`, `~`, `=>`), comparison, arithmetic, sets (`\in`, `\union`, `\intersect`, `SUBSET`, `UNION`), functions (`[x \in S |-> e]`, `DOMAIN`, `EXCEPT`, `@@`), quantifiers (`\E`, `\A`, `CHOOSE`), records, tuples/sequences, `IF-THEN-ELSE`, `CASE`, `LET-IN`, primed variables, `UNCHANGED`, transitive closure, module instances (`INSTANCE` with qualified calls), and Unicode equivalents for all operators.
+
+### Module Instances
+
+Specs can use `INSTANCE` to import and compose modules:
+
+```tla
+---- MODULE pingpong ----
+LOCAL INSTANCE Naturals
+
+VARIABLES server_to_client, client_to_server
+
+Data == [message: {"ping"}] \cup [message: {"pong"}]
+
+ServerToClientChannel(Id) == INSTANCE MChannel WITH channels <- server_to_client
+ClientToServerChannel(Id) == INSTANCE MChannel WITH channels <- client_to_server
+
+Next ==
+    \/ \E id \in ClientIds: ServerToClientChannel(id)!Send([message |-> "ping"])
+    \/ \E id \in ClientIds: ClientToServerChannel(id)!Recv([message |-> "pong"])
+====
+```
+
+Both static (`Alias == INSTANCE M WITH ...`) and parameterized (`Alias(p) == INSTANCE M WITH ...`) instances are supported. Library modules without Init/Next work as expected. The module file must be in the same directory as the spec.
 
 ### Spec Structure
 

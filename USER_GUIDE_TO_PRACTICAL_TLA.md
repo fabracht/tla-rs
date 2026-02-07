@@ -109,8 +109,6 @@ Model these as separate actions in your Next relation. A timeout is just an acti
 
 When you suspect a bug in an existing system but can't reproduce it, model the system as-is — including the suspected flaw. If the model confirms the violation, the counterexample trace shows you the exact interleaving that triggers it. If it doesn't, your model is missing something (which is also useful information).
 
-The MQDB outbox double-delivery bug was found this way. The spec modeled `dispatch_idx` as an explicit state variable. When `DispatchEventFailure` fired, the action reset `dispatch_idx` to 0 without recording progress. The next `StartDispatch` restarted from event 1, re-delivering events that had already succeeded. The invariant `\A key \in EventKey : delivery_count[key] <= 1` immediately flagged it.
-
 After finding the bug, write the fix into the spec and verify it passes. Then write the bug variant (the original behavior) and verify it still fails. Now you have a regression test that lives at the design level.
 
 ## Parameter Sweeps
@@ -205,6 +203,48 @@ Not every invariant violation is a bug. An offline auth system might have 25% of
 | Machine-readable output | `--json` |
 | Visualize state graph | `--export-dot graph.dot` |
 | Check liveness/fairness | `--check-liveness` |
+
+## Compositional Specs with INSTANCE
+
+As specs grow, extract reusable components into separate modules. A channel abstraction, a lock protocol, or a queue can live in its own `.tla` file and be instantiated with different parameters.
+
+```tla
+---- MODULE MChannel ----
+CONSTANT Id, Data
+VARIABLE channels
+
+Send(data) ==
+   /\ \lnot channels[Id].busy
+   /\ channels' = [channels EXCEPT ![Id] = [@ EXCEPT !.val = data, !.busy = TRUE]]
+
+Recv(data) ==
+   /\ channels[Id].busy
+   /\ data = channels[Id].val
+   /\ channels' = [channels EXCEPT ![Id] = [@ EXCEPT !.val = <<>>, !.busy = FALSE]]
+
+InitValue == [val |-> <<>>, busy |-> FALSE]
+====
+```
+
+The main spec instantiates it with concrete parameters:
+
+```tla
+ServerToClientChannel(Id) == INSTANCE MChannel WITH channels <- server_to_client
+ClientToServerChannel(Id) == INSTANCE MChannel WITH channels <- client_to_server
+
+ServerSendPing ==
+   /\ \E client_id \in ClientIds:
+      ServerToClientChannel(client_id)!Send([message |-> "ping"])
+   /\ UNCHANGED<<client_to_server>>
+```
+
+Each qualified call like `ServerToClientChannel(1)!Send(msg)` substitutes `Id=1` and `channels=server_to_client` into the module body, then evaluates `Send(msg)` in that context.
+
+The module file must be in the same directory as the main spec. Library modules (no Init/Next) work as INSTANCE targets. Stdlib modules (Naturals, Sequences, TLC) can be used with `LOCAL INSTANCE` inside any module.
+
+```bash
+tla pingpong.tla -c NumberOfClients=2 -c NumberOfPings=2 --allow-deadlock
+```
 
 ## Stack Size
 
