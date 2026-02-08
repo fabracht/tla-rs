@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod checker;
+pub mod config;
 pub mod diagnostic;
 pub mod eval;
 pub mod export;

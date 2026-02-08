@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use tla_checker::ast::{Env, Value};
 use tla_checker::checker::{CheckResult, CheckerConfig, check};
+use tla_checker::config::{apply_config, parse_cfg};
 use tla_checker::parser::parse;
 
 fn check_spec_file(path: &Path) -> CheckResult {
@@ -564,4 +565,89 @@ fn test_should_pass_pingpong() {
         "pingpong.tla should pass, got: {:?}",
         result
     );
+}
+
+#[test]
+fn test_cfg_twophase_auto_load() {
+    let path = Path::new("test_cases/official/TwoPhase.tla");
+    let cfg_path = Path::new("test_cases/official/TwoPhase.cfg");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let cfg_input = fs::read_to_string(cfg_path).expect("failed to read cfg file");
+    let mut spec = parse(&input).expect("failed to parse spec");
+    let tlc_cfg = parse_cfg(&cfg_input).expect("failed to parse cfg");
+
+    let mut domains = Env::new();
+    let mut config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
+    config.spec_path = Some(path.to_path_buf());
+
+    apply_config(
+        &tlc_cfg,
+        &mut spec,
+        &mut domains,
+        &mut config,
+        &[],
+        &[],
+        false,
+    )
+    .expect("failed to apply config");
+
+    assert!(domains.contains_key("RM"), "RM should be set from cfg");
+
+    let result = check(&spec, &domains, &config);
+    match result {
+        CheckResult::Ok(stats) => {
+            assert_eq!(
+                stats.states_explored, 288,
+                "3 RMs should produce 288 states"
+            );
+        }
+        other => panic!("TwoPhase with cfg should pass, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_cfg_cli_constant_overrides_cfg() {
+    let path = Path::new("test_cases/official/TwoPhase.tla");
+    let cfg_input = "CONSTANT RM = {rm1, rm2, rm3}\nINIT TPInit\nNEXT TPNext\nINVARIANT TPTypeOK";
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let mut spec = parse(&input).expect("failed to parse spec");
+    let tlc_cfg = parse_cfg(cfg_input).expect("failed to parse cfg");
+
+    let mut rm_set = BTreeSet::new();
+    rm_set.insert(Value::Str("r1".into()));
+    rm_set.insert(Value::Str("r2".into()));
+    let cli_constants = vec![(Arc::from("RM"), Value::Set(rm_set))];
+
+    let mut domains = Env::new();
+    let mut config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
+    config.spec_path = Some(path.to_path_buf());
+
+    apply_config(
+        &tlc_cfg,
+        &mut spec,
+        &mut domains,
+        &mut config,
+        &cli_constants,
+        &[],
+        false,
+    )
+    .expect("failed to apply config");
+
+    for (name, val) in &cli_constants {
+        domains.insert(name.clone(), val.clone());
+    }
+
+    let result = check(&spec, &domains, &config);
+    match result {
+        CheckResult::Ok(stats) => {
+            assert_eq!(stats.states_explored, 56, "2 RMs should produce 56 states");
+        }
+        other => panic!("TwoPhase with CLI override should pass, got: {:?}", other),
+    }
 }
