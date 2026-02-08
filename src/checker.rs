@@ -1307,6 +1307,14 @@ mod tests {
         Expr::Prime(var(name))
     }
 
+    fn labeled_action(name: &str, e: Expr) -> Expr {
+        Expr::LabeledAction(var(name), Box::new(e))
+    }
+
+    fn fn_call0(name: &str) -> Expr {
+        Expr::FnCall(var(name), vec![])
+    }
+
     fn eq(l: Expr, r: Expr) -> Expr {
         Expr::Eq(Box::new(l), Box::new(r))
     }
@@ -1627,5 +1635,90 @@ mod tests {
         assert!(output.contains("State 0"));
         assert!(output.contains("x = 42"));
         assert!(output.contains("y = {1, 2}"));
+    }
+
+    #[test]
+    fn counterexample_actions_alignment() {
+        // Case 1: Violation in initial state
+        // Init == x = 1
+        // Action == x' = x
+        // Next == Action
+        // Invariant == x < 1
+        let spec1 = Spec {
+            vars: vec![var("x")],
+            constants: vec![],
+            extends: vec![],
+            definitions: BTreeMap::from([(
+                Arc::from("Action"),
+                ((vec![], eq(prime_expr("x"), var_expr("x")))),
+            )]),
+            assumes: vec![],
+            instances: vec![],
+            init: Some(eq(var_expr("x"), lit_int(1))),
+            next: Some(labeled_action("Action", fn_call0("Action"))),
+            invariants: vec![lt(var_expr("x"), lit_int(1))],
+            invariant_names: vec![None],
+            fairness: vec![],
+            liveness_properties: vec![],
+        };
+
+        let result1 = check(&spec1, &Env::new(), &CheckerConfig::default());
+        match result1 {
+            CheckResult::InvariantViolation(cex, _) => {
+                assert_eq!(cex.trace.len(), 1);
+                assert_eq!(cex.actions.len(), 1);
+                assert_eq!(cex.actions[0], None);
+                assert_eq!(cex.trace[0].values[0], Value::Int(1));
+            }
+            res => panic!(
+                "Expected invariant violation in initial state, got {:?}",
+                res
+            ),
+        }
+
+        // Case 2: Violation in second state
+        // Init: x = 0
+        // Action == x = 0 /\ x' = 1
+        // Next == Action
+        // Invariant == x < 1
+        let spec2 = Spec {
+            vars: vec![var("x")],
+            constants: vec![],
+            extends: vec![],
+            definitions: BTreeMap::from([(
+                Arc::from("Action"),
+                ((
+                    vec![],
+                    and(
+                        eq(var_expr("x"), lit_int(0)),
+                        eq(prime_expr("x"), lit_int(1)),
+                    ),
+                )),
+            )]),
+            assumes: vec![],
+            instances: vec![],
+            init: Some(eq(var_expr("x"), lit_int(0))),
+            next: Some(labeled_action("Action", fn_call0("Action"))),
+            invariants: vec![lt(var_expr("x"), lit_int(1))],
+            invariant_names: vec![None],
+            fairness: vec![],
+            liveness_properties: vec![],
+        };
+
+        let result2 = check(&spec2, &Env::new(), &CheckerConfig::default());
+        match result2 {
+            CheckResult::InvariantViolation(cex, _) => {
+                assert_eq!(cex.trace.len(), 2);
+                assert_eq!(cex.actions.len(), 2);
+                assert_eq!(cex.actions[0], None);
+                assert_eq!(cex.actions[1], Some(Arc::from("Action")));
+                assert_eq!(cex.trace[0].values[0], Value::Int(0));
+                assert_eq!(cex.trace[1].values[0], Value::Int(1));
+            }
+            res => panic!(
+                "Expected invariant violation in second state, got {:?}",
+                res
+            ),
+        }
     }
 }
