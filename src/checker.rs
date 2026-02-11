@@ -183,7 +183,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     let missing: Vec<_> = spec
         .constants
         .iter()
-        .filter(|c| !domains.contains_key(*c))
+        .filter(|c| !domains.contains_key(c))
         .cloned()
         .collect();
     if !missing.is_empty() {
