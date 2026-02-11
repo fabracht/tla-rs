@@ -9,6 +9,7 @@ pub mod graph;
 pub mod interactive;
 pub mod lexer;
 pub mod liveness;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod modules;
 pub mod parser;
 pub mod scc;
@@ -16,6 +17,7 @@ pub mod scenario;
 pub mod source;
 pub mod span;
 pub mod stdlib;
+pub mod substitution;
 pub mod symmetry;
 #[cfg(feature = "wasm")]
 pub mod wasm;

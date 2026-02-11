@@ -52,7 +52,7 @@ pub(crate) fn resolve_parameterized_defs(
     param_inst: &ParameterizedInstance,
     inst_arg_vals: Vec<crate::ast::Value>,
 ) -> Definitions {
-    use crate::modules::{apply_substitutions, substitute_expr};
+    use crate::substitution::{apply_substitutions, substitute_expr};
 
     let param_subs: Vec<(Arc<str>, Expr)> = param_inst
         .params
