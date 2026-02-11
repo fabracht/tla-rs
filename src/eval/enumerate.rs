@@ -3,7 +3,7 @@ use super::ast_utils::{
     collect_conjuncts, collect_disjuncts_with_labels, contains_prime_ref, format_expr_brief,
     infer_action_name,
 };
-use super::candidates::{infer_all_candidates, infer_candidates};
+use super::candidates::infer_all_candidates;
 use super::error::Result;
 #[cfg(feature = "profiling")]
 use super::global_state::PROFILING_STATS;
@@ -96,7 +96,7 @@ pub(crate) fn next_states_impl(
                 }
             } else {
                 let mut results = Vec::new();
-                enumerate_next(disjunct, base_env, &ctx, 0, action.clone(), &mut results)?;
+                enumerate_next(disjunct, base_env, &ctx, action.clone(), &mut results)?;
                 for transition in results {
                     all_results.insert(transition);
                 }
@@ -107,7 +107,7 @@ pub(crate) fn next_states_impl(
 
     let action = infer_action_name(effective, defs);
     let mut results = Vec::new();
-    enumerate_next(effective, base_env, &ctx, 0, action, &mut results)?;
+    enumerate_next(effective, base_env, &ctx, action, &mut results)?;
     Ok(results)
 }
 
@@ -147,12 +147,12 @@ fn expand_and_enumerate(
                 if let Expr::Exists(_, _, _) = disjunct {
                     expand_and_enumerate(disjunct, env, ctx, effective_action, results)?;
                 } else {
-                    enumerate_next(disjunct, env, ctx, 0, effective_action, results)?;
+                    enumerate_next(disjunct, env, ctx, effective_action, results)?;
                 }
             }
             Ok(())
         }
-        _ => enumerate_next(expr, env, ctx, 0, action, results),
+        _ => enumerate_next(expr, env, ctx, action, results),
     }
 }
 
@@ -175,18 +175,13 @@ fn enumerate_next(
     next: &Expr,
     env: &mut Env,
     ctx: &EnumCtx<'_>,
-    var_idx: usize,
     action: Option<Arc<str>>,
     results: &mut Vec<Transition>,
 ) -> Result<()> {
     #[cfg(feature = "profiling")]
     let _start = Instant::now();
 
-    let result = if var_idx == 0 {
-        enumerate_next_with_refinement(next, env, ctx, action, results)
-    } else {
-        enumerate_next_impl(next, env, ctx, var_idx, action, results)
-    };
+    let result = enumerate_next_with_refinement(next, env, ctx, action, results);
 
     #[cfg(feature = "profiling")]
     PROFILING_STATS.with(|s| {
@@ -196,42 +191,6 @@ fn enumerate_next(
     });
 
     result
-}
-
-fn enumerate_next_impl(
-    next: &Expr,
-    env: &mut Env,
-    ctx: &EnumCtx<'_>,
-    var_idx: usize,
-    action: Option<Arc<str>>,
-    results: &mut Vec<Transition>,
-) -> Result<()> {
-    if var_idx == 0 && !evaluate_guards(next, env, ctx.defs)? {
-        return Ok(());
-    }
-
-    if var_idx >= ctx.vars.len() {
-        if eval_bool(next, env, ctx.defs)? {
-            results.push(Transition {
-                state: env_to_next_state(env, ctx.vars, ctx.primed_vars),
-                action: action.clone(),
-            });
-        }
-        return Ok(());
-    }
-
-    let var = &ctx.vars[var_idx];
-    let primed = &ctx.primed_vars[var_idx];
-
-    let candidates = infer_candidates(next, env, var, ctx.defs)?;
-
-    for candidate in candidates {
-        env.insert(primed.clone(), candidate);
-        enumerate_next_impl(next, env, ctx, var_idx + 1, action.clone(), results)?;
-    }
-    env.remove(primed);
-
-    Ok(())
 }
 
 fn enumerate_next_with_refinement(

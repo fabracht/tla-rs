@@ -594,7 +594,10 @@ fn test_cfg_twophase_auto_load() {
     )
     .expect("failed to apply config");
 
-    assert!(domains.contains_key("RM"), "RM should be set from cfg");
+    assert!(
+        domains.contains_key(&Arc::from("RM")),
+        "RM should be set from cfg"
+    );
 
     let result = check(&spec, &domains, &config);
     match result {

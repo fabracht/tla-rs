@@ -250,7 +250,7 @@ fn parse_constant_value_from_tokens(tokens: &[Token], pos: &mut usize) -> Result
 pub fn split_top_level(s: &str, delim: char) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();
-    let mut depth = 0;
+    let mut depth: u32 = 0;
     let mut in_string = false;
 
     for c in s.chars() {
@@ -263,7 +263,7 @@ pub fn split_top_level(s: &str, delim: char) -> Vec<String> {
             depth += 1;
             current.push(c);
         } else if c == '}' {
-            depth -= 1;
+            depth = depth.saturating_sub(1);
             current.push(c);
         } else if c == delim && depth == 0 {
             parts.push(current.trim().to_string());
@@ -438,7 +438,16 @@ pub fn apply_config(
 ) -> Result<Vec<String>, String> {
     let mut warnings = Vec::new();
 
+    let mut seen_constants: Vec<&Arc<str>> = Vec::new();
     for (name, val) in &cfg.constants {
+        if seen_constants.iter().any(|n| **n == *name) {
+            warnings.push(format!(
+                "duplicate CONSTANT '{}' in cfg file (last value wins)",
+                name
+            ));
+        } else {
+            seen_constants.push(name);
+        }
         if cli_constants.iter().any(|(n, _)| n == name) {
             continue;
         }

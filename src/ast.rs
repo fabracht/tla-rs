@@ -189,14 +189,17 @@ impl Env {
             if std::ptr::addr_eq(Arc::as_ptr(&self.entries[i].0), ptr)
                 || *self.entries[i].0 == **key
             {
-                return Some(self.entries.swap_remove(i).1);
+                return Some(self.entries.remove(i).1);
             }
         }
         None
     }
 
-    pub fn contains_key(&self, key: &str) -> bool {
-        self.entries.iter().any(|(k, _)| &**k == key)
+    pub fn contains_key(&self, key: &Arc<str>) -> bool {
+        let ptr = Arc::as_ptr(key);
+        self.entries
+            .iter()
+            .any(|(k, _)| std::ptr::addr_eq(Arc::as_ptr(k), ptr) || **k == **key)
     }
 
     pub fn keys(&self) -> impl Iterator<Item = &Arc<str>> {

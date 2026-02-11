@@ -601,7 +601,7 @@ fn main() -> ExitCode {
         let missing: Vec<_> = spec
             .constants
             .iter()
-            .filter(|c| !domains.contains_key(c.as_ref()))
+            .filter(|c| !domains.contains_key(c))
             .collect();
         if !missing.is_empty() {
             eprintln!(
@@ -1030,7 +1030,7 @@ fn main() -> ExitCode {
                 let missing: Vec<_> = spec
                     .constants
                     .iter()
-                    .filter(|c| !domains.contains_key(c.as_ref()))
+                    .filter(|c| !domains.contains_key(c))
                     .map(|c| c.as_ref())
                     .collect();
                 if !missing.is_empty() {
