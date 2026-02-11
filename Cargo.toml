@@ -1,6 +1,6 @@
 [package]
 name = "tla-checker"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "A TLA+ model checker written in Rust"
 license = "MIT OR Apache-2.0"
