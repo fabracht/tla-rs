@@ -3,7 +3,7 @@ use super::ast_utils::{
     collect_conjuncts, collect_disjuncts_with_labels, contains_prime_ref, format_expr_brief,
     infer_action_name,
 };
-use super::candidates::infer_candidates;
+use super::candidates::{infer_all_candidates, infer_candidates};
 use super::error::Result;
 #[cfg(feature = "profiling")]
 use super::global_state::PROFILING_STATS;
@@ -245,10 +245,7 @@ fn enumerate_next_with_refinement(
         return Ok(());
     }
 
-    let mut all_candidates: Vec<Vec<Value>> = Vec::with_capacity(ctx.vars.len());
-    for var in ctx.vars {
-        all_candidates.push(infer_candidates(next, env, var, ctx.defs)?);
-    }
+    let mut all_candidates = infer_all_candidates(next, env, ctx.vars, ctx.defs)?;
 
     for (i, primed) in ctx.primed_vars.iter().enumerate() {
         if let Some(first) = all_candidates[i].first() {
@@ -262,8 +259,8 @@ fn enumerate_next_with_refinement(
         changed = false;
         iterations += 1;
 
-        for (i, var) in ctx.vars.iter().enumerate() {
-            let new_candidates = infer_candidates(next, env, var, ctx.defs)?;
+        let new_all = infer_all_candidates(next, env, ctx.vars, ctx.defs)?;
+        for (i, new_candidates) in new_all.into_iter().enumerate() {
             if new_candidates != all_candidates[i] {
                 all_candidates[i] = new_candidates;
                 changed = true;
