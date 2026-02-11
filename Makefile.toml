@@ -1,3 +1,16 @@
 [tasks.install]
 command = "cargo"
-args = ["install", "--path", "."]
+args = ["install", "--path", ".", "--force"]
+
+[tasks.wasm]
+description = "Build wasm package"
+dependencies = ["wasm-build", "wasm-bindgen"]
+
+[tasks.wasm-build]
+command = "cargo"
+args = ["build", "--lib", "--release", "--target", "wasm32-unknown-unknown", "--features", "wasm"]
+
+[tasks.wasm-bindgen]
+command = "wasm-bindgen"
+args = ["--target", "web", "--out-dir", "pkg", "target/wasm32-unknown-unknown/release/tla_checker.wasm"]
+dependencies = ["wasm-build"]

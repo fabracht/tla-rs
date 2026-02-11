@@ -14,13 +14,15 @@ use indexmap::IndexSet;
 use crate::ast::{Env, Expr, Spec, State, Value};
 use crate::eval::{
     CheckerStats as EvalCheckerStats, Definitions, EvalContext, EvalError, eval, eval_with_context,
-    init_states, make_primed_names, next_states, set_parameterized_instances,
-    set_resolved_instances, update_checker_stats,
+    init_states, make_primed_names, next_states, update_checker_stats,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use crate::eval::{set_parameterized_instances, set_resolved_instances};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::export::export_dot;
 use crate::graph::StateGraph;
 use crate::liveness::{self, LivenessViolation};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::modules::{ModuleRegistry, resolve_instances};
 use crate::scc::compute_sccs;
 use crate::stdlib;
