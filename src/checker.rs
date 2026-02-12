@@ -392,10 +392,10 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         (trace, actions)
     };
 
-    let dot_cell: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
     let do_export = |states: &IndexSet<State>,
                      parent: &[Option<usize>],
-                     error_state: Option<usize>| {
+                     error_state: Option<usize>|
+     -> Option<String> {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(ref path) = config.export_dot_path {
             match File::create(path) {
@@ -414,9 +414,10 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         if config.export_dot_string {
             let mut buf = Vec::new();
             if export_dot(states, parent, &spec.vars, error_state, &mut buf).is_ok() {
-                *dot_cell.borrow_mut() = String::from_utf8(buf).ok();
+                return String::from_utf8(buf).ok();
             }
         }
+        None
     };
 
     while let Some((current_idx, depth)) = queue.pop_front() {
@@ -458,15 +459,13 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
         if stats.states_explored > config.max_states {
             stats.elapsed_secs = elapsed_secs();
-            do_export(&states, &parent, None);
-            stats.dot_graph = dot_cell.borrow_mut().take();
+            stats.dot_graph = do_export(&states, &parent, None);
             return CheckResult::MaxStatesExceeded(stats);
         }
 
         if depth > config.max_depth {
             stats.elapsed_secs = elapsed_secs();
-            do_export(&states, &parent, None);
-            stats.dot_graph = dot_cell.borrow_mut().take();
+            stats.dot_graph = do_export(&states, &parent, None);
             return CheckResult::MaxDepthExceeded(stats);
         }
 
@@ -512,8 +511,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                         let (trace, actions) =
                             reconstruct_trace(current_idx, &states, &parent, &parent_action);
                         stats.elapsed_secs = elapsed_secs();
-                        do_export(&states, &parent, Some(current_idx));
-                        stats.dot_graph = dot_cell.borrow_mut().take();
+                        stats.dot_graph = do_export(&states, &parent, Some(current_idx));
                         return CheckResult::InvariantViolation(
                             Counterexample {
                                 trace,
@@ -527,7 +525,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 Ok(_) => {
                     let (trace, _actions) =
                         reconstruct_trace(current_idx, &states, &parent, &parent_action);
-                    do_export(&states, &parent, Some(current_idx));
+                    let _ = do_export(&states, &parent, Some(current_idx));
                     return CheckResult::InvariantError(
                         EvalError::TypeMismatch {
                             expected: "Bool",
@@ -541,7 +539,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 Err(e) => {
                     let (trace, _actions) =
                         reconstruct_trace(current_idx, &states, &parent, &parent_action);
-                    do_export(&states, &parent, Some(current_idx));
+                    let _ = do_export(&states, &parent, Some(current_idx));
                     return CheckResult::InvariantError(e, trace);
                 }
             }
@@ -577,7 +575,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             Err(e) => {
                 let (trace, _actions) =
                     reconstruct_trace(current_idx, &states, &parent, &parent_action);
-                do_export(&states, &parent, Some(current_idx));
+                let _ = do_export(&states, &parent, Some(current_idx));
                 return CheckResult::NextError(e, trace);
             }
         };
@@ -585,8 +583,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         if successors.is_empty() && !config.allow_deadlock {
             let (trace, actions) = reconstruct_trace(current_idx, &states, &parent, &parent_action);
             stats.elapsed_secs = elapsed_secs();
-            do_export(&states, &parent, Some(current_idx));
-            stats.dot_graph = dot_cell.borrow_mut().take();
+            stats.dot_graph = do_export(&states, &parent, Some(current_idx));
             return CheckResult::Deadlock(trace, actions, stats);
         }
 
@@ -603,8 +600,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     }
 
     stats.elapsed_secs = elapsed_secs();
-    do_export(&states, &parent, None);
-    stats.dot_graph = dot_cell.borrow_mut().take();
+    stats.dot_graph = do_export(&states, &parent, None);
 
     if config.continue_on_violation {
         stats.violations_by_invariant = violation_counts_by_inv

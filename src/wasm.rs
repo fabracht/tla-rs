@@ -1,5 +1,3 @@
-#![cfg(feature = "wasm")]
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -10,6 +8,16 @@ use crate::ast::{Env, Value};
 use crate::checker::{CheckResult, CheckerConfig, check, format_eval_error, format_trace};
 use crate::config::{apply_config, parse_cfg};
 use crate::parser::parse;
+
+#[derive(Serialize, Deserialize, Default)]
+struct WasmCheckOptions {
+    constants: Option<BTreeMap<String, serde_json::Value>>,
+    cfg_source: Option<String>,
+    max_states: Option<usize>,
+    max_depth: Option<usize>,
+    allow_deadlock: Option<bool>,
+    export_dot: Option<bool>,
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct WasmCheckResult {
@@ -87,11 +95,7 @@ pub fn check_spec_with_config(
         domains.insert(Arc::from(k), json_to_value(v));
     }
 
-    let mut config = CheckerConfig::default();
-    config.max_states = max_states;
-    config.max_depth = max_depth;
-    config.allow_deadlock = allow_deadlock;
-    config.export_dot_string = export_dot;
+    let config = build_config(max_states, max_depth, allow_deadlock, export_dot);
 
     let result = check(&spec, &domains, &config);
 
@@ -148,11 +152,7 @@ pub fn check_spec_with_cfg(
         domains.insert(Arc::from(k), json_to_value(v));
     }
 
-    let mut config = CheckerConfig::default();
-    config.max_states = max_states;
-    config.max_depth = max_depth;
-    config.allow_deadlock = allow_deadlock;
-    config.export_dot_string = export_dot;
+    let mut config = build_config(max_states, max_depth, allow_deadlock, export_dot);
 
     let warnings = match apply_config(&cfg, &mut spec, &mut domains, &mut config, &[], &[], false) {
         Ok(w) => w,
@@ -175,6 +175,99 @@ pub fn check_spec_with_cfg(
     serde_json::to_string(&result_to_wasm(result, &spec.vars, warnings)).unwrap_or_default()
 }
 
+#[wasm_bindgen]
+pub fn check_spec_with_options(spec_source: &str, options_json: &str) -> String {
+    let options: WasmCheckOptions = match serde_json::from_str(options_json) {
+        Ok(o) => o,
+        Err(e) => {
+            return serde_json::to_string(&WasmCheckResult {
+                success: false,
+                error_type: Some("OptionsError".into()),
+                error_message: Some(format!("Invalid options JSON: {e}")),
+                states_explored: 0,
+                trace: None,
+                dot: None,
+                warnings: vec![],
+            })
+            .unwrap_or_default();
+        }
+    };
+
+    let mut spec = match parse(spec_source) {
+        Ok(s) => s,
+        Err(e) => {
+            return serde_json::to_string(&WasmCheckResult {
+                success: false,
+                error_type: Some("ParseError".into()),
+                error_message: Some(format!("{e:?}")),
+                states_explored: 0,
+                trace: None,
+                dot: None,
+                warnings: vec![],
+            })
+            .unwrap_or_default();
+        }
+    };
+
+    let mut domains = Env::new();
+    if let Some(constants) = options.constants {
+        for (k, v) in constants {
+            domains.insert(Arc::from(k), json_to_value(v));
+        }
+    }
+
+    let mut config = CheckerConfig::default();
+    if let Some(v) = options.max_states {
+        config.max_states = v;
+    }
+    if let Some(v) = options.max_depth {
+        config.max_depth = v;
+    }
+    if let Some(v) = options.allow_deadlock {
+        config.allow_deadlock = v;
+    }
+    if let Some(v) = options.export_dot {
+        config.export_dot_string = v;
+    }
+
+    let mut warnings = Vec::new();
+    if let Some(ref cfg_source) = options.cfg_source {
+        let cfg = match parse_cfg(cfg_source) {
+            Ok(c) => c,
+            Err(e) => {
+                return serde_json::to_string(&WasmCheckResult {
+                    success: false,
+                    error_type: Some("ConfigError".into()),
+                    error_message: Some(e),
+                    states_explored: 0,
+                    trace: None,
+                    dot: None,
+                    warnings: vec![],
+                })
+                .unwrap_or_default();
+            }
+        };
+        match apply_config(&cfg, &mut spec, &mut domains, &mut config, &[], &[], false) {
+            Ok(w) => warnings = w,
+            Err(e) => {
+                return serde_json::to_string(&WasmCheckResult {
+                    success: false,
+                    error_type: Some("ConfigError".into()),
+                    error_message: Some(e),
+                    states_explored: 0,
+                    trace: None,
+                    dot: None,
+                    warnings: vec![],
+                })
+                .unwrap_or_default();
+            }
+        }
+    }
+
+    let result = check(&spec, &domains, &config);
+    serde_json::to_string(&result_to_wasm(result, &spec.vars, warnings)).unwrap_or_default()
+}
+
 fn json_to_value(v: serde_json::Value) -> Value {
     match v {
         serde_json::Value::Bool(b) => Value::Bool(b),
@@ -193,6 +286,21 @@ fn json_to_value(v: serde_json::Value) -> Value {
             Value::Record(rec)
         }
         serde_json::Value::Null => Value::Bool(false),
+    }
+}
+
+fn build_config(
+    max_states: usize,
+    max_depth: usize,
+    allow_deadlock: bool,
+    export_dot: bool,
+) -> CheckerConfig {
+    CheckerConfig {
+        max_states,
+        max_depth,
+        allow_deadlock,
+        export_dot_string: export_dot,
+        ..Default::default()
     }
 }
 
