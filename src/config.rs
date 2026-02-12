@@ -109,6 +109,12 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
             i += 1;
             let mut s = String::new();
             while i < chars.len() && chars[i] != '"' {
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    s.push(chars[i]);
+                    s.push(chars[i + 1]);
+                    i += 2;
+                    continue;
+                }
                 s.push(chars[i]);
                 i += 1;
             }
@@ -252,12 +258,24 @@ pub fn split_top_level(s: &str, delim: char) -> Vec<String> {
     let mut current = String::new();
     let mut depth: u32 = 0;
     let mut in_string = false;
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
 
-    for c in s.chars() {
-        if c == '"' {
-            in_string = !in_string;
+    while i < chars.len() {
+        let c = chars[i];
+        if in_string {
+            if c == '\\' && i + 1 < chars.len() {
+                current.push(c);
+                current.push(chars[i + 1]);
+                i += 2;
+                continue;
+            }
+            if c == '"' {
+                in_string = false;
+            }
             current.push(c);
-        } else if in_string {
+        } else if c == '"' {
+            in_string = true;
             current.push(c);
         } else if c == '{' {
             depth += 1;
@@ -271,6 +289,7 @@ pub fn split_top_level(s: &str, delim: char) -> Vec<String> {
         } else {
             current.push(c);
         }
+        i += 1;
     }
     if !current.trim().is_empty() {
         parts.push(current.trim().to_string());
@@ -588,25 +607,28 @@ pub fn apply_config(
     Ok(warnings)
 }
 
+fn find_box_action(expr: &Expr) -> Option<Expr> {
+    match expr {
+        Expr::BoxAction(next, _) => Some(*next.clone()),
+        Expr::And(l, r) => find_box_action(l).or_else(|| find_box_action(r)),
+        _ => None,
+    }
+}
+
+fn leftmost_conjunct(expr: &Expr) -> &Expr {
+    match expr {
+        Expr::And(l, _) => leftmost_conjunct(l),
+        other => other,
+    }
+}
+
 fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<(), String> {
     match spec.definitions.get(spec_name.as_ref()) {
         Some((params, expr)) if params.is_empty() => {
-            if let Expr::And(init_part, temporal_part) = expr {
-                spec.init = Some(*init_part.clone());
-                if let Expr::BoxAction(next_expr, _) = temporal_part.as_ref() {
-                    spec.next = Some(*next_expr.clone());
-                    return Ok(());
-                }
-                if let Expr::And(box_part, _fairness) = temporal_part.as_ref()
-                    && let Expr::BoxAction(next_expr, _) = box_part.as_ref()
-                {
-                    spec.next = Some(*next_expr.clone());
-                    return Ok(());
-                }
-                return Err(format!(
-                    "SPECIFICATION '{}': could not extract Next from temporal formula",
-                    spec_name
-                ));
+            if let Some(next_expr) = find_box_action(expr) {
+                spec.init = Some(leftmost_conjunct(expr).clone());
+                spec.next = Some(next_expr);
+                return Ok(());
             }
             Err(format!(
                 "SPECIFICATION '{}': expected Init /\\ [][Next]_vars form",
@@ -868,5 +890,63 @@ mod tests {
         expected.insert(Value::Str("b".into()));
         expected.insert(Value::Str("c".into()));
         assert_eq!(cfg.constants[0].1, Value::Set(expected));
+    }
+
+    #[test]
+    fn parse_escaped_quotes_in_string() {
+        let input = r#"CONSTANT S = {"hello\"world", "ok"}"#;
+        let cfg = parse_cfg(input).unwrap();
+        let mut expected = BTreeSet::new();
+        expected.insert(Value::Str(r#"hello\"world"#.into()));
+        expected.insert(Value::Str("ok".into()));
+        assert_eq!(cfg.constants[0].1, Value::Set(expected));
+    }
+
+    #[test]
+    fn split_top_level_escaped_quotes() {
+        let result = split_top_level(r#""hello\"world","ok""#, ',');
+        assert_eq!(result, vec![r#""hello\"world""#, r#""ok""#]);
+    }
+
+    #[test]
+    fn apply_config_symmetry_permutations() {
+        let mut spec = Spec {
+            vars: vec![],
+            init: None,
+            next: None,
+            invariants: vec![],
+            invariant_names: vec![],
+            definitions: std::collections::BTreeMap::new(),
+            instances: vec![],
+            extends: vec![],
+            fairness: vec![],
+            assumes: vec![],
+            liveness_properties: vec![],
+            constants: vec![],
+        };
+        spec.definitions.insert(
+            Arc::from("Perms"),
+            (
+                vec![],
+                Expr::Permutations(Box::new(Expr::Var(Arc::from("RM")))),
+            ),
+        );
+
+        let cfg = parse_cfg("SYMMETRY Perms").unwrap();
+        let mut domains = Env::new();
+        let mut checker_config = CheckerConfig::default();
+
+        apply_config(
+            &cfg,
+            &mut spec,
+            &mut domains,
+            &mut checker_config,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(checker_config.symmetric_constants, vec![Arc::from("RM")]);
     }
 }

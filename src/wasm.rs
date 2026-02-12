@@ -19,6 +19,7 @@ pub struct WasmCheckResult {
     pub states_explored: usize,
     pub trace: Option<Vec<String>>,
     pub dot: Option<String>,
+    pub warnings: Vec<String>,
 }
 
 #[wasm_bindgen]
@@ -33,6 +34,7 @@ pub fn check_spec(spec_source: &str, constants_json: &str) -> String {
                 states_explored: 0,
                 trace: None,
                 dot: None,
+                warnings: vec![],
             })
             .unwrap_or_default();
         }
@@ -49,7 +51,7 @@ pub fn check_spec(spec_source: &str, constants_json: &str) -> String {
     let config = CheckerConfig::default();
     let result = check(&spec, &domains, &config);
 
-    serde_json::to_string(&result_to_wasm(result, &spec.vars)).unwrap_or_default()
+    serde_json::to_string(&result_to_wasm(result, &spec.vars, vec![])).unwrap_or_default()
 }
 
 #[wasm_bindgen]
@@ -71,6 +73,7 @@ pub fn check_spec_with_config(
                 states_explored: 0,
                 trace: None,
                 dot: None,
+                warnings: vec![],
             })
             .unwrap_or_default();
         }
@@ -92,7 +95,7 @@ pub fn check_spec_with_config(
 
     let result = check(&spec, &domains, &config);
 
-    serde_json::to_string(&result_to_wasm(result, &spec.vars)).unwrap_or_default()
+    serde_json::to_string(&result_to_wasm(result, &spec.vars, vec![])).unwrap_or_default()
 }
 
 #[wasm_bindgen]
@@ -115,6 +118,7 @@ pub fn check_spec_with_cfg(
                 states_explored: 0,
                 trace: None,
                 dot: None,
+                warnings: vec![],
             })
             .unwrap_or_default();
         }
@@ -130,6 +134,7 @@ pub fn check_spec_with_cfg(
                 states_explored: 0,
                 trace: None,
                 dot: None,
+                warnings: vec![],
             })
             .unwrap_or_default();
         }
@@ -149,21 +154,25 @@ pub fn check_spec_with_cfg(
     config.allow_deadlock = allow_deadlock;
     config.export_dot_string = export_dot;
 
-    if let Err(e) = apply_config(&cfg, &mut spec, &mut domains, &mut config, &[], &[], false) {
-        return serde_json::to_string(&WasmCheckResult {
-            success: false,
-            error_type: Some("ConfigError".into()),
-            error_message: Some(e),
-            states_explored: 0,
-            trace: None,
-            dot: None,
-        })
-        .unwrap_or_default();
-    }
+    let warnings = match apply_config(&cfg, &mut spec, &mut domains, &mut config, &[], &[], false) {
+        Ok(w) => w,
+        Err(e) => {
+            return serde_json::to_string(&WasmCheckResult {
+                success: false,
+                error_type: Some("ConfigError".into()),
+                error_message: Some(e),
+                states_explored: 0,
+                trace: None,
+                dot: None,
+                warnings: vec![],
+            })
+            .unwrap_or_default();
+        }
+    };
 
     let result = check(&spec, &domains, &config);
 
-    serde_json::to_string(&result_to_wasm(result, &spec.vars)).unwrap_or_default()
+    serde_json::to_string(&result_to_wasm(result, &spec.vars, warnings)).unwrap_or_default()
 }
 
 fn json_to_value(v: serde_json::Value) -> Value {
@@ -187,7 +196,11 @@ fn json_to_value(v: serde_json::Value) -> Value {
     }
 }
 
-fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
+fn result_to_wasm(
+    result: CheckResult,
+    vars: &[Arc<str>],
+    warnings: Vec<String>,
+) -> WasmCheckResult {
     match result {
         CheckResult::Ok(stats) => WasmCheckResult {
             success: true,
@@ -196,6 +209,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             states_explored: stats.states_explored,
             trace: None,
             dot: stats.dot_graph,
+            warnings,
         },
         CheckResult::InvariantViolation(ce, stats) => WasmCheckResult {
             success: false,
@@ -204,6 +218,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             states_explored: stats.states_explored,
             trace: Some(vec![format_trace(&ce.trace, vars)]),
             dot: stats.dot_graph,
+            warnings,
         },
         CheckResult::LivenessViolation(violation, stats) => WasmCheckResult {
             success: false,
@@ -218,6 +233,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
                 format_trace(&violation.cycle, vars),
             ]),
             dot: stats.dot_graph,
+            warnings,
         },
         CheckResult::Deadlock(trace, _, stats) => WasmCheckResult {
             success: false,
@@ -226,6 +242,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             states_explored: stats.states_explored,
             trace: Some(vec![format_trace(&trace, vars)]),
             dot: stats.dot_graph,
+            warnings,
         },
         CheckResult::InitError(e) => WasmCheckResult {
             success: false,
@@ -234,6 +251,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             states_explored: 0,
             trace: None,
             dot: None,
+            warnings,
         },
         CheckResult::NextError(e, trace) => WasmCheckResult {
             success: false,
@@ -242,6 +260,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             states_explored: 0,
             trace: Some(vec![format_trace(&trace, vars)]),
             dot: None,
+            warnings,
         },
         CheckResult::InvariantError(e, trace) => WasmCheckResult {
             success: false,
@@ -250,6 +269,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             states_explored: 0,
             trace: Some(vec![format_trace(&trace, vars)]),
             dot: None,
+            warnings,
         },
         CheckResult::AssumeViolation(idx) => WasmCheckResult {
             success: false,
@@ -258,6 +278,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             states_explored: 0,
             trace: None,
             dot: None,
+            warnings,
         },
         CheckResult::AssumeError(idx, e) => WasmCheckResult {
             success: false,
@@ -266,6 +287,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             states_explored: 0,
             trace: None,
             dot: None,
+            warnings,
         },
         CheckResult::MaxStatesExceeded(stats) => WasmCheckResult {
             success: false,
@@ -274,6 +296,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             states_explored: stats.states_explored,
             trace: None,
             dot: stats.dot_graph,
+            warnings,
         },
         CheckResult::MaxDepthExceeded(stats) => WasmCheckResult {
             success: false,
@@ -282,6 +305,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             states_explored: stats.states_explored,
             trace: None,
             dot: stats.dot_graph,
+            warnings,
         },
         CheckResult::NoInitialStates => WasmCheckResult {
             success: false,
@@ -290,6 +314,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             states_explored: 0,
             trace: None,
             dot: None,
+            warnings,
         },
         CheckResult::MissingConstants(missing) => WasmCheckResult {
             success: false,
@@ -305,6 +330,7 @@ fn result_to_wasm(result: CheckResult, vars: &[Arc<str>]) -> WasmCheckResult {
             states_explored: 0,
             trace: None,
             dot: None,
+            warnings,
         },
     }
 }

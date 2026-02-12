@@ -116,11 +116,15 @@ impl Parser {
                 let list_col = self.current_column();
                 let list_line = self.current_line();
                 self.advance();
-                let first = self.parse_comparison()?;
+                let label = self.consume_label();
+                let first = self.parse_and_item(list_col)?;
+                let first = super::expr::wrap_with_label(first, label);
                 let mut result = first;
                 while *self.peek() == Token::And && !self.col_mismatch(list_col, list_line) {
                     self.advance();
-                    let next = self.parse_comparison()?;
+                    let label = self.consume_label();
+                    let next = self.parse_and_item(list_col)?;
+                    let next = super::expr::wrap_with_label(next, label);
                     result = Expr::And(Box::new(result), Box::new(next));
                 }
                 Ok(result)
@@ -129,11 +133,15 @@ impl Parser {
                 let list_col = self.current_column();
                 let list_line = self.current_line();
                 self.advance();
-                let first = self.parse_comparison()?;
+                let label = self.consume_label();
+                let first = self.parse_and_conjunct(Some(list_col))?;
+                let first = super::expr::wrap_with_label(first, label);
                 let mut result = first;
                 while *self.peek() == Token::Or && !self.col_mismatch(list_col, list_line) {
                     self.advance();
-                    let next = self.parse_comparison()?;
+                    let label = self.consume_label();
+                    let next = self.parse_and_conjunct(Some(list_col))?;
+                    let next = super::expr::wrap_with_label(next, label);
                     result = Expr::Or(Box::new(result), Box::new(next));
                 }
                 Ok(result)
