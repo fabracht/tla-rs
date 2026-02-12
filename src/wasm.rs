@@ -19,7 +19,7 @@ struct WasmCheckOptions {
     export_dot: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct WasmCheckResult {
     pub success: bool,
     pub error_type: Option<String>,
@@ -34,18 +34,7 @@ pub struct WasmCheckResult {
 pub fn check_spec(spec_source: &str, constants_json: &str) -> String {
     let spec = match parse(spec_source) {
         Ok(s) => s,
-        Err(e) => {
-            return serde_json::to_string(&WasmCheckResult {
-                success: false,
-                error_type: Some("ParseError".into()),
-                error_message: Some(format!("{:?}", e)),
-                states_explored: 0,
-                trace: None,
-                dot: None,
-                warnings: vec![],
-            })
-            .unwrap_or_default();
-        }
+        Err(e) => return wasm_error("ParseError", format!("{e:?}")),
     };
 
     let constants: BTreeMap<String, serde_json::Value> =
@@ -73,18 +62,7 @@ pub fn check_spec_with_config(
 ) -> String {
     let spec = match parse(spec_source) {
         Ok(s) => s,
-        Err(e) => {
-            return serde_json::to_string(&WasmCheckResult {
-                success: false,
-                error_type: Some("ParseError".into()),
-                error_message: Some(format!("{:?}", e)),
-                states_explored: 0,
-                trace: None,
-                dot: None,
-                warnings: vec![],
-            })
-            .unwrap_or_default();
-        }
+        Err(e) => return wasm_error("ParseError", format!("{e:?}")),
     };
 
     let constants: BTreeMap<String, serde_json::Value> =
@@ -114,61 +92,28 @@ pub fn check_spec_with_cfg(
 ) -> String {
     let mut spec = match parse(spec_source) {
         Ok(s) => s,
-        Err(e) => {
-            return serde_json::to_string(&WasmCheckResult {
-                success: false,
-                error_type: Some("ParseError".into()),
-                error_message: Some(format!("{:?}", e)),
-                states_explored: 0,
-                trace: None,
-                dot: None,
-                warnings: vec![],
-            })
-            .unwrap_or_default();
-        }
+        Err(e) => return wasm_error("ParseError", format!("{e:?}")),
     };
 
     let cfg = match parse_cfg(cfg_source) {
         Ok(c) => c,
-        Err(e) => {
-            return serde_json::to_string(&WasmCheckResult {
-                success: false,
-                error_type: Some("ConfigError".into()),
-                error_message: Some(e),
-                states_explored: 0,
-                trace: None,
-                dot: None,
-                warnings: vec![],
-            })
-            .unwrap_or_default();
-        }
+        Err(e) => return wasm_error("ConfigError", e),
     };
 
     let constants: BTreeMap<String, serde_json::Value> =
         serde_json::from_str(constants_json).unwrap_or_default();
 
     let mut domains = Env::new();
-    for (k, v) in constants {
-        domains.insert(Arc::from(k), json_to_value(v));
-    }
-
     let mut config = build_config(max_states, max_depth, allow_deadlock, export_dot);
 
     let warnings = match apply_config(&cfg, &mut spec, &mut domains, &mut config, &[], &[], false) {
         Ok(w) => w,
-        Err(e) => {
-            return serde_json::to_string(&WasmCheckResult {
-                success: false,
-                error_type: Some("ConfigError".into()),
-                error_message: Some(e),
-                states_explored: 0,
-                trace: None,
-                dot: None,
-                warnings: vec![],
-            })
-            .unwrap_or_default();
-        }
+        Err(e) => return wasm_error("ConfigError", e),
     };
+
+    for (k, v) in constants {
+        domains.insert(Arc::from(k), json_to_value(v));
+    }
 
     let result = check(&spec, &domains, &config);
 
@@ -179,43 +124,15 @@ pub fn check_spec_with_cfg(
 pub fn check_spec_with_options(spec_source: &str, options_json: &str) -> String {
     let options: WasmCheckOptions = match serde_json::from_str(options_json) {
         Ok(o) => o,
-        Err(e) => {
-            return serde_json::to_string(&WasmCheckResult {
-                success: false,
-                error_type: Some("OptionsError".into()),
-                error_message: Some(format!("Invalid options JSON: {e}")),
-                states_explored: 0,
-                trace: None,
-                dot: None,
-                warnings: vec![],
-            })
-            .unwrap_or_default();
-        }
+        Err(e) => return wasm_error("OptionsError", format!("Invalid options JSON: {e}")),
     };
 
     let mut spec = match parse(spec_source) {
         Ok(s) => s,
-        Err(e) => {
-            return serde_json::to_string(&WasmCheckResult {
-                success: false,
-                error_type: Some("ParseError".into()),
-                error_message: Some(format!("{e:?}")),
-                states_explored: 0,
-                trace: None,
-                dot: None,
-                warnings: vec![],
-            })
-            .unwrap_or_default();
-        }
+        Err(e) => return wasm_error("ParseError", format!("{e:?}")),
     };
 
     let mut domains = Env::new();
-    if let Some(constants) = options.constants {
-        for (k, v) in constants {
-            domains.insert(Arc::from(k), json_to_value(v));
-        }
-    }
-
     let mut config = CheckerConfig::default();
     if let Some(v) = options.max_states {
         config.max_states = v;
@@ -234,38 +151,31 @@ pub fn check_spec_with_options(spec_source: &str, options_json: &str) -> String 
     if let Some(ref cfg_source) = options.cfg_source {
         let cfg = match parse_cfg(cfg_source) {
             Ok(c) => c,
-            Err(e) => {
-                return serde_json::to_string(&WasmCheckResult {
-                    success: false,
-                    error_type: Some("ConfigError".into()),
-                    error_message: Some(e),
-                    states_explored: 0,
-                    trace: None,
-                    dot: None,
-                    warnings: vec![],
-                })
-                .unwrap_or_default();
-            }
+            Err(e) => return wasm_error("ConfigError", e),
         };
         match apply_config(&cfg, &mut spec, &mut domains, &mut config, &[], &[], false) {
             Ok(w) => warnings = w,
-            Err(e) => {
-                return serde_json::to_string(&WasmCheckResult {
-                    success: false,
-                    error_type: Some("ConfigError".into()),
-                    error_message: Some(e),
-                    states_explored: 0,
-                    trace: None,
-                    dot: None,
-                    warnings: vec![],
-                })
-                .unwrap_or_default();
-            }
+            Err(e) => return wasm_error("ConfigError", e),
+        }
+    }
+
+    if let Some(constants) = options.constants {
+        for (k, v) in constants {
+            domains.insert(Arc::from(k), json_to_value(v));
         }
     }
 
     let result = check(&spec, &domains, &config);
     serde_json::to_string(&result_to_wasm(result, &spec.vars, warnings)).unwrap_or_default()
+}
+
+fn wasm_error(error_type: &str, message: String) -> String {
+    serde_json::to_string(&WasmCheckResult {
+        error_type: Some(error_type.into()),
+        error_message: Some(message),
+        ..Default::default()
+    })
+    .unwrap_or_default()
 }
 
 fn json_to_value(v: serde_json::Value) -> Value {
@@ -440,5 +350,105 @@ fn result_to_wasm(
             dot: None,
             warnings,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const COUNTER_SPEC: &str = "\
+VARIABLES count
+
+Init == count = 0
+
+Next == \\/ (count < 3 /\\ count' = count + 1)
+        \\/ (count = 3 /\\ count' = 0)
+
+Inv == count >= 0 /\\ count <= 3
+";
+
+    const COUNTER_WITH_MAX_SPEC: &str = "\
+CONSTANT MAX
+
+VARIABLES count
+
+Init == count = 0
+
+Next == \\/ (count < MAX /\\ count' = count + 1)
+        \\/ (count = MAX /\\ count' = 0)
+
+Inv == count >= 0 /\\ count <= MAX
+";
+
+    fn parse_result(json: &str) -> WasmCheckResult {
+        serde_json::from_str(json).expect("valid JSON result")
+    }
+
+    #[test]
+    fn test_check_spec_basic() {
+        let result = parse_result(&check_spec(COUNTER_SPEC, "{}"));
+        assert!(result.success);
+        assert!(result.states_explored > 0);
+        assert!(result.error_type.is_none());
+    }
+
+    #[test]
+    fn test_check_spec_with_options_constants() {
+        let options = r#"{"constants": {"MAX": 5}}"#;
+        let result = parse_result(&check_spec_with_options(COUNTER_WITH_MAX_SPEC, options));
+        assert!(result.success);
+        assert!(result.states_explored > 0);
+    }
+
+    #[test]
+    fn test_check_spec_with_options_cfg_source() {
+        let cfg = "CONSTANT MAX = 3\n";
+        let options = serde_json::json!({ "cfg_source": cfg }).to_string();
+        let result = parse_result(&check_spec_with_options(COUNTER_WITH_MAX_SPEC, &options));
+        assert!(result.success);
+        assert!(result.states_explored > 0);
+    }
+
+    #[test]
+    fn test_options_constants_override_cfg() {
+        let cfg = "CONSTANT MAX = 2\n";
+        let options = serde_json::json!({
+            "cfg_source": cfg,
+            "constants": {"MAX": 5}
+        })
+        .to_string();
+        let result_override =
+            parse_result(&check_spec_with_options(COUNTER_WITH_MAX_SPEC, &options));
+        assert!(result_override.success);
+
+        let options_cfg_only = serde_json::json!({ "cfg_source": cfg }).to_string();
+        let result_cfg = parse_result(&check_spec_with_options(
+            COUNTER_WITH_MAX_SPEC,
+            &options_cfg_only,
+        ));
+        assert!(result_cfg.success);
+
+        assert!(
+            result_override.states_explored > result_cfg.states_explored,
+            "MAX=5 should produce more states than MAX=2"
+        );
+    }
+
+    #[test]
+    fn test_check_spec_with_options_invalid_json() {
+        let result = parse_result(&check_spec_with_options(COUNTER_SPEC, "not json"));
+        assert!(!result.success);
+        assert_eq!(result.error_type.as_deref(), Some("OptionsError"));
+    }
+
+    #[test]
+    fn test_check_spec_with_options_export_dot() {
+        let options = r#"{"export_dot": true}"#;
+        let result = parse_result(&check_spec_with_options(COUNTER_SPEC, options));
+        assert!(result.success);
+        assert!(result.dot.is_some());
+        let dot = result.dot.unwrap();
+        assert!(dot.contains("digraph"));
     }
 }
