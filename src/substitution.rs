@@ -508,34 +508,66 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
             Expr::LabeledAction(label.clone(), Box::new(substitute_expr(action, subs)))
         }
 
+        Expr::Print(a, b) => Expr::Print(
+            Box::new(substitute_expr(a, subs)),
+            Box::new(substitute_expr(b, subs)),
+        ),
+        Expr::PrintT(e) => Expr::PrintT(Box::new(substitute_expr(e, subs))),
+        Expr::Assert(a, b) => Expr::Assert(
+            Box::new(substitute_expr(a, subs)),
+            Box::new(substitute_expr(b, subs)),
+        ),
+        Expr::Permutations(e) => Expr::Permutations(Box::new(substitute_expr(e, subs))),
+        Expr::SortSeq(a, b) => Expr::SortSeq(
+            Box::new(substitute_expr(a, subs)),
+            Box::new(substitute_expr(b, subs)),
+        ),
+        Expr::TLCToString(e) => Expr::TLCToString(Box::new(substitute_expr(e, subs))),
+        Expr::RandomElement(e) => Expr::RandomElement(Box::new(substitute_expr(e, subs))),
+        Expr::TLCGet(e) => Expr::TLCGet(Box::new(substitute_expr(e, subs))),
+        Expr::TLCSet(a, b) => Expr::TLCSet(
+            Box::new(substitute_expr(a, subs)),
+            Box::new(substitute_expr(b, subs)),
+        ),
+        Expr::TLCEval(e) => Expr::TLCEval(Box::new(substitute_expr(e, subs))),
+
+        Expr::IsABag(e) => Expr::IsABag(Box::new(substitute_expr(e, subs))),
+        Expr::BagToSet(e) => Expr::BagToSet(Box::new(substitute_expr(e, subs))),
+        Expr::SetToBag(e) => Expr::SetToBag(Box::new(substitute_expr(e, subs))),
+        Expr::BagIn(l, r) => Expr::BagIn(
+            Box::new(substitute_expr(l, subs)),
+            Box::new(substitute_expr(r, subs)),
+        ),
+        Expr::BagAdd(l, r) => Expr::BagAdd(
+            Box::new(substitute_expr(l, subs)),
+            Box::new(substitute_expr(r, subs)),
+        ),
+        Expr::BagSub(l, r) => Expr::BagSub(
+            Box::new(substitute_expr(l, subs)),
+            Box::new(substitute_expr(r, subs)),
+        ),
+        Expr::BagUnion(e) => Expr::BagUnion(Box::new(substitute_expr(e, subs))),
+        Expr::SqSubseteq(l, r) => Expr::SqSubseteq(
+            Box::new(substitute_expr(l, subs)),
+            Box::new(substitute_expr(r, subs)),
+        ),
+        Expr::SubBag(e) => Expr::SubBag(Box::new(substitute_expr(e, subs))),
+        Expr::BagOfAll(l, r) => Expr::BagOfAll(
+            Box::new(substitute_expr(l, subs)),
+            Box::new(substitute_expr(r, subs)),
+        ),
+        Expr::BagCardinality(e) => Expr::BagCardinality(Box::new(substitute_expr(e, subs))),
+        Expr::CopiesIn(l, r) => Expr::CopiesIn(
+            Box::new(substitute_expr(l, subs)),
+            Box::new(substitute_expr(r, subs)),
+        ),
+
         Expr::Lit(_)
         | Expr::OldValue
-        | Expr::Print(_, _)
-        | Expr::PrintT(_)
-        | Expr::Assert(_, _)
         | Expr::JavaTime
         | Expr::SystemTime
-        | Expr::Permutations(_)
-        | Expr::SortSeq(_, _)
-        | Expr::TLCToString(_)
-        | Expr::RandomElement(_)
-        | Expr::TLCGet(_)
-        | Expr::TLCSet(_, _)
         | Expr::Any
-        | Expr::TLCEval(_)
-        | Expr::IsABag(_)
-        | Expr::BagToSet(_)
-        | Expr::SetToBag(_)
-        | Expr::BagIn(_, _)
-        | Expr::EmptyBag
-        | Expr::BagAdd(_, _)
-        | Expr::BagSub(_, _)
-        | Expr::BagUnion(_)
-        | Expr::SqSubseteq(_, _)
-        | Expr::SubBag(_)
-        | Expr::BagOfAll(_, _)
-        | Expr::BagCardinality(_)
-        | Expr::CopiesIn(_, _) => expr.clone(),
+        | Expr::EmptyBag => expr.clone(),
     }
 }
 

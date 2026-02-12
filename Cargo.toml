@@ -8,6 +8,9 @@ repository = "https://github.com/fabracht/tla-rs"
 keywords = ["tla", "model-checking", "formal-verification"]
 categories = ["command-line-utilities", "development-tools"]
 
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
 [lib]
 name = "tla_checker"
 path = "src/lib.rs"

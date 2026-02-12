@@ -18,7 +18,6 @@ use crate::eval::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::eval::{set_parameterized_instances, set_resolved_instances};
-#[cfg(not(target_arch = "wasm32"))]
 use crate::export::export_dot;
 use crate::graph::StateGraph;
 use crate::liveness::{self, LivenessViolation};
@@ -43,6 +42,7 @@ pub struct CheckerConfig {
     pub json_output: bool,
     pub continue_on_violation: bool,
     pub count_properties: Vec<Arc<str>>,
+    pub export_dot_string: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pub spec_path: Option<PathBuf>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -65,6 +65,7 @@ impl Default for CheckerConfig {
             json_output: false,
             continue_on_violation: false,
             count_properties: Vec::new(),
+            export_dot_string: false,
             #[cfg(not(target_arch = "wasm32"))]
             spec_path: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -96,6 +97,7 @@ pub struct CheckStats {
     pub violation_traces: Vec<Counterexample>,
     pub violations_by_invariant: Vec<(Option<Arc<str>>, usize)>,
     pub property_stats: Vec<PropertyStats>,
+    pub dot_graph: Option<String>,
 }
 
 #[derive(Debug)]
@@ -317,6 +319,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         violation_traces: Vec::new(),
         violations_by_invariant: Vec::new(),
         property_stats: Vec::new(),
+        dot_graph: None,
     };
 
     let base_env: Env = domains.clone();
@@ -389,10 +392,11 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         (trace, actions)
     };
 
-    #[cfg(not(target_arch = "wasm32"))]
+    let dot_cell: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
     let do_export = |states: &IndexSet<State>,
                      parent: &[Option<usize>],
                      error_state: Option<usize>| {
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(ref path) = config.export_dot_path {
             match File::create(path) {
                 Ok(file) => {
@@ -407,10 +411,13 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 Err(e) => eprintln!("  Failed to create DOT file: {}", e),
             }
         }
+        if config.export_dot_string {
+            let mut buf = Vec::new();
+            if export_dot(states, parent, &spec.vars, error_state, &mut buf).is_ok() {
+                *dot_cell.borrow_mut() = String::from_utf8(buf).ok();
+            }
+        }
     };
-    #[cfg(target_arch = "wasm32")]
-    let do_export =
-        |_states: &IndexSet<State>, _parent: &[Option<usize>], _error_state: Option<usize>| {};
 
     while let Some((current_idx, depth)) = queue.pop_front() {
         stats.states_explored += 1;
@@ -452,12 +459,14 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         if stats.states_explored > config.max_states {
             stats.elapsed_secs = elapsed_secs();
             do_export(&states, &parent, None);
+            stats.dot_graph = dot_cell.borrow_mut().take();
             return CheckResult::MaxStatesExceeded(stats);
         }
 
         if depth > config.max_depth {
             stats.elapsed_secs = elapsed_secs();
             do_export(&states, &parent, None);
+            stats.dot_graph = dot_cell.borrow_mut().take();
             return CheckResult::MaxDepthExceeded(stats);
         }
 
@@ -504,6 +513,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                             reconstruct_trace(current_idx, &states, &parent, &parent_action);
                         stats.elapsed_secs = elapsed_secs();
                         do_export(&states, &parent, Some(current_idx));
+                        stats.dot_graph = dot_cell.borrow_mut().take();
                         return CheckResult::InvariantViolation(
                             Counterexample {
                                 trace,
@@ -576,6 +586,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             let (trace, actions) = reconstruct_trace(current_idx, &states, &parent, &parent_action);
             stats.elapsed_secs = elapsed_secs();
             do_export(&states, &parent, Some(current_idx));
+            stats.dot_graph = dot_cell.borrow_mut().take();
             return CheckResult::Deadlock(trace, actions, stats);
         }
 
@@ -593,6 +604,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
     stats.elapsed_secs = elapsed_secs();
     do_export(&states, &parent, None);
+    stats.dot_graph = dot_cell.borrow_mut().take();
 
     if config.continue_on_violation {
         stats.violations_by_invariant = violation_counts_by_inv
@@ -1320,6 +1332,45 @@ mod tests {
             CheckResult::Ok(stats) => {
                 assert_eq!(stats.states_explored, 4);
                 assert_eq!(stats.transitions, 3);
+            }
+            other => panic!("expected Ok, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn export_dot_string_produces_graph() {
+        let spec = Spec {
+            vars: vec![var("count")],
+            constants: vec![],
+            extends: vec![],
+            definitions: BTreeMap::new(),
+            assumes: vec![],
+            instances: vec![],
+            init: Some(eq(var_expr("count"), lit_int(0))),
+            next: Some(and(
+                in_set(var_expr("count"), set_range(lit_int(0), lit_int(2))),
+                eq(prime_expr("count"), add(var_expr("count"), lit_int(1))),
+            )),
+            invariants: vec![le(var_expr("count"), lit_int(3))],
+            invariant_names: vec![None],
+            fairness: vec![],
+            liveness_properties: vec![],
+        };
+
+        let domains = Env::new();
+        let config = CheckerConfig {
+            allow_deadlock: true,
+            export_dot_string: true,
+            ..CheckerConfig::default()
+        };
+        let result = check(&spec, &domains, &config);
+
+        match result {
+            CheckResult::Ok(stats) => {
+                let dot = stats.dot_graph.expect("dot_graph should be Some");
+                assert!(dot.contains("digraph StateGraph"));
+                assert!(dot.contains("s0"));
+                assert!(dot.contains("s0 -> s1"));
             }
             other => panic!("expected Ok, got {:?}", other),
         }

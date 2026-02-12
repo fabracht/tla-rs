@@ -254,7 +254,7 @@ pub fn split_top_level(s: &str, delim: char) -> Vec<String> {
     let mut in_string = false;
 
     for c in s.chars() {
-        if c == '"' && depth == 0 {
+        if c == '"' {
             in_string = !in_string;
             current.push(c);
         } else if in_string {
@@ -548,6 +548,12 @@ pub fn apply_config(
         if let Some((_params, expr)) = spec.definitions.get(sym_name.as_ref()) {
             if let Expr::FnCall(const_name, _) = expr {
                 checker_config.symmetric_constants.push(const_name.clone());
+            } else if let Expr::Permutations(inner) = expr {
+                if let Expr::Var(const_name) = inner.as_ref() {
+                    checker_config.symmetric_constants.push(const_name.clone());
+                } else {
+                    checker_config.symmetric_constants.push(sym_name.clone());
+                }
             } else if let Expr::Var(const_name) = expr {
                 checker_config.symmetric_constants.push(const_name.clone());
             } else {
