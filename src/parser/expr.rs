@@ -36,7 +36,7 @@ impl Parser {
         Ok(left)
     }
 
-    fn consume_label(&mut self) -> Option<Arc<str>> {
+    pub(super) fn consume_label(&mut self) -> Option<Arc<str>> {
         if let Token::Ident(name) = self.peek().clone()
             && *self.peek_n(1) == Token::LabelSep
         {
@@ -72,7 +72,7 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_and_conjunct(&mut self, list_col: Option<u32>) -> Result<Expr> {
+    pub(super) fn parse_and_conjunct(&mut self, list_col: Option<u32>) -> Result<Expr> {
         let left = self.parse_comparison()?;
         let mut result = match self.peek() {
             Token::Implies => {
@@ -101,7 +101,7 @@ impl Parser {
         Ok(result)
     }
 
-    fn parse_and_item(&mut self, list_col: u32) -> Result<Expr> {
+    pub(super) fn parse_and_item(&mut self, list_col: u32) -> Result<Expr> {
         let start_line = self.current_line();
         let mut item = self.parse_and_conjunct(Some(list_col))?;
         while *self.peek() == Token::Or {
@@ -885,7 +885,7 @@ impl Parser {
     }
 }
 
-fn wrap_with_label(expr: Expr, label: Option<Arc<str>>) -> Expr {
+pub(super) fn wrap_with_label(expr: Expr, label: Option<Arc<str>>) -> Expr {
     match label {
         Some(name) => Expr::LabeledAction(name, Box::new(expr)),
         None => expr,

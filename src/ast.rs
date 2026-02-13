@@ -138,7 +138,121 @@ pub enum Expr {
     LabeledAction(Arc<str>, Box<Expr>),
 }
 
-pub type Env = BTreeMap<Arc<str>, Value>;
+#[derive(Clone, Debug)]
+pub struct Env {
+    entries: Vec<(Arc<str>, Value)>,
+}
+
+impl Default for Env {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Env {
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    pub fn with_capacity(cap: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(cap),
+        }
+    }
+
+    pub fn get(&self, key: &Arc<str>) -> Option<&Value> {
+        let ptr = Arc::as_ptr(key);
+        for (k, v) in &self.entries {
+            if std::ptr::addr_eq(Arc::as_ptr(k), ptr) || **k == **key {
+                return Some(v);
+            }
+        }
+        None
+    }
+
+    pub fn insert(&mut self, key: Arc<str>, value: Value) -> Option<Value> {
+        let ptr = Arc::as_ptr(&key);
+        for (k, v) in &mut self.entries {
+            if std::ptr::addr_eq(Arc::as_ptr(k), ptr) || **k == *key {
+                return Some(std::mem::replace(v, value));
+            }
+        }
+        self.entries.push((key, value));
+        None
+    }
+
+    pub fn remove(&mut self, key: &Arc<str>) -> Option<Value> {
+        let ptr = Arc::as_ptr(key);
+        for i in 0..self.entries.len() {
+            if std::ptr::addr_eq(Arc::as_ptr(&self.entries[i].0), ptr)
+                || *self.entries[i].0 == **key
+            {
+                return Some(self.entries.remove(i).1);
+            }
+        }
+        None
+    }
+
+    pub fn contains_key(&self, key: &Arc<str>) -> bool {
+        let ptr = Arc::as_ptr(key);
+        self.entries
+            .iter()
+            .any(|(k, _)| std::ptr::addr_eq(Arc::as_ptr(k), ptr) || **k == **key)
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &Arc<str>> {
+        self.entries.iter().map(|(k, _)| k)
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Arc<str>, &Value)> {
+        self.entries.iter().map(|(k, v)| (k, v))
+    }
+}
+
+impl<'a> IntoIterator for &'a Env {
+    type Item = (&'a Arc<str>, &'a Value);
+    type IntoIter = std::iter::Map<
+        std::slice::Iter<'a, (Arc<str>, Value)>,
+        fn(&'a (Arc<str>, Value)) -> (&'a Arc<str>, &'a Value),
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.iter().map(|(k, v)| (k, v))
+    }
+}
+
+impl IntoIterator for Env {
+    type Item = (Arc<str>, Value);
+    type IntoIter = std::vec::IntoIter<(Arc<str>, Value)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.into_iter()
+    }
+}
+
+impl FromIterator<(Arc<str>, Value)> for Env {
+    fn from_iter<I: IntoIterator<Item = (Arc<str>, Value)>>(iter: I) -> Self {
+        let entries: Vec<(Arc<str>, Value)> = iter.into_iter().collect();
+        debug_assert!(
+            {
+                let mut seen = std::collections::HashSet::new();
+                entries.iter().all(|(k, _)| seen.insert(&**k))
+            },
+            "Env::from_iter called with duplicate keys"
+        );
+        Self { entries }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct State {

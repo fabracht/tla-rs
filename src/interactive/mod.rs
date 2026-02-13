@@ -64,7 +64,7 @@ pub fn run_interactive(spec: &Spec, domains: &Env) -> io::Result<()> {
         let missing: Vec<&str> = spec
             .constants
             .iter()
-            .filter(|c| !domains.contains_key(c.as_ref()))
+            .filter(|c| !domains.contains_key(c))
             .map(|c| c.as_ref())
             .collect();
         if !missing.is_empty() {

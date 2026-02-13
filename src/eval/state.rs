@@ -147,13 +147,10 @@ fn check_enabled(
 }
 
 pub fn state_to_env(state: &State, vars: &[Arc<str>]) -> Env {
-    let mut env = Env::new();
-    for (i, var) in vars.iter().enumerate() {
-        if let Some(val) = state.values.get(i) {
-            env.insert(var.clone(), val.clone());
-        }
-    }
-    env
+    vars.iter()
+        .zip(state.values.iter())
+        .map(|(var, val)| (var.clone(), val.clone()))
+        .collect()
 }
 
 pub(crate) fn env_to_next_state(env: &Env, vars: &[Arc<str>], primed_vars: &[Arc<str>]) -> State {

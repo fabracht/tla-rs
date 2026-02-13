@@ -2,11 +2,9 @@
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-use std::collections::BTreeSet;
 use std::env;
 use std::fs;
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -17,78 +15,12 @@ use tla_checker::checker::{
     format_eval_error, format_trace, format_trace_with_actions, format_trace_with_diffs,
     write_trace_json,
 };
+use tla_checker::config::{apply_config, parse_cfg, parse_constant_value, split_top_level};
 use tla_checker::diagnostic::{ColorConfig, Diagnostic};
 #[cfg(not(target_arch = "wasm32"))]
 use tla_checker::interactive::{run_interactive, run_interactive_replay};
 use tla_checker::parser::parse;
 use tla_checker::scenario::{execute_scenario, format_scenario_result, parse_scenario};
-
-fn split_top_level(s: &str, delim: char) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut depth = 0;
-    let mut in_string = false;
-
-    for c in s.chars() {
-        if c == '"' && depth == 0 {
-            in_string = !in_string;
-            current.push(c);
-        } else if in_string {
-            current.push(c);
-        } else if c == '{' {
-            depth += 1;
-            current.push(c);
-        } else if c == '}' {
-            depth -= 1;
-            current.push(c);
-        } else if c == delim && depth == 0 {
-            parts.push(current.trim().to_string());
-            current = String::new();
-        } else {
-            current.push(c);
-        }
-    }
-    if !current.trim().is_empty() {
-        parts.push(current.trim().to_string());
-    }
-    parts
-}
-
-fn parse_constant_value(s: &str) -> Option<Value> {
-    let s = s.trim();
-    if let Ok(n) = s.parse::<i64>() {
-        return Some(Value::Int(n));
-    }
-    if s == "TRUE" {
-        return Some(Value::Bool(true));
-    }
-    if s == "FALSE" {
-        return Some(Value::Bool(false));
-    }
-    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-        let inner: Arc<str> = s[1..s.len() - 1].into();
-        return Some(Value::Str(inner));
-    }
-    if s.starts_with('{') && s.ends_with('}') {
-        let inner = s[1..s.len() - 1].trim();
-        if inner.is_empty() {
-            return Some(Value::Set(BTreeSet::new()));
-        }
-        let mut set = BTreeSet::new();
-        for part in split_top_level(inner, ',') {
-            if let Some(val) = parse_constant_value(&part) {
-                set.insert(val);
-            } else {
-                return None;
-            }
-        }
-        return Some(Value::Set(set));
-    }
-    if !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_') {
-        return Some(Value::Str(s.into()));
-    }
-    None
-}
 
 fn is_likely_subcommand(arg: &str) -> bool {
     ["check", "run", "verify", "parse", "lint", "test"].contains(&arg.to_lowercase().as_str())
@@ -256,6 +188,8 @@ fn main() -> ExitCode {
     let mut validate_only = false;
     let mut list_invariants = false;
     let mut sweep: Option<(Arc<str>, Vec<Value>)> = None;
+    let mut config_path: Option<PathBuf> = None;
+    let mut cli_allow_deadlock = false;
     #[cfg(not(target_arch = "wasm32"))]
     let mut interactive_mode = false;
     #[cfg(not(target_arch = "wasm32"))]
@@ -340,6 +274,7 @@ fn main() -> ExitCode {
             }
             "--allow-deadlock" => {
                 config.allow_deadlock = true;
+                cli_allow_deadlock = true;
             }
             "--check-liveness" => {
                 config.check_liveness = true;
@@ -367,6 +302,14 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
                 config.count_properties.push(args[i].clone().into());
+            }
+            "--config" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--config requires a path");
+                    return ExitCode::FAILURE;
+                }
+                config_path = Some(PathBuf::from(&args[i]));
             }
             "--validate" => {
                 validate_only = true;
@@ -493,6 +436,7 @@ fn main() -> ExitCode {
                     "  --validate                 Parse and validate spec without model checking"
                 );
                 println!("  --list-invariants          Show detected invariants and exit");
+                println!("  --config PATH              Load TLC-style cfg file (auto: Spec.cfg)");
                 println!("  --scenario TEXT            Explore a specific scenario (or @file)");
                 println!("  --interactive, -i          Interactive TUI exploration mode");
                 println!("  --help, -h                 Show this help");
@@ -553,7 +497,7 @@ fn main() -> ExitCode {
     let source = Source::new(spec_path.as_str(), input.as_str());
     let colors = ColorConfig::detect();
 
-    let spec = match parse(&input) {
+    let mut spec = match parse(&input) {
         Ok(s) => s,
         Err(e) => {
             let mut diag = Diagnostic::error(&e.message);
@@ -574,8 +518,58 @@ fn main() -> ExitCode {
     };
 
     let mut domains = Env::new();
-    for (name, val) in constants {
-        domains.insert(name, val);
+
+    let cfg_path = config_path.or_else(|| {
+        let candidate = Path::new(&spec_path).with_extension("cfg");
+        if candidate.exists() {
+            Some(candidate)
+        } else {
+            None
+        }
+    });
+
+    if let Some(ref cfg_file) = cfg_path {
+        let cfg_input = match fs::read_to_string(cfg_file) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("failed to read config {}: {}", cfg_file.display(), e);
+                return ExitCode::FAILURE;
+            }
+        };
+        let tlc_cfg = match parse_cfg(&cfg_input) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error parsing {}: {}", cfg_file.display(), e);
+                return ExitCode::FAILURE;
+            }
+        };
+        let cli_symmetry = config.symmetric_constants.clone();
+        match apply_config(
+            &tlc_cfg,
+            &mut spec,
+            &mut domains,
+            &mut config,
+            &constants,
+            &cli_symmetry,
+            cli_allow_deadlock,
+        ) {
+            Ok(warnings) => {
+                for w in &warnings {
+                    eprintln!("  Warning: {}", w);
+                }
+            }
+            Err(e) => {
+                eprintln!("error applying {}: {}", cfg_file.display(), e);
+                return ExitCode::FAILURE;
+            }
+        }
+        if config.verbosity >= 2 {
+            println!("  Config: {}", cfg_file.display());
+        }
+    }
+
+    for (name, val) in &constants {
+        domains.insert(name.clone(), val.clone());
     }
 
     if list_invariants {
@@ -607,7 +601,7 @@ fn main() -> ExitCode {
         let missing: Vec<_> = spec
             .constants
             .iter()
-            .filter(|c| !domains.contains_key(c.as_ref()))
+            .filter(|c| !domains.contains_key(c))
             .collect();
         if !missing.is_empty() {
             eprintln!(
@@ -762,8 +756,8 @@ fn main() -> ExitCode {
         let trace = match &result {
             CheckResult::InvariantViolation(cex, _) => Some(&cex.trace),
             CheckResult::Deadlock(trace, _, _) => Some(trace),
-            CheckResult::NextError(_, trace) => Some(trace),
-            CheckResult::InvariantError(_, trace) => Some(trace),
+            CheckResult::NextError(_, trace, _) => Some(trace),
+            CheckResult::InvariantError(_, trace, _) => Some(trace),
             _ => None,
         };
         if let Some(trace) = trace {
@@ -962,7 +956,7 @@ fn main() -> ExitCode {
             eprintln!("{}", diag.render_colored(&source, &colors));
             ExitCode::FAILURE
         }
-        CheckResult::NextError(e, trace) => {
+        CheckResult::NextError(e, trace, _) => {
             let diag =
                 eval_error_to_diagnostic(&e).with_note("error occurred while evaluating Next");
             eprintln!("{}", diag.render_colored(&source, &colors));
@@ -970,7 +964,7 @@ fn main() -> ExitCode {
             print!("{}", format_trace(&trace, &spec.vars));
             ExitCode::FAILURE
         }
-        CheckResult::InvariantError(e, trace) => {
+        CheckResult::InvariantError(e, trace, _) => {
             let diag =
                 eval_error_to_diagnostic(&e).with_note("error occurred while evaluating invariant");
             eprintln!("{}", diag.render_colored(&source, &colors));
@@ -1036,7 +1030,7 @@ fn main() -> ExitCode {
                 let missing: Vec<_> = spec
                     .constants
                     .iter()
-                    .filter(|c| !domains.contains_key(c.as_ref()))
+                    .filter(|c| !domains.contains_key(c))
                     .map(|c| c.as_ref())
                     .collect();
                 if !missing.is_empty() {
