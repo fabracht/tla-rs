@@ -949,4 +949,92 @@ mod tests {
 
         assert_eq!(checker_config.symmetric_constants, vec![Arc::from("RM")]);
     }
+
+    #[test]
+    fn apply_config_specification_resolves_init_next() {
+        let mut spec = Spec {
+            vars: vec![Arc::from("x")],
+            init: None,
+            next: None,
+            invariants: vec![],
+            invariant_names: vec![],
+            definitions: std::collections::BTreeMap::new(),
+            instances: vec![],
+            extends: vec![],
+            fairness: vec![],
+            assumes: vec![],
+            liveness_properties: vec![],
+            constants: vec![],
+        };
+
+        let init_expr = Expr::Var(Arc::from("MyInit"));
+        let next_expr = Expr::Var(Arc::from("MyNext"));
+        let spec_body = Expr::And(
+            Box::new(init_expr.clone()),
+            Box::new(Expr::BoxAction(Box::new(next_expr.clone()), Arc::from("x"))),
+        );
+        spec.definitions
+            .insert(Arc::from("Spec"), (vec![], spec_body));
+
+        let cfg = parse_cfg("SPECIFICATION Spec").unwrap();
+        let mut domains = Env::new();
+        let mut checker_config = CheckerConfig::default();
+
+        apply_config(
+            &cfg,
+            &mut spec,
+            &mut domains,
+            &mut checker_config,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(
+            format!("{:?}", spec.init.unwrap()),
+            format!("{init_expr:?}")
+        );
+        assert_eq!(
+            format!("{:?}", spec.next.unwrap()),
+            format!("{next_expr:?}")
+        );
+    }
+
+    #[test]
+    fn apply_config_specification_missing_box_action_errors() {
+        let mut spec = Spec {
+            vars: vec![Arc::from("x")],
+            init: None,
+            next: None,
+            invariants: vec![],
+            invariant_names: vec![],
+            definitions: std::collections::BTreeMap::new(),
+            instances: vec![],
+            extends: vec![],
+            fairness: vec![],
+            assumes: vec![],
+            liveness_properties: vec![],
+            constants: vec![],
+        };
+
+        spec.definitions
+            .insert(Arc::from("Spec"), (vec![], Expr::Var(Arc::from("Init"))));
+
+        let cfg = parse_cfg("SPECIFICATION Spec").unwrap();
+        let mut domains = Env::new();
+        let mut checker_config = CheckerConfig::default();
+
+        let result = apply_config(
+            &cfg,
+            &mut spec,
+            &mut domains,
+            &mut checker_config,
+            &[],
+            &[],
+            false,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected Init /\\"));
+    }
 }

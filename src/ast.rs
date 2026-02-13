@@ -242,9 +242,15 @@ impl IntoIterator for Env {
 
 impl FromIterator<(Arc<str>, Value)> for Env {
     fn from_iter<I: IntoIterator<Item = (Arc<str>, Value)>>(iter: I) -> Self {
-        Self {
-            entries: iter.into_iter().collect(),
-        }
+        let entries: Vec<(Arc<str>, Value)> = iter.into_iter().collect();
+        debug_assert!(
+            {
+                let mut seen = std::collections::HashSet::new();
+                entries.iter().all(|(k, _)| seen.insert(&**k))
+            },
+            "Env::from_iter called with duplicate keys"
+        );
+        Self { entries }
     }
 }
 
