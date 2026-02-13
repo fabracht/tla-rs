@@ -756,8 +756,8 @@ fn main() -> ExitCode {
         let trace = match &result {
             CheckResult::InvariantViolation(cex, _) => Some(&cex.trace),
             CheckResult::Deadlock(trace, _, _) => Some(trace),
-            CheckResult::NextError(_, trace) => Some(trace),
-            CheckResult::InvariantError(_, trace) => Some(trace),
+            CheckResult::NextError(_, trace, _) => Some(trace),
+            CheckResult::InvariantError(_, trace, _) => Some(trace),
             _ => None,
         };
         if let Some(trace) = trace {
@@ -956,7 +956,7 @@ fn main() -> ExitCode {
             eprintln!("{}", diag.render_colored(&source, &colors));
             ExitCode::FAILURE
         }
-        CheckResult::NextError(e, trace) => {
+        CheckResult::NextError(e, trace, _) => {
             let diag =
                 eval_error_to_diagnostic(&e).with_note("error occurred while evaluating Next");
             eprintln!("{}", diag.render_colored(&source, &colors));
@@ -964,7 +964,7 @@ fn main() -> ExitCode {
             print!("{}", format_trace(&trace, &spec.vars));
             ExitCode::FAILURE
         }
-        CheckResult::InvariantError(e, trace) => {
+        CheckResult::InvariantError(e, trace, _) => {
             let diag =
                 eval_error_to_diagnostic(&e).with_note("error occurred while evaluating invariant");
             eprintln!("{}", diag.render_colored(&source, &colors));

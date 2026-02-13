@@ -106,7 +106,15 @@ pub fn check_spec_with_cfg(
     let mut domains = Env::new();
     let mut config = build_config(max_states, max_depth, allow_deadlock, export_dot);
 
-    let warnings = match apply_config(&cfg, &mut spec, &mut domains, &mut config, &[], &[], false) {
+    let warnings = match apply_config(
+        &cfg,
+        &mut spec,
+        &mut domains,
+        &mut config,
+        &[],
+        &[],
+        allow_deadlock,
+    ) {
         Ok(w) => w,
         Err(e) => return wasm_error("ConfigError", e),
     };
@@ -153,7 +161,16 @@ pub fn check_spec_with_options(spec_source: &str, options_json: &str) -> String 
             Ok(c) => c,
             Err(e) => return wasm_error("ConfigError", e),
         };
-        match apply_config(&cfg, &mut spec, &mut domains, &mut config, &[], &[], false) {
+        let cli_allow_deadlock = options.allow_deadlock.unwrap_or(false);
+        match apply_config(
+            &cfg,
+            &mut spec,
+            &mut domains,
+            &mut config,
+            &[],
+            &[],
+            cli_allow_deadlock,
+        ) {
             Ok(w) => warnings = w,
             Err(e) => return wasm_error("ConfigError", e),
         }
@@ -271,22 +288,22 @@ fn result_to_wasm(
             dot: None,
             warnings,
         },
-        CheckResult::NextError(e, trace) => WasmCheckResult {
+        CheckResult::NextError(e, trace, dot) => WasmCheckResult {
             success: false,
             error_type: Some("NextError".into()),
             error_message: Some(format_eval_error(&e)),
             states_explored: 0,
             trace: Some(vec![format_trace(&trace, vars)]),
-            dot: None,
+            dot,
             warnings,
         },
-        CheckResult::InvariantError(e, trace) => WasmCheckResult {
+        CheckResult::InvariantError(e, trace, dot) => WasmCheckResult {
             success: false,
             error_type: Some("InvariantError".into()),
             error_message: Some(format_eval_error(&e)),
             states_explored: 0,
             trace: Some(vec![format_trace(&trace, vars)]),
-            dot: None,
+            dot,
             warnings,
         },
         CheckResult::AssumeViolation(idx) => WasmCheckResult {

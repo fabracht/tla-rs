@@ -117,8 +117,8 @@ pub enum CheckResult {
     LivenessViolation(LivenessViolation, CheckStats),
     Deadlock(Vec<State>, Vec<Option<Arc<str>>>, CheckStats),
     InitError(EvalError),
-    NextError(EvalError, Vec<State>),
-    InvariantError(EvalError, Vec<State>),
+    NextError(EvalError, Vec<State>, Option<String>),
+    InvariantError(EvalError, Vec<State>, Option<String>),
     AssumeViolation(usize),
     AssumeError(usize, EvalError),
     MaxStatesExceeded(CheckStats),
@@ -267,6 +267,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                     span: None,
                 },
                 vec![],
+                None,
             );
         }
     };
@@ -476,6 +477,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                     span: None,
                 },
                 vec![],
+                None,
             );
         };
         let mut env = base_env.clone();
@@ -525,7 +527,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 Ok(_) => {
                     let (trace, _actions) =
                         reconstruct_trace(current_idx, &states, &parent, &parent_action);
-                    let _ = do_export(&states, &parent, Some(current_idx));
+                    let dot = do_export(&states, &parent, Some(current_idx));
                     return CheckResult::InvariantError(
                         EvalError::TypeMismatch {
                             expected: "Bool",
@@ -534,13 +536,14 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                             span: None,
                         },
                         trace,
+                        dot,
                     );
                 }
                 Err(e) => {
                     let (trace, _actions) =
                         reconstruct_trace(current_idx, &states, &parent, &parent_action);
-                    let _ = do_export(&states, &parent, Some(current_idx));
-                    return CheckResult::InvariantError(e, trace);
+                    let dot = do_export(&states, &parent, Some(current_idx));
+                    return CheckResult::InvariantError(e, trace, dot);
                 }
             }
         }
@@ -575,8 +578,8 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             Err(e) => {
                 let (trace, _actions) =
                     reconstruct_trace(current_idx, &states, &parent, &parent_action);
-                let _ = do_export(&states, &parent, Some(current_idx));
-                return CheckResult::NextError(e, trace);
+                let dot = do_export(&states, &parent, Some(current_idx));
+                return CheckResult::NextError(e, trace, dot);
             }
         };
 
@@ -628,7 +631,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 return CheckResult::LivenessViolation(violation, stats);
             }
             Err(e) => {
-                return CheckResult::InvariantError(e, vec![]);
+                return CheckResult::InvariantError(e, vec![], stats.dot_graph.take());
             }
         }
     }
@@ -1113,14 +1116,14 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                 format_eval_error(e).replace('"', "\\\"")
             )
         }
-        CheckResult::NextError(e, trace) => {
+        CheckResult::NextError(e, trace, _) => {
             format!(
                 r#"{{"status": "next_error", "error": "{}", "trace": {}}}"#,
                 format_eval_error(e).replace('"', "\\\""),
                 trace_to_json(trace, &spec.vars)
             )
         }
-        CheckResult::InvariantError(e, trace) => {
+        CheckResult::InvariantError(e, trace, _) => {
             format!(
                 r#"{{"status": "invariant_error", "error": "{}", "trace": {}}}"#,
                 format_eval_error(e).replace('"', "\\\""),

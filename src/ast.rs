@@ -189,7 +189,7 @@ impl Env {
             if std::ptr::addr_eq(Arc::as_ptr(&self.entries[i].0), ptr)
                 || *self.entries[i].0 == **key
             {
-                return Some(self.entries.swap_remove(i).1);
+                return Some(self.entries.remove(i).1);
             }
         }
         None

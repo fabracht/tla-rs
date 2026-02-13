@@ -107,7 +107,7 @@ fn test_should_error_no_next() {
     let path = Path::new("test_cases/should_error/no_next.tla");
     let result = check_spec_file(path);
     assert!(
-        matches!(result, CheckResult::NextError(_, _)),
+        matches!(result, CheckResult::NextError(..)),
         "no_next.tla should produce NextError for missing Next, got: {:?}",
         result
     );
@@ -515,7 +515,7 @@ fn test_should_error_next_error() {
     let path = Path::new("test_cases/should_error/next_error.tla");
     let result = check_spec_file(path);
     assert!(
-        matches!(result, CheckResult::NextError(_, _)),
+        matches!(result, CheckResult::NextError(..)),
         "next_error.tla should produce NextError, got: {:?}",
         result
     );
@@ -526,7 +526,7 @@ fn test_should_error_invariant_error() {
     let path = Path::new("test_cases/should_error/invariant_error.tla");
     let result = check_spec_file(path);
     assert!(
-        matches!(result, CheckResult::InvariantError(_, _)),
+        matches!(result, CheckResult::InvariantError(..)),
         "invariant_error.tla should produce InvariantError, got: {:?}",
         result
     );
