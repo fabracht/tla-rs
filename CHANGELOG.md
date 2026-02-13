@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.3.0] - 2026-02-13
+
+### Added
+
+- TLC-compatible `.cfg` file parser with auto-discovery (`Spec.cfg` next to `Spec.tla`)
+- Supported directives: INIT, NEXT, SPECIFICATION, CONSTANT(S), INVARIANT(S), PROPERTY/PROPERTIES, SYMMETRY, CHECK_DEADLOCK
+- WASM `check_spec_with_options` API with unified options object
+- WASM `check_spec_with_cfg` API for cfg file support
+- WASM unit tests
+- Bench profile (`panic = "unwind"`, `strip = false`)
+
+### Changed
+
+- Batch candidate inference across all variables in a single AST walk
+- Replaced `Env` BTreeMap with Vec-backed struct (~15% speedup on model checking)
+- Extracted `substitution.rs` from `modules.rs` for expression substitution logic
+- Gated `ratatui`/`crossterm` dependencies for non-WASM targets only
+- `CheckResult::NextError` and `InvariantError` now carry DOT graph data
+- `do_export` refactored to return `Option<String>` for WASM compatibility
+
+### Fixed
+
+- WASM constant/cfg precedence: JSON constants now correctly override cfg constants
+- WASM `allow_deadlock` flag now properly propagated to `apply_config`
+- `substitute_expr` now recurses into TLC builtins and Bag operations
+- `Env::remove` preserves insertion order (changed from `swap_remove` to `remove`)
+- `split_top_level` handles escaped quotes and brace depth correctly
+
 ## [0.2.0] - 2026-02-05
 
 ### Added

@@ -18,6 +18,7 @@ The binary will be at `target/release/tla`.
 tla spec.tla
 tla spec.tla -c 'N=5' -c 'Procs={"p1","p2","p3"}'
 tla spec.tla -c 'Proc={"a","b","c"}' --symmetry Proc
+tla spec.tla --config model.cfg
 tla spec.tla --quick    # limit to 10,000 states
 tla spec.tla -i         # interactive TUI
 ```
@@ -30,6 +31,7 @@ Constants accept integers (`42`), booleans (`TRUE`), strings (`"hello"`), and se
 |--------|-------------|
 | `-c NAME=VALUE` | Set a constant value |
 | `-s CONST` | Enable symmetry reduction for a constant |
+| `--config PATH` | Load TLC-style cfg file (auto-discovers `Spec.cfg` next to `Spec.tla`) |
 | `--max-states N` | Maximum states to explore (default: 1000000) |
 | `--max-depth N` | Maximum trace depth (default: 100) |
 | `-q` | Quick exploration (limit: 10,000 states) |
@@ -43,6 +45,20 @@ Constants accept integers (`42`), booleans (`TRUE`), strings (`"hello"`), and se
 | `-i` | Interactive TUI exploration mode |
 | `--json` | JSON output |
 | `-v` | Verbose output (depth breakdowns, etc.) |
+
+## Configuration Files
+
+tla-rs supports TLC-compatible `.cfg` files. If `Spec.cfg` exists next to `Spec.tla`, it is loaded automatically. Use `--config PATH` to specify an explicit path.
+
+```
+CONSTANT RM = {rm1, rm2, rm3}
+INIT TPInit
+NEXT TPNext
+INVARIANT TPTypeOK
+CHECK_DEADLOCK TRUE
+```
+
+Supported directives: `INIT`/`NEXT`, `SPECIFICATION` (temporal formula in `Init /\ [][Next]_vars` form), `CONSTANT`/`CONSTANTS`, `INVARIANT`/`INVARIANTS`, `PROPERTY`/`PROPERTIES`, `SYMMETRY`, and `CHECK_DEADLOCK`. CLI flags override cfg values.
 
 ## Scenarios
 
@@ -187,6 +203,16 @@ dot -Tpng graph.dot -o graph.png
 ```
 
 Error states are highlighted in red.
+
+## WebAssembly
+
+The core library compiles to WASM for browser embedding:
+
+```bash
+cargo make wasm
+```
+
+This produces a `pkg/` directory with the WASM module and JS bindings. The WASM API provides `check_spec`, `check_spec_with_config`, `check_spec_with_cfg`, and `check_spec_with_options` — all returning JSON results with success status, state count, error traces, and optional DOT graph output.
 
 ## Limitations
 
