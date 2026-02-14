@@ -7,6 +7,7 @@ use wasm_bindgen::prelude::*;
 use crate::ast::{Env, Value};
 use crate::checker::{CheckResult, CheckerConfig, check, format_eval_error, format_trace};
 use crate::config::{apply_config, parse_cfg};
+use crate::export::DotMode;
 use crate::parser::parse;
 
 #[derive(Serialize, Deserialize, Default)]
@@ -17,6 +18,7 @@ struct WasmCheckOptions {
     max_depth: Option<usize>,
     allow_deadlock: Option<bool>,
     export_dot: Option<bool>,
+    dot_mode: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -153,6 +155,12 @@ pub fn check_spec_with_options(spec_source: &str, options_json: &str) -> String 
     }
     if let Some(v) = options.export_dot {
         config.export_dot_string = v;
+    }
+    if let Some(ref mode_str) = options.dot_mode {
+        match mode_str.parse::<DotMode>() {
+            Ok(mode) => config.dot_mode = mode,
+            Err(e) => return wasm_error("OptionsError", e),
+        }
     }
 
     let mut warnings = Vec::new();
