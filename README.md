@@ -36,6 +36,7 @@ Constants accept integers (`42`), booleans (`TRUE`), strings (`"hello"`), and se
 | `--max-depth N` | Maximum trace depth (default: 100) |
 | `-q` | Quick exploration (limit: 10,000 states) |
 | `--export-dot FILE` | Export state graph to DOT format |
+| `--dot-mode MODE` | DOT mode: `full`, `trace`, `clean` (default), `choices` |
 | `--allow-deadlock` | Allow states with no successors |
 | `--check-liveness` | Check liveness and fairness properties |
 | `--continue` | Continue past invariant violations |
@@ -199,10 +200,20 @@ On invariant violation, you get a counterexample trace with state diffs marking 
 
 ```bash
 tla spec.tla --export-dot graph.dot
+tla spec.tla --export-dot graph.dot --dot-mode full
 dot -Tpng graph.dot -o graph.png
 ```
 
-Error states are highlighted in red.
+Four export modes are available via `--dot-mode`:
+
+| Mode | Description |
+|------|-------------|
+| `clean` (default) | All nodes, no self-loops, parallel edges merged into single labeled edges |
+| `full` | All nodes and all edges including self-loops, each edge separate |
+| `trace` | Only counterexample trace nodes and edges (falls back to full if no trace) |
+| `choices` | Trace path plus alternative transitions at each trace state; non-trace nodes shown dashed, alternative edges gray/dashed (falls back to full if no trace) |
+
+Error states are highlighted in red. Trace edges are red and thick in all modes.
 
 ## WebAssembly
 
