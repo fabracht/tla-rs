@@ -90,7 +90,7 @@ impl Parser {
         while *self.peek() == Token::And {
             if let Some(lc) = list_col
                 && self.paren_depth == 0
-                && self.current_column() == lc
+                && self.current_column() <= lc
             {
                 break;
             }

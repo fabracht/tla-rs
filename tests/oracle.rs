@@ -568,6 +568,59 @@ fn test_should_pass_pingpong() {
 }
 
 #[test]
+fn test_pingpong_action_labels_not_unnamed() {
+    let path = Path::new("test_cases/should_pass/pingpong.tla");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let mut spec = parse(&input).expect("failed to parse spec");
+
+    let mut domains = Env::new();
+    domains.insert(Arc::from("NumberOfClients"), Value::Int(2));
+    domains.insert(Arc::from("NumberOfPings"), Value::Int(2));
+
+    let not_finished = spec
+        .definitions
+        .get(&Arc::from("NotFinished") as &str)
+        .expect("NotFinished should be defined")
+        .clone();
+    spec.invariants = vec![not_finished.1];
+    spec.invariant_names = vec![Some(Arc::from("NotFinished"))];
+
+    let mut config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
+    config.spec_path = Some(path.to_path_buf());
+    let result = check(&spec, &domains, &config);
+
+    match result {
+        CheckResult::InvariantViolation(cex, _stats) => {
+            let unnamed_count = cex.actions.iter().filter(|a| a.is_none()).count();
+            let named: Vec<_> = cex
+                .actions
+                .iter()
+                .filter_map(|a| a.as_ref().map(|s| s.as_ref()))
+                .collect();
+            assert!(
+                !named.is_empty(),
+                "trace should have at least one named action"
+            );
+            assert_eq!(
+                unnamed_count,
+                1,
+                "only the initial state should have no action label, but got {} unnamed out of {} total; named: {:?}",
+                unnamed_count,
+                cex.actions.len(),
+                named
+            );
+        }
+        other => panic!(
+            "pingpong with NotFinished invariant should violate, got: {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
 fn test_cfg_twophase_auto_load() {
     let path = Path::new("test_cases/official/TwoPhase.tla");
     let cfg_path = Path::new("test_cases/official/TwoPhase.cfg");

@@ -153,6 +153,40 @@ mod tests {
     }
 
     #[test]
+    fn exists_in_conjunction_list_does_not_absorb_outer_conjuncts() {
+        let input = "\
+/\\ \\E x \\in {1, 2}:
+      /\\ x > 0
+/\\ y' = y + 1
+/\\ z' = z";
+        let expr = parse_expr(input).unwrap();
+        fn count_and_nodes(e: &Expr) -> usize {
+            match e {
+                Expr::And(l, r) => 1 + count_and_nodes(l) + count_and_nodes(r),
+                _ => 0,
+            }
+        }
+        let top_and_count = count_and_nodes(&expr);
+        assert_eq!(
+            top_and_count, 2,
+            "outer conjunction list should have 3 items (2 And nodes)"
+        );
+        if let Expr::And(left, _) = &expr {
+            if let Expr::And(inner_left, _) = left.as_ref() {
+                assert!(
+                    matches!(inner_left.as_ref(), Expr::Exists(_, _, _)),
+                    "first conjunct should be Exists, got {:?}",
+                    inner_left
+                );
+            } else {
+                panic!("expected nested And, got {:?}", left);
+            }
+        } else {
+            panic!("expected top-level And");
+        }
+    }
+
+    #[test]
     fn parse_spec_counter() {
         let input = r#"
             VARIABLES count
