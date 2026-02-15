@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::io::Write;
 use std::str::FromStr;
@@ -229,7 +229,7 @@ fn render_trace_mode<W: Write>(
     trace_path: &[usize],
     out: &mut W,
 ) -> std::io::Result<()> {
-    let (trace_nodes, trace_edges) = build_trace_sets(trace_path);
+    let trace_nodes: HashSet<usize> = trace_path.iter().copied().collect();
 
     write_header(out)?;
 
@@ -241,7 +241,8 @@ fn render_trace_mode<W: Write>(
         }
     }
 
-    for &(src, dst) in &trace_edges {
+    for w in trace_path.windows(2) {
+        let (src, dst) = (w[0], w[1]);
         let mut attrs = vec!["color=red".to_string(), "penwidth=2".to_string()];
         if let Some(label) = find_edge_label(all_edges, src, dst) {
             attrs.insert(0, format!("label=\"{}\"", escape_edge_label(label)));
@@ -333,7 +334,7 @@ fn render_choices_mode<W: Write>(
 ) -> std::io::Result<()> {
     let (trace_nodes, trace_edges) = build_trace_sets(trace_path);
 
-    let mut visible_nodes: HashSet<usize> = trace_nodes.clone();
+    let mut visible_nodes: BTreeSet<usize> = trace_nodes.iter().copied().collect();
     for &node in trace_path {
         if let Some(edges) = all_edges.get(node) {
             for (dst, _) in edges {

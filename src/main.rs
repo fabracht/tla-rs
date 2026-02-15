@@ -746,6 +746,10 @@ fn main() -> ExitCode {
 
     config.spec_path = Some(PathBuf::from(&spec_path));
 
+    if config.dot_mode != DotMode::default() && config.export_dot_path.is_none() {
+        eprintln!("warning: --dot-mode has no effect without --export-dot");
+    }
+
     if let Some((sweep_name, sweep_values)) = sweep {
         return run_sweep(&spec, &domains, &config, &sweep_name, &sweep_values);
     }
