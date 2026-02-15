@@ -225,6 +225,34 @@ cargo make wasm
 
 This produces a `pkg/` directory with the WASM module and JS bindings. The WASM API provides `check_spec`, `check_spec_with_config`, `check_spec_with_cfg`, and `check_spec_with_options` — all returning JSON results with success status, state count, error traces, and optional DOT graph output.
 
+The `check_spec_with_options` API accepts a JSON options object:
+
+```js
+const result = JSON.parse(check_spec_with_options(specSource, JSON.stringify({
+  constants: { N: 3 },
+  max_states: 10000,
+  max_depth: 50,
+  allow_deadlock: true,
+  export_dot: true,
+  dot_mode: "choices",   // "full", "trace", "clean" (default), "choices"
+  cfg_source: "INIT Init\nNEXT Next\n"
+})));
+
+if (result.dot) {
+  // DOT graph string: "digraph StateGraph { ... }"
+}
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `constants` | object | Constant values (`{"N": 3, "Procs": ["a","b"]}`) |
+| `cfg_source` | string | TLC-style cfg file contents |
+| `max_states` | number | Maximum states to explore |
+| `max_depth` | number | Maximum trace depth |
+| `allow_deadlock` | bool | Allow states with no successors |
+| `export_dot` | bool | Include DOT graph in result |
+| `dot_mode` | string | DOT export mode: `full`, `trace`, `clean` (default), `choices` |
+
 ## Limitations
 
 `Nat` and `Int` are bounded (-100 to 100 by default). Temporal operators `[]`, `<>`, `~>` are parsed but cannot be evaluated directly — use `--check-liveness` for fairness/liveness properties via SCC analysis. Unbounded quantifiers (`\E x : P` without `\in S`) and `Seq(S)` enumeration are not supported. Recursive operators must be declared with `RECURSIVE`.
