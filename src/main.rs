@@ -17,6 +17,7 @@ use tla_checker::checker::{
 };
 use tla_checker::config::{apply_config, parse_cfg, parse_constant_value, split_top_level};
 use tla_checker::diagnostic::{ColorConfig, Diagnostic};
+use tla_checker::export::DotMode;
 #[cfg(not(target_arch = "wasm32"))]
 use tla_checker::interactive::{run_interactive, run_interactive_replay};
 use tla_checker::parser::parse;
@@ -272,6 +273,20 @@ fn main() -> ExitCode {
                 }
                 config.export_dot_path = Some(PathBuf::from(&args[i]));
             }
+            "--dot-mode" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--dot-mode requires a mode (full, trace, clean, choices)");
+                    return ExitCode::FAILURE;
+                }
+                match args[i].parse::<DotMode>() {
+                    Ok(mode) => config.dot_mode = mode,
+                    Err(e) => {
+                        eprintln!("{}", e);
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
             "--allow-deadlock" => {
                 config.allow_deadlock = true;
                 cli_allow_deadlock = true;
@@ -417,6 +432,9 @@ fn main() -> ExitCode {
                 );
                 println!("  --max-depth N              Maximum trace depth (default: 100)");
                 println!("  --export-dot FILE          Export state graph to DOT format");
+                println!(
+                    "  --dot-mode MODE            DOT mode: full, trace, clean (default), choices"
+                );
                 println!("  --trace-json FILE          Export counterexample trace to JSON format");
                 println!(
                     "  --save-counterexample FILE Export counterexample with metadata for replay"
@@ -727,6 +745,10 @@ fn main() -> ExitCode {
     println!();
 
     config.spec_path = Some(PathBuf::from(&spec_path));
+
+    if config.dot_mode != DotMode::default() && config.export_dot_path.is_none() {
+        eprintln!("warning: --dot-mode has no effect without --export-dot");
+    }
 
     if let Some((sweep_name, sweep_values)) = sweep {
         return run_sweep(&spec, &domains, &config, &sweep_name, &sweep_values);

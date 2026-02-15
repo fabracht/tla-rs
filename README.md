@@ -36,6 +36,7 @@ Constants accept integers (`42`), booleans (`TRUE`), strings (`"hello"`), and se
 | `--max-depth N` | Maximum trace depth (default: 100) |
 | `-q` | Quick exploration (limit: 10,000 states) |
 | `--export-dot FILE` | Export state graph to DOT format |
+| `--dot-mode MODE` | DOT mode: `full`, `trace`, `clean` (default), `choices` |
 | `--allow-deadlock` | Allow states with no successors |
 | `--check-liveness` | Check liveness and fairness properties |
 | `--continue` | Continue past invariant violations |
@@ -199,10 +200,20 @@ On invariant violation, you get a counterexample trace with state diffs marking 
 
 ```bash
 tla spec.tla --export-dot graph.dot
+tla spec.tla --export-dot graph.dot --dot-mode full
 dot -Tpng graph.dot -o graph.png
 ```
 
-Error states are highlighted in red.
+Four export modes are available via `--dot-mode`:
+
+| Mode | Description |
+|------|-------------|
+| `clean` (default) | All nodes, no self-loops, parallel edges merged into single labeled edges |
+| `full` | All nodes and all edges including self-loops, each edge separate |
+| `trace` | Only counterexample trace nodes and edges (falls back to full if no trace) |
+| `choices` | Trace path plus alternative transitions at each trace state; non-trace nodes shown dashed, alternative edges gray/dashed (falls back to full if no trace) |
+
+Error states are highlighted in red. Trace edges are red and thick in all modes.
 
 ## WebAssembly
 
@@ -213,6 +224,34 @@ cargo make wasm
 ```
 
 This produces a `pkg/` directory with the WASM module and JS bindings. The WASM API provides `check_spec`, `check_spec_with_config`, `check_spec_with_cfg`, and `check_spec_with_options` — all returning JSON results with success status, state count, error traces, and optional DOT graph output.
+
+The `check_spec_with_options` API accepts a JSON options object:
+
+```js
+const result = JSON.parse(check_spec_with_options(specSource, JSON.stringify({
+  constants: { N: 3 },
+  max_states: 10000,
+  max_depth: 50,
+  allow_deadlock: true,
+  export_dot: true,
+  dot_mode: "choices",   // "full", "trace", "clean" (default), "choices"
+  cfg_source: "INIT Init\nNEXT Next\n"
+})));
+
+if (result.dot) {
+  // DOT graph string: "digraph StateGraph { ... }"
+}
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `constants` | object | Constant values (`{"N": 3, "Procs": ["a","b"]}`) |
+| `cfg_source` | string | TLC-style cfg file contents |
+| `max_states` | number | Maximum states to explore |
+| `max_depth` | number | Maximum trace depth |
+| `allow_deadlock` | bool | Allow states with no successors |
+| `export_dot` | bool | Include DOT graph in result |
+| `dot_mode` | string | DOT export mode: `full`, `trace`, `clean` (default), `choices` |
 
 ## Limitations
 

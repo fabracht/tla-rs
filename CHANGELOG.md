@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.1] - 2026-02-14
+
+### Added
+
+- `--dot-mode` flag with four DOT export modes: `clean` (default), `full`, `trace`, `choices`
+- `DotExport` context struct for cleaner `export_dot` API
+- WASM `dot_mode` option in `check_spec_with_options`
+
+### Changed
+
+- Default DOT export changed from full (all edges) to clean (no self-loops, parallel edges merged)
+- `export_dot` now takes a `DotExport` struct instead of individual parameters
+
 ## [0.3.0] - 2026-02-13
 
 ### Added

@@ -18,7 +18,7 @@ use crate::eval::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::eval::{set_parameterized_instances, set_resolved_instances};
-use crate::export::export_dot;
+use crate::export::{DotExport, DotMode, EdgeList, export_dot};
 use crate::graph::StateGraph;
 use crate::liveness::{self, LivenessViolation};
 #[cfg(not(target_arch = "wasm32"))]
@@ -43,6 +43,7 @@ pub struct CheckerConfig {
     pub continue_on_violation: bool,
     pub count_properties: Vec<Arc<str>>,
     pub export_dot_string: bool,
+    pub dot_mode: DotMode,
     #[cfg(not(target_arch = "wasm32"))]
     pub spec_path: Option<PathBuf>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -66,6 +67,7 @@ impl Default for CheckerConfig {
             continue_on_violation: false,
             count_properties: Vec::new(),
             export_dot_string: false,
+            dot_mode: DotMode::default(),
             #[cfg(not(target_arch = "wasm32"))]
             spec_path: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -311,6 +313,12 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     let mut parent: Vec<Option<usize>> = Vec::new();
     let mut parent_action: Vec<Option<Arc<str>>> = Vec::new();
     let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let collect_edges = config.export_dot_path.is_some() || config.export_dot_string;
+    #[cfg(target_arch = "wasm32")]
+    let collect_edges = config.export_dot_string;
+    let mut all_edges: Vec<EdgeList> = Vec::new();
     let mut stats = CheckStats {
         states_explored: 0,
         transitions: 0,
@@ -368,6 +376,9 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         if is_new {
             parent.push(None);
             parent_action.push(None);
+            if collect_edges {
+                all_edges.push(Vec::new());
+            }
             queue.push_back((idx, 1));
         }
     }
@@ -395,15 +406,36 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
     let do_export = |states: &IndexSet<State>,
                      parent: &[Option<usize>],
-                     error_state: Option<usize>|
+                     error_state: Option<usize>,
+                     all_edges: &[EdgeList]|
      -> Option<String> {
+        let trace_path: Vec<usize> = if let Some(idx) = error_state {
+            let mut path = Vec::new();
+            let mut current = Some(idx);
+            while let Some(i) = current {
+                path.push(i);
+                current = parent[i];
+            }
+            path.reverse();
+            path
+        } else {
+            Vec::new()
+        };
+        let dot_ctx = DotExport {
+            states,
+            parents: parent,
+            vars: &spec.vars,
+            error_state,
+            all_edges,
+            trace_path: &trace_path,
+            mode: config.dot_mode,
+        };
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(ref path) = config.export_dot_path {
             match File::create(path) {
                 Ok(file) => {
                     let mut writer = BufWriter::new(file);
-                    if let Err(e) = export_dot(states, parent, &spec.vars, error_state, &mut writer)
-                    {
+                    if let Err(e) = export_dot(&dot_ctx, &mut writer) {
                         eprintln!("  Failed to write DOT export: {}", e);
                     } else {
                         eprintln!("  Exported state graph to {}", path.display());
@@ -414,7 +446,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         }
         if config.export_dot_string {
             let mut buf = Vec::new();
-            if export_dot(states, parent, &spec.vars, error_state, &mut buf).is_ok() {
+            if export_dot(&dot_ctx, &mut buf).is_ok() {
                 return String::from_utf8(buf).ok();
             }
         }
@@ -460,13 +492,13 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
         if stats.states_explored > config.max_states {
             stats.elapsed_secs = elapsed_secs();
-            stats.dot_graph = do_export(&states, &parent, None);
+            stats.dot_graph = do_export(&states, &parent, None, &all_edges);
             return CheckResult::MaxStatesExceeded(stats);
         }
 
         if depth > config.max_depth {
             stats.elapsed_secs = elapsed_secs();
-            stats.dot_graph = do_export(&states, &parent, None);
+            stats.dot_graph = do_export(&states, &parent, None, &all_edges);
             return CheckResult::MaxDepthExceeded(stats);
         }
 
@@ -513,7 +545,8 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                         let (trace, actions) =
                             reconstruct_trace(current_idx, &states, &parent, &parent_action);
                         stats.elapsed_secs = elapsed_secs();
-                        stats.dot_graph = do_export(&states, &parent, Some(current_idx));
+                        stats.dot_graph =
+                            do_export(&states, &parent, Some(current_idx), &all_edges);
                         return CheckResult::InvariantViolation(
                             Counterexample {
                                 trace,
@@ -527,7 +560,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 Ok(_) => {
                     let (trace, _actions) =
                         reconstruct_trace(current_idx, &states, &parent, &parent_action);
-                    let dot = do_export(&states, &parent, Some(current_idx));
+                    let dot = do_export(&states, &parent, Some(current_idx), &all_edges);
                     return CheckResult::InvariantError(
                         EvalError::TypeMismatch {
                             expected: "Bool",
@@ -542,7 +575,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 Err(e) => {
                     let (trace, _actions) =
                         reconstruct_trace(current_idx, &states, &parent, &parent_action);
-                    let dot = do_export(&states, &parent, Some(current_idx));
+                    let dot = do_export(&states, &parent, Some(current_idx), &all_edges);
                     return CheckResult::InvariantError(e, trace, dot);
                 }
             }
@@ -578,7 +611,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             Err(e) => {
                 let (trace, _actions) =
                     reconstruct_trace(current_idx, &states, &parent, &parent_action);
-                let dot = do_export(&states, &parent, Some(current_idx));
+                let dot = do_export(&states, &parent, Some(current_idx), &all_edges);
                 return CheckResult::NextError(e, trace, dot);
             }
         };
@@ -586,7 +619,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         if successors.is_empty() && !config.allow_deadlock {
             let (trace, actions) = reconstruct_trace(current_idx, &states, &parent, &parent_action);
             stats.elapsed_secs = elapsed_secs();
-            stats.dot_graph = do_export(&states, &parent, Some(current_idx));
+            stats.dot_graph = do_export(&states, &parent, Some(current_idx), &all_edges);
             return CheckResult::Deadlock(trace, actions, stats);
         }
 
@@ -596,14 +629,20 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             let (succ_idx, is_new) = states.insert_full(canonical);
             if is_new {
                 parent.push(Some(current_idx));
-                parent_action.push(transition.action);
+                parent_action.push(transition.action.clone());
+                if collect_edges {
+                    all_edges.push(Vec::new());
+                }
                 queue.push_back((succ_idx, depth + 1));
+            }
+            if collect_edges {
+                all_edges[current_idx].push((succ_idx, transition.action));
             }
         }
     }
 
     stats.elapsed_secs = elapsed_secs();
-    stats.dot_graph = do_export(&states, &parent, None);
+    stats.dot_graph = do_export(&states, &parent, None, &all_edges);
 
     if config.continue_on_violation {
         stats.violations_by_invariant = violation_counts_by_inv
@@ -1370,6 +1409,49 @@ mod tests {
                 assert!(dot.contains("digraph StateGraph"));
                 assert!(dot.contains("s0"));
                 assert!(dot.contains("s0 -> s1"));
+            }
+            other => panic!("expected Ok, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn export_dot_includes_back_edges() {
+        let spec = Spec {
+            vars: vec![var("count")],
+            constants: vec![],
+            extends: vec![],
+            definitions: BTreeMap::new(),
+            assumes: vec![],
+            instances: vec![],
+            init: Some(eq(var_expr("count"), lit_int(0))),
+            next: Some(eq(
+                prime_expr("count"),
+                Expr::Mod(
+                    Box::new(add(var_expr("count"), lit_int(1))),
+                    Box::new(lit_int(3)),
+                ),
+            )),
+            invariants: vec![lit_bool(true)],
+            invariant_names: vec![None],
+            fairness: vec![],
+            liveness_properties: vec![],
+        };
+
+        let domains = Env::new();
+        let config = CheckerConfig {
+            allow_deadlock: true,
+            export_dot_string: true,
+            ..CheckerConfig::default()
+        };
+        let result = check(&spec, &domains, &config);
+
+        match result {
+            CheckResult::Ok(stats) => {
+                assert_eq!(stats.states_explored, 3);
+                let dot = stats.dot_graph.expect("dot_graph should be Some");
+                assert!(dot.contains("s0 -> s1"), "missing edge 0→1");
+                assert!(dot.contains("s1 -> s2"), "missing edge 1→2");
+                assert!(dot.contains("s2 -> s0"), "missing back-edge 2→0");
             }
             other => panic!("expected Ok, got {:?}", other),
         }
