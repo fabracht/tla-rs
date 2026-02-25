@@ -665,6 +665,47 @@ fn test_cfg_twophase_auto_load() {
 }
 
 #[test]
+fn test_should_pass_inline_disjunction() {
+    let path = Path::new("test_cases/should_pass/inline_disjunction.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "inline_disjunction.tla should pass, got: {result:?}",
+    );
+}
+
+#[test]
+fn test_should_pass_specification_directive() {
+    let path = Path::new("test_cases/should_pass/specification_directive.tla");
+    let cfg_path = Path::new("test_cases/should_pass/specification_directive.cfg");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let cfg_input = fs::read_to_string(cfg_path).expect("failed to read cfg file");
+    let mut spec = parse(&input).expect("failed to parse spec");
+    let tlc_cfg = parse_cfg(&cfg_input).expect("failed to parse cfg");
+
+    let mut domains = Env::new();
+    let mut config = CheckerConfig::default();
+    config.spec_path = Some(path.to_path_buf());
+
+    apply_config(
+        &tlc_cfg,
+        &mut spec,
+        &mut domains,
+        &mut config,
+        &[],
+        &[],
+        false,
+    )
+    .expect("failed to apply config");
+
+    let result = check(&spec, &domains, &config);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "specification_directive.tla with SPECIFICATION directive should pass, got: {result:?}",
+    );
+}
+
+#[test]
 fn test_cfg_cli_constant_overrides_cfg() {
     let path = Path::new("test_cases/official/TwoPhase.tla");
     let cfg_input = "CONSTANT RM = {rm1, rm2, rm3}\nINIT TPInit\nNEXT TPNext\nINVARIANT TPTypeOK";
