@@ -50,21 +50,27 @@ impl Parser {
     fn parse_or(&mut self) -> Result<Expr> {
         let mut list_anchor = None;
         if *self.peek() == Token::Or {
-            list_anchor = Some((self.current_column(), self.current_line()));
+            list_anchor = Some(self.current_column());
             self.advance();
             self.consume_label();
         }
+        let mut item_line = self.current_line();
         let mut left = self.parse_and()?;
         while *self.peek() == Token::Or {
-            if let Some((lc, ll)) = list_anchor {
-                if self.col_mismatch(lc, ll) {
-                    break;
+            if let Some(lc) = list_anchor {
+                if self.paren_depth == 0 {
+                    let col = self.current_column();
+                    let line = self.current_line();
+                    if col != lc && line != item_line {
+                        break;
+                    }
                 }
             } else {
-                list_anchor = Some((self.current_column(), self.current_line()));
+                list_anchor = Some(self.current_column());
             }
             self.advance();
             let label = self.consume_label();
+            item_line = self.current_line();
             let right = self.parse_and()?;
             let right = wrap_with_label(right, label);
             left = Expr::Or(Box::new(left), Box::new(right));

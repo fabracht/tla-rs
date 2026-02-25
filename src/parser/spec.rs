@@ -149,10 +149,11 @@ impl Parser {
 
                     self.expect(Token::EqEq)?;
 
-                    if name.as_ref() == "Spec" {
+                    if name.as_ref() == "Spec" || name.ends_with("Spec") {
                         match self.parse_expr() {
                             Ok(spec_expr) => {
                                 self.extract_fairness_and_liveness(&spec_expr);
+                                self.definitions.insert(name, spec_expr);
                             }
                             Err(_) => {
                                 self.skip_to_next_definition();

@@ -187,6 +187,48 @@ mod tests {
     }
 
     #[test]
+    fn parse_inline_disjunctions_in_bulleted_list() {
+        let input = r#"
+            VARIABLES x
+
+            Init == x = 0
+
+            A == x' = 1
+            B == x' = 2
+            C == x' = 3
+            D == x' = 4
+            E == x' = 5
+
+            Next ==
+                \/ A \/ B \/ C
+                \/ D
+                \/ E
+        "#;
+        let spec = parse(input).unwrap();
+        assert!(spec.next.is_some());
+    }
+
+    #[test]
+    fn parse_spec_definition_stored() {
+        let input = r#"
+            VARIABLES x
+
+            Init == x = 0
+
+            Next == x' = x + 1
+
+            vars == <<x>>
+
+            Spec == Init /\ [][Next]_vars
+        "#;
+        let spec = parse(input).unwrap();
+        assert!(
+            spec.definitions.contains_key("Spec"),
+            "Spec definition should be stored in definitions"
+        );
+    }
+
+    #[test]
     fn parse_spec_counter() {
         let input = r#"
             VARIABLES count
