@@ -33,7 +33,6 @@ strip = true
 panic = "abort"
 
 [profile.bench]
-panic = "unwind"
 strip = false
 
 [profile.profiling]

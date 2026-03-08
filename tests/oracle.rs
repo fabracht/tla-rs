@@ -706,6 +706,41 @@ fn test_should_pass_specification_directive() {
 }
 
 #[test]
+fn test_should_pass_specification_directive_multi_var() {
+    let path = Path::new("test_cases/should_pass/specification_directive_multi_var.tla");
+    let cfg_path = Path::new("test_cases/should_pass/specification_directive_multi_var.cfg");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let cfg_input = fs::read_to_string(cfg_path).expect("failed to read cfg file");
+    let mut spec = parse(&input).expect("failed to parse spec");
+    let tlc_cfg = parse_cfg(&cfg_input).expect("failed to parse cfg");
+
+    let mut domains = Env::new();
+    let mut config = CheckerConfig::default();
+    config.spec_path = Some(path.to_path_buf());
+
+    apply_config(
+        &tlc_cfg,
+        &mut spec,
+        &mut domains,
+        &mut config,
+        &[],
+        &[],
+        false,
+    )
+    .expect("failed to apply config");
+
+    let result = check(&spec, &domains, &config);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "specification_directive_multi_var.tla with SPECIFICATION directive should pass, got: {result:?}",
+    );
+    if let CheckResult::Ok(stats) = &result {
+        assert_eq!(stats.states_explored, 4);
+        assert_eq!(stats.transitions, 8);
+    }
+}
+
+#[test]
 fn test_cfg_cli_constant_overrides_cfg() {
     let path = Path::new("test_cases/official/TwoPhase.tla");
     let cfg_input = "CONSTANT RM = {rm1, rm2, rm3}\nINIT TPInit\nNEXT TPNext\nINVARIANT TPTypeOK";
