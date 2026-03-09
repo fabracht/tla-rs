@@ -871,3 +871,23 @@ fn test_should_error_extends_parse_error() {
         ),
     }
 }
+
+#[test]
+fn test_should_error_extends_cycle() {
+    let path = Path::new("test_cases/should_error/extends_cycle/extends_cycle.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    match result {
+        CheckResult::InitError(e) => {
+            let msg = format!("{:?}", e);
+            assert!(
+                msg.contains("cyclic"),
+                "error should mention cyclic dependency, got: {}",
+                msg
+            );
+        }
+        other => panic!(
+            "extends_cycle.tla should produce InitError, got: {:?}",
+            other
+        ),
+    }
+}

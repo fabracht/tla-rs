@@ -1,5 +1,3 @@
-#[cfg(not(target_arch = "wasm32"))]
-use std::collections::BTreeSet;
 use std::collections::{BTreeMap, VecDeque};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
@@ -24,7 +22,7 @@ use crate::export::{DotExport, DotMode, EdgeList, export_dot};
 use crate::graph::StateGraph;
 use crate::liveness::{self, LivenessViolation};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::modules::{ModuleRegistry, resolve_instances};
+use crate::modules::{ModuleError, ModuleRegistry, resolve_instances};
 use crate::scc::compute_sccs;
 use crate::stdlib;
 use crate::symmetry::SymmetryConfig;
@@ -131,6 +129,83 @@ pub enum CheckResult {
     MissingConstants(Vec<Arc<str>>),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn load_module_extends(
+    name: &Arc<str>,
+    spec_path: &std::path::Path,
+    registry: &mut ModuleRegistry,
+    domains: &mut crate::ast::Env,
+    extended_defs: &mut Definitions,
+    ancestors: &mut Vec<Arc<str>>,
+) -> Result<(), EvalError> {
+    if ancestors.iter().any(|a| a == name) {
+        let mut cycle_path: Vec<String> = ancestors
+            .iter()
+            .skip_while(|a| a.as_ref() != name.as_ref())
+            .map(|a| a.to_string())
+            .collect();
+        cycle_path.push(name.to_string());
+        return Err(EvalError::DomainError {
+            message: format!("cyclic EXTENDS dependency: {}", cycle_path.join(" -> ")),
+            span: None,
+        });
+    }
+
+    if let Some(cached) = registry.get(name) {
+        for (def_name, def) in &cached.definitions {
+            extended_defs.insert(def_name.clone(), def.clone());
+        }
+        return Ok(());
+    }
+
+    let (child_extends, child_defs) = match registry.load(name, spec_path) {
+        Ok(loaded) => (loaded.extends.clone(), loaded.definitions.clone()),
+        Err(ModuleError::NotFound(_)) => {
+            return Err(EvalError::DomainError {
+                message: format!(
+                    "module {} not found (no file {}.tla in spec directory)",
+                    name, name
+                ),
+                span: None,
+            });
+        }
+        Err(ModuleError::ParseError(msg)) => {
+            return Err(EvalError::DomainError {
+                message: format!("parse error in module {}: {}", name, msg),
+                span: None,
+            });
+        }
+        Err(ModuleError::CyclicDependency(dep)) => {
+            return Err(EvalError::DomainError {
+                message: format!("cyclic dependency loading module {}", dep),
+                span: None,
+            });
+        }
+        Err(ModuleError::IoError(msg)) => {
+            return Err(EvalError::DomainError {
+                message: format!("I/O error loading module {}: {}", name, msg),
+                span: None,
+            });
+        }
+    };
+
+    ancestors.push(name.clone());
+    for ext in &child_extends {
+        if stdlib::is_stdlib_module(ext) {
+            stdlib::load_module(ext, domains);
+        } else {
+            load_module_extends(ext, spec_path, registry, domains, extended_defs, ancestors)?;
+        }
+    }
+    ancestors.pop();
+
+    for (def_name, def) in child_defs {
+        extended_defs.insert(def_name, def);
+    }
+
+    Ok(())
+}
+
 pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult {
     let user_constants = domains.clone();
     let mut domains = Env::new();
@@ -146,54 +221,20 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(ref spec_path) = config.spec_path {
         let mut registry = ModuleRegistry::new();
-        let mut worklist: Vec<Arc<str>> = spec
-            .extends
-            .iter()
-            .filter(|m| !stdlib::is_stdlib_module(m))
-            .cloned()
-            .collect();
-        let mut visited: BTreeSet<Arc<str>> = worklist.iter().cloned().collect();
-        while let Some(module) = worklist.pop() {
-            match registry.load(&module, spec_path) {
-                Ok(loaded) => {
-                    for ext in &loaded.extends {
-                        if stdlib::is_stdlib_module(ext) {
-                            stdlib::load_module(ext, &mut domains);
-                        } else if visited.insert(ext.clone()) {
-                            worklist.push(ext.clone());
-                        }
-                    }
-                    for (name, def) in &loaded.definitions {
-                        extended_defs.insert(name.clone(), def.clone());
-                    }
-                }
-                Err(crate::modules::ModuleError::NotFound(_)) => {
-                    return CheckResult::InitError(EvalError::DomainError {
-                        message: format!(
-                            "module {} not found (no file {}.tla in spec directory)",
-                            module, module
-                        ),
-                        span: None,
-                    });
-                }
-                Err(crate::modules::ModuleError::ParseError(msg)) => {
-                    return CheckResult::InitError(EvalError::DomainError {
-                        message: format!("parse error in module {}: {}", module, msg),
-                        span: None,
-                    });
-                }
-                Err(crate::modules::ModuleError::CyclicDependency(name)) => {
-                    return CheckResult::InitError(EvalError::DomainError {
-                        message: format!("cyclic dependency loading module {}", name),
-                        span: None,
-                    });
-                }
-                Err(crate::modules::ModuleError::IoError(msg)) => {
-                    return CheckResult::InitError(EvalError::DomainError {
-                        message: format!("I/O error loading module {}: {}", module, msg),
-                        span: None,
-                    });
-                }
+        let mut ancestors: Vec<Arc<str>> = Vec::new();
+        for module in &spec.extends {
+            if stdlib::is_stdlib_module(module) {
+                continue;
+            }
+            if let Err(err) = load_module_extends(
+                module,
+                spec_path,
+                &mut registry,
+                &mut domains,
+                &mut extended_defs,
+                &mut ancestors,
+            ) {
+                return CheckResult::InitError(err);
             }
         }
     }
