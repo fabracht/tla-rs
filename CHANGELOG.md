@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.4] - 2026-03-08
+
+### Fixed
+
+- `SPECIFICATION` cfg directive extracting only the first init conjunct, producing 0 initial states for multi-variable specs
+
 ## [0.3.3] - 2026-02-25
 
 ### Added
