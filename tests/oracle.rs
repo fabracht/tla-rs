@@ -783,3 +783,71 @@ fn test_cfg_cli_constant_overrides_cfg() {
         other => panic!("TwoPhase with CLI override should pass, got: {:?}", other),
     }
 }
+
+#[test]
+fn test_should_error_extends_missing_module() {
+    let path = Path::new("test_cases/should_error/extends_missing_module.tla");
+    let result = check_spec_file(path);
+    match result {
+        CheckResult::InitError(e) => {
+            let msg = format!("{:?}", e);
+            assert!(
+                msg.contains("NotThere"),
+                "error should mention missing module name, got: {}",
+                msg
+            );
+        }
+        other => panic!(
+            "extends_missing_module.tla should produce InitError, got: {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_should_pass_extends_file_module() {
+    let path = Path::new("test_cases/should_pass/extends_file_module/extends_file_module.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "extends_file_module.tla should pass, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_pass_extends_transitive() {
+    let path = Path::new("test_cases/should_pass/extends_transitive/extends_transitive.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "extends_transitive.tla should pass, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_pass_extends_override() {
+    let path = Path::new("test_cases/should_pass/extends_override/extends_override.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    match &result {
+        CheckResult::Ok(stats) => {
+            assert_eq!(
+                stats.states_explored, 4,
+                "spec Limit=3 should produce 4 states (0,1,2,3)"
+            );
+        }
+        other => panic!("extends_override.tla should pass, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_should_pass_extends_multiple() {
+    let path = Path::new("test_cases/should_pass/extends_multiple/extends_multiple.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "extends_multiple.tla should pass, got: {:?}",
+        result
+    );
+}

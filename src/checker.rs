@@ -140,6 +140,66 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         domains.insert(k, v);
     }
 
+    let mut extended_defs: Definitions = BTreeMap::new();
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(ref spec_path) = config.spec_path {
+        let mut registry = ModuleRegistry::new();
+        let mut worklist: Vec<Arc<str>> = spec
+            .extends
+            .iter()
+            .filter(|m| !stdlib::is_stdlib_module(m))
+            .cloned()
+            .collect();
+        let mut visited: std::collections::BTreeSet<Arc<str>> = worklist.iter().cloned().collect();
+        while let Some(module) = worklist.pop() {
+            match registry.load(&module, spec_path) {
+                Ok(loaded) => {
+                    for ext in &loaded.extends {
+                        if stdlib::is_stdlib_module(ext) {
+                            stdlib::load_module(ext, &mut domains);
+                        } else if visited.insert(ext.clone()) {
+                            worklist.push(ext.clone());
+                        }
+                    }
+                    for (name, def) in &loaded.definitions {
+                        extended_defs.insert(name.clone(), def.clone());
+                    }
+                }
+                Err(crate::modules::ModuleError::NotFound(_)) => {
+                    return CheckResult::InitError(EvalError::DomainError {
+                        message: format!(
+                            "module {} not found (no file {}.tla in spec directory)",
+                            module, module
+                        ),
+                        span: None,
+                    });
+                }
+                Err(crate::modules::ModuleError::ParseError(msg)) => {
+                    return CheckResult::InitError(EvalError::DomainError {
+                        message: format!("parse error in module {}: {}", module, msg),
+                        span: None,
+                    });
+                }
+                Err(crate::modules::ModuleError::CyclicDependency(name)) => {
+                    return CheckResult::InitError(EvalError::DomainError {
+                        message: format!("cyclic dependency loading module {}", name),
+                        span: None,
+                    });
+                }
+                Err(crate::modules::ModuleError::IoError(msg)) => {
+                    return CheckResult::InitError(EvalError::DomainError {
+                        message: format!("I/O error loading module {}: {}", module, msg),
+                        span: None,
+                    });
+                }
+            }
+        }
+    }
+    for (name, def) in &spec.definitions {
+        extended_defs.insert(name.clone(), def.clone());
+    }
+    let defs = extended_defs;
+
     for inst in &spec.instances {
         if stdlib::is_stdlib_module(&inst.module_name) {
             stdlib::load_module(&inst.module_name, &mut domains);
@@ -195,7 +255,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     }
 
     for (idx, assume) in spec.assumes.iter().enumerate() {
-        match eval(assume, &mut domains, &spec.definitions) {
+        match eval(assume, &mut domains, &defs) {
             Ok(Value::Bool(true)) => {}
             Ok(Value::Bool(false)) => return CheckResult::AssumeViolation(idx),
             Ok(_) => {
@@ -277,7 +337,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     if !config.quiet {
         eprintln!("  Computing initial states...");
     }
-    let initial = match init_states(init_expr, &spec.vars, &domains, &spec.definitions) {
+    let initial = match init_states(init_expr, &spec.vars, &domains, &defs) {
         Ok(states) => states,
         Err(e) => return CheckResult::InitError(e),
     };
@@ -341,7 +401,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     let count_exprs: Vec<(Arc<str>, Expr)> = config
         .count_properties
         .iter()
-        .filter_map(|name| match spec.definitions.get(name) {
+        .filter_map(|name| match defs.get(name) {
             Some((params, expr)) if params.is_empty() => Some((name.clone(), expr.clone())),
             Some(_) => {
                 if !config.quiet {
@@ -526,7 +586,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         };
 
         for (idx, invariant) in spec.invariants.iter().enumerate() {
-            match eval_with_context(invariant, &mut env, &spec.definitions, &ctx) {
+            match eval_with_context(invariant, &mut env, &defs, &ctx) {
                 Ok(Value::Bool(true)) => {}
                 Ok(Value::Bool(false)) => {
                     if config.continue_on_violation {
@@ -585,7 +645,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             for (idx, (_name, expr)) in count_exprs.iter().enumerate() {
                 let entry = &mut property_counters[idx];
                 *entry.depth_total.entry(depth).or_default() += 1;
-                match eval_with_context(expr, &mut env, &spec.definitions, &ctx) {
+                match eval_with_context(expr, &mut env, &defs, &ctx) {
                     Ok(Value::Bool(true)) => {
                         entry.satisfied += 1;
                         *entry.depth_satisfied.entry(depth).or_default() += 1;
@@ -605,7 +665,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             &spec.vars,
             &primed_vars,
             &mut reusable_env,
-            &spec.definitions,
+            &defs,
         ) {
             Ok(s) => s,
             Err(e) => {
@@ -664,7 +724,8 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         if !config.quiet {
             eprintln!("  Running liveness checking...");
         }
-        match check_liveness_properties(spec, &states, &parent, &domains, &symmetry, config) {
+        match check_liveness_properties(spec, &states, &parent, &domains, &symmetry, config, &defs)
+        {
             Ok(None) => {}
             Ok(Some(violation)) => {
                 return CheckResult::LivenessViolation(violation, stats);
@@ -685,6 +746,7 @@ fn check_liveness_properties(
     domains: &Env,
     symmetry: &SymmetryConfig,
     config: &CheckerConfig,
+    defs: &Definitions,
 ) -> Result<Option<LivenessViolation>, EvalError> {
     let mut graph = StateGraph::new();
 
@@ -708,7 +770,7 @@ fn check_liveness_properties(
             &spec.vars,
             &primed_vars,
             &mut reusable_env,
-            &spec.definitions,
+            defs,
         )?;
         for transition in successors {
             let canonical = symmetry.canonicalize(&transition.state);
@@ -731,25 +793,22 @@ fn check_liveness_properties(
         );
     }
 
-    if !spec.fairness.is_empty() {
-        let defs: Definitions = spec.definitions.clone();
-        if let Some(scc_idx) =
-            liveness::find_violating_scc(&graph, &sccs, &spec.fairness, &spec.vars, domains, &defs)?
-        {
-            let violation = liveness::build_counterexample(
-                &graph,
-                &sccs[scc_idx],
-                &spec.fairness,
-                &spec.vars,
-                domains,
-                &defs,
-            )?;
-            return Ok(Some(violation));
-        }
+    if !spec.fairness.is_empty()
+        && let Some(scc_idx) =
+            liveness::find_violating_scc(&graph, &sccs, &spec.fairness, &spec.vars, domains, defs)?
+    {
+        let violation = liveness::build_counterexample(
+            &graph,
+            &sccs[scc_idx],
+            &spec.fairness,
+            &spec.vars,
+            domains,
+            defs,
+        )?;
+        return Ok(Some(violation));
     }
 
     for property in &spec.liveness_properties {
-        let defs: Definitions = spec.definitions.clone();
         for scc in &sccs {
             if !liveness::check_fairness_in_scc(
                 &graph,
@@ -757,16 +816,16 @@ fn check_liveness_properties(
                 &spec.fairness,
                 &spec.vars,
                 domains,
-                &defs,
+                defs,
             )? {
                 continue;
             }
 
             let property_satisfied = match property {
                 Expr::LeadsTo(p, q) => {
-                    liveness::check_leads_to(&graph, scc, p, q, domains, &defs, &spec.vars)?
+                    liveness::check_leads_to(&graph, scc, p, q, domains, defs, &spec.vars)?
                 }
-                _ => liveness::check_eventually(&graph, scc, property, domains, &defs, &spec.vars)?,
+                _ => liveness::check_eventually(&graph, scc, property, domains, defs, &spec.vars)?,
             };
 
             if !property_satisfied {
