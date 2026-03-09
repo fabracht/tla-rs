@@ -615,31 +615,23 @@ fn find_box_action(expr: &Expr) -> Option<Expr> {
     }
 }
 
-fn collect_non_box_conjuncts(expr: &Expr, out: &mut Vec<Expr>) {
+fn collect_init(expr: &Expr) -> Option<Expr> {
     match expr {
-        Expr::BoxAction(_, _) => {}
-        Expr::And(l, r) => {
-            collect_non_box_conjuncts(l, out);
-            collect_non_box_conjuncts(r, out);
-        }
-        other => out.push(other.clone()),
+        Expr::BoxAction(_, _) => None,
+        Expr::And(l, r) => match (collect_init(l), collect_init(r)) {
+            (Some(a), Some(b)) => Some(Expr::And(Box::new(a), Box::new(b))),
+            (a, None) => a,
+            (None, b) => b,
+        },
+        other => Some(other.clone()),
     }
-}
-
-fn conjoin(parts: Vec<Expr>) -> Option<Expr> {
-    parts
-        .into_iter()
-        .reduce(|acc, e| Expr::And(Box::new(acc), Box::new(e)))
 }
 
 fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<(), String> {
     match spec.definitions.get(spec_name.as_ref()) {
         Some((params, expr)) if params.is_empty() => {
             if let Some(next_expr) = find_box_action(expr) {
-                let mut init_parts = Vec::new();
-                collect_non_box_conjuncts(expr, &mut init_parts);
-                let init_expr = conjoin(init_parts).unwrap_or(Expr::Lit(Value::Bool(true)));
-                spec.init = Some(init_expr);
+                spec.init = Some(collect_init(expr).unwrap_or(Expr::Lit(Value::Bool(true))));
                 spec.next = Some(next_expr);
                 return Ok(());
             }
@@ -1069,14 +1061,8 @@ mod tests {
         .unwrap();
 
         let expected_init = Expr::And(Box::new(init_part_1), Box::new(init_part_2));
-        assert_eq!(
-            format!("{:?}", spec.init.unwrap()),
-            format!("{expected_init:?}")
-        );
-        assert_eq!(
-            format!("{:?}", spec.next.unwrap()),
-            format!("{next_expr:?}")
-        );
+        assert_eq!(spec.init.unwrap(), expected_init);
+        assert_eq!(spec.next.unwrap(), next_expr);
     }
 
     #[test]
