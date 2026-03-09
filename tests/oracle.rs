@@ -851,3 +851,23 @@ fn test_should_pass_extends_multiple() {
         result
     );
 }
+
+#[test]
+fn test_should_error_extends_parse_error() {
+    let path = Path::new("test_cases/should_error/extends_parse_error/extends_parse_error.tla");
+    let result = check_spec_file(path);
+    match result {
+        CheckResult::InitError(e) => {
+            let msg = format!("{:?}", e);
+            assert!(
+                msg.contains("Broken"),
+                "error should mention the broken module name, got: {}",
+                msg
+            );
+        }
+        other => panic!(
+            "extends_parse_error.tla should produce InitError, got: {:?}",
+            other
+        ),
+    }
+}

@@ -1,3 +1,5 @@
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::BTreeSet;
 use std::collections::{BTreeMap, VecDeque};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
@@ -150,7 +152,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             .filter(|m| !stdlib::is_stdlib_module(m))
             .cloned()
             .collect();
-        let mut visited: std::collections::BTreeSet<Arc<str>> = worklist.iter().cloned().collect();
+        let mut visited: BTreeSet<Arc<str>> = worklist.iter().cloned().collect();
         while let Some(module) = worklist.pop() {
             match registry.load(&module, spec_path) {
                 Ok(loaded) => {
