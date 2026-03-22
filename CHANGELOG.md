@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.5] - 2026-03-21
+
+### Fixed
+
+- `contains_prime_ref` infinite recursion when analyzing `RECURSIVE` operator bodies, causing the checker to hang on any spec using recursive operators inside Next actions
+
 ## [0.3.4] - 2026-03-08
 
 ### Fixed
