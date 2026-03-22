@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::Definitions;
@@ -115,6 +116,15 @@ pub(crate) fn collect_disjuncts_with_labels<'a>(
 }
 
 pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
+    let mut visited = BTreeSet::new();
+    contains_prime_ref_impl(expr, defs, &mut visited)
+}
+
+fn contains_prime_ref_impl(
+    expr: &Expr,
+    defs: &Definitions,
+    visited: &mut BTreeSet<Arc<str>>,
+) -> bool {
     match expr {
         Expr::Prime(_) | Expr::Unchanged(_) => true,
         Expr::Var(_)
@@ -151,7 +161,7 @@ pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
         | Expr::BagCardinality(e)
         | Expr::Always(e)
         | Expr::Eventually(e)
-        | Expr::EnabledOp(e) => contains_prime_ref(e, defs),
+        | Expr::EnabledOp(e) => contains_prime_ref_impl(e, defs, visited),
         Expr::And(l, r)
         | Expr::Or(l, r)
         | Expr::Implies(l, r)
@@ -196,11 +206,13 @@ pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
         | Expr::BagOfAll(l, r)
         | Expr::CopiesIn(l, r)
         | Expr::SqSubseteq(l, r)
-        | Expr::LeadsTo(l, r) => contains_prime_ref(l, defs) || contains_prime_ref(r, defs),
+        | Expr::LeadsTo(l, r) => {
+            contains_prime_ref_impl(l, defs, visited) || contains_prime_ref_impl(r, defs, visited)
+        }
         Expr::If(c, t, e) | Expr::SubSeq(c, t, e) => {
-            contains_prime_ref(c, defs)
-                || contains_prime_ref(t, defs)
-                || contains_prime_ref(e, defs)
+            contains_prime_ref_impl(c, defs, visited)
+                || contains_prime_ref_impl(t, defs, visited)
+                || contains_prime_ref_impl(e, defs, visited)
         }
         Expr::Forall(_, d, b)
         | Expr::Exists(_, d, b)
@@ -208,26 +220,36 @@ pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
         | Expr::FnDef(_, d, b)
         | Expr::SetFilter(_, d, b)
         | Expr::SetMap(_, d, b)
-        | Expr::CustomOp(_, d, b) => contains_prime_ref(d, defs) || contains_prime_ref(b, defs),
-        Expr::SetEnum(elems) | Expr::TupleLit(elems) => {
-            elems.iter().any(|e| contains_prime_ref(e, defs))
+        | Expr::CustomOp(_, d, b) => {
+            contains_prime_ref_impl(d, defs, visited) || contains_prime_ref_impl(b, defs, visited)
         }
-        Expr::RecordLit(fields) | Expr::RecordSet(fields) => {
-            fields.iter().any(|(_, e)| contains_prime_ref(e, defs))
+        Expr::SetEnum(elems) | Expr::TupleLit(elems) => elems
+            .iter()
+            .any(|e| contains_prime_ref_impl(e, defs, visited)),
+        Expr::RecordLit(fields) | Expr::RecordSet(fields) => fields
+            .iter()
+            .any(|(_, e)| contains_prime_ref_impl(e, defs, visited)),
+        Expr::RecordAccess(r, _) | Expr::TupleAccess(r, _) => {
+            contains_prime_ref_impl(r, defs, visited)
         }
-        Expr::RecordAccess(r, _) | Expr::TupleAccess(r, _) => contains_prime_ref(r, defs),
         Expr::Except(b, u) => {
-            contains_prime_ref(b, defs)
+            contains_prime_ref_impl(b, defs, visited)
                 || u.iter().any(|(path, val)| {
-                    path.iter().any(|p| contains_prime_ref(p, defs))
-                        || contains_prime_ref(val, defs)
+                    path.iter()
+                        .any(|p| contains_prime_ref_impl(p, defs, visited))
+                        || contains_prime_ref_impl(val, defs, visited)
                 })
         }
         Expr::FnCall(name, args) => {
             if let Some((_, body)) = defs.get(name) {
-                contains_prime_ref(body, defs)
+                if visited.contains(name) {
+                    return false;
+                }
+                visited.insert(name.clone());
+                contains_prime_ref_impl(body, defs, visited)
             } else {
-                args.iter().any(|a| contains_prime_ref(a, defs))
+                args.iter()
+                    .any(|a| contains_prime_ref_impl(a, defs, visited))
             }
         }
         Expr::QualifiedCall(instance_expr, op, _) => match instance_expr.as_ref() {
@@ -238,25 +260,26 @@ pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
                     if let Some(instance_defs) = instances.get(instance_name)
                         && let Some((_, body)) = instance_defs.get(op)
                     {
-                        return contains_prime_ref(body, defs);
+                        return contains_prime_ref_impl(body, defs, visited);
                     }
                     true
                 })
             }
             _ => true,
         },
-        Expr::Lambda(_, body) => contains_prime_ref(body, defs),
+        Expr::Lambda(_, body) => contains_prime_ref_impl(body, defs, visited),
         Expr::Let(_, binding, body) => {
-            contains_prime_ref(binding, defs) || contains_prime_ref(body, defs)
+            contains_prime_ref_impl(binding, defs, visited)
+                || contains_prime_ref_impl(body, defs, visited)
         }
-        Expr::Case(branches) => branches
-            .iter()
-            .any(|(c, r)| contains_prime_ref(c, defs) || contains_prime_ref(r, defs)),
-        Expr::LabeledAction(_, a) => contains_prime_ref(a, defs),
+        Expr::Case(branches) => branches.iter().any(|(c, r)| {
+            contains_prime_ref_impl(c, defs, visited) || contains_prime_ref_impl(r, defs, visited)
+        }),
+        Expr::LabeledAction(_, a) => contains_prime_ref_impl(a, defs, visited),
         Expr::WeakFairness(_, e)
         | Expr::StrongFairness(_, e)
         | Expr::BoxAction(e, _)
-        | Expr::DiamondAction(e, _) => contains_prime_ref(e, defs),
+        | Expr::DiamondAction(e, _) => contains_prime_ref_impl(e, defs, visited),
     }
 }
 
