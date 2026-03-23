@@ -209,6 +209,17 @@ fn test_should_pass_recursive_factorial() {
 }
 
 #[test]
+fn test_should_pass_recursive_in_next() {
+    let path = Path::new("test_cases/should_pass/recursive_in_next.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "recursive_in_next.tla should pass, got: {:?}",
+        result
+    );
+}
+
+#[test]
 fn test_should_pass_exponentiation() {
     let path = Path::new("test_cases/should_pass/exponentiation.tla");
     let result = check_spec_file(path);
