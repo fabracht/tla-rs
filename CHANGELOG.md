@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.6] - 2026-03-23
+
+### Fixed
+
+- IF expressions with bulleted conjunction lists as conditions (`IF /\ cond1 /\ cond2 THEN`)
+- IF conditions with multi-line inline conjunctions where `/\` is outdented relative to the first operand
+- Leading `/\` in IF THEN/ELSE branches (e.g., `THEN /\ expr1 /\ expr2`)
+- Nested EXCEPT updates through records inside functions (`[f EXCEPT ![key].field = val]`)
+
 ## [0.3.5] - 2026-03-22
 
 ### Fixed
