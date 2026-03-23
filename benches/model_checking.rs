@@ -122,6 +122,7 @@ fn bench_tcommit(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(test)]
 fn validate_benchmarks() {
     let large_counter_text = include_str!("../test_cases/benchmark/large_counter.tla");
     let large_counter = parse(large_counter_text).expect("failed to parse large_counter.tla");
