@@ -274,8 +274,39 @@ pub(crate) fn update_nested(
     })?;
     match inner {
         Value::Fn(inner_fn) => update_nested(inner_fn, &keys[1..], val),
+        Value::Record(rec) => update_nested_record(rec, &keys[1..], val),
         _ => Err(EvalError::TypeMismatch {
-            expected: "Fn",
+            expected: "Fn or Record",
+            got: inner.clone(),
+            context: Some("nested EXCEPT update"),
+            span: None,
+        }),
+    }
+}
+
+fn update_nested_record(
+    rec: &mut BTreeMap<Arc<str>, Value>,
+    keys: &[Value],
+    val: Value,
+) -> Result<()> {
+    let Value::Str(field) = &keys[0] else {
+        return Err(EvalError::domain_error(format!(
+            "expected string key for record field, got {}",
+            format_value(&keys[0])
+        )));
+    };
+    if keys.len() == 1 {
+        rec.insert(field.clone(), val);
+        return Ok(());
+    }
+    let inner = rec
+        .get_mut(field)
+        .ok_or_else(|| EvalError::domain_error(format!("field '{}' not found in record", field)))?;
+    match inner {
+        Value::Fn(inner_fn) => update_nested(inner_fn, &keys[1..], val),
+        Value::Record(inner_rec) => update_nested_record(inner_rec, &keys[1..], val),
+        _ => Err(EvalError::TypeMismatch {
+            expected: "Fn or Record",
             got: inner.clone(),
             context: Some("nested EXCEPT update"),
             span: None,

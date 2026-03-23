@@ -426,7 +426,18 @@ impl Parser {
     }
 
     pub(super) fn parse_if(&mut self) -> Result<Expr> {
-        let cond = self.parse_single_expr()?;
+        let cond = if *self.peek() == Token::And {
+            self.advance();
+            let mut left = self.parse_comparison()?;
+            while *self.peek() == Token::And {
+                self.advance();
+                let right = self.parse_comparison()?;
+                left = Expr::And(Box::new(left), Box::new(right));
+            }
+            left
+        } else {
+            self.parse_expr()?
+        };
         self.expect(Token::Then)?;
         let then_br = self.parse_single_expr()?;
         self.expect(Token::Else)?;

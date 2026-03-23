@@ -212,6 +212,25 @@ impl Parser {
     }
 
     fn parse_single_and(&mut self) -> Result<Expr> {
+        if *self.peek() == Token::And {
+            let anchor_col = self.current_column();
+            self.advance();
+            self.consume_label();
+            let first_line = self.current_line();
+            let mut left = self.parse_comparison()?;
+            while *self.peek() == Token::And {
+                let col = self.current_column();
+                let line = self.current_line();
+                if self.paren_depth == 0 && line != first_line && col != anchor_col {
+                    break;
+                }
+                self.advance();
+                let right = self.parse_comparison()?;
+                left = Expr::And(Box::new(left), Box::new(right));
+            }
+            return Ok(left);
+        }
+
         let start_col = self.current_column();
         let start_line = self.current_line();
         let mut left = self.parse_comparison()?;
