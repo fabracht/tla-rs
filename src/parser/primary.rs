@@ -356,7 +356,7 @@ impl Parser {
         let var = self.expect_ident()?;
         if *self.peek() == Token::In {
             self.advance();
-            let domain = self.parse_additive()?;
+            let domain = self.parse_range()?;
             self.expect(Token::Colon)?;
             let body = self.parse_expr()?;
             Ok(Expr::Choose(var, Box::new(domain), Box::new(body)))
@@ -504,7 +504,7 @@ impl Parser {
                 self.advance();
                 let param = self.expect_ident()?;
                 self.expect(Token::In)?;
-                let domain = self.parse_additive()?;
+                let domain = self.parse_range()?;
                 self.expect(Token::RBracket)?;
                 self.expect(Token::EqEq)?;
                 let body = self.parse_expr()?;

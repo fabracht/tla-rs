@@ -231,6 +231,16 @@ fn test_should_pass_recursive_in_next() {
 }
 
 #[test]
+fn test_should_pass_recursive_dotdot() {
+    let path = Path::new("test_cases/should_pass/recursive_dotdot.tla");
+    let result = check_spec_file(path);
+    match &result {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 2),
+        _ => panic!("recursive_dotdot.tla should pass, got: {:?}", result),
+    }
+}
+
+#[test]
 fn test_should_pass_exponentiation() {
     let path = Path::new("test_cases/should_pass/exponentiation.tla");
     let result = check_spec_file(path);
