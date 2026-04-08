@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use crate::ast::{Env, Value};
-use crate::checker::{CheckResult, CheckerConfig, check, format_eval_error, format_trace};
+use crate::checker::{
+    CheckResult, CheckerConfig, PrepareSpecError, check, format_eval_error, format_trace,
+};
 use crate::config::{apply_config, parse_cfg};
 use crate::export::DotMode;
 use crate::parser::parse;
@@ -314,24 +316,6 @@ fn result_to_wasm(
             dot,
             warnings,
         },
-        CheckResult::AssumeViolation(idx) => WasmCheckResult {
-            success: false,
-            error_type: Some("AssumeViolation".into()),
-            error_message: Some(format!("Assume {} violated", idx)),
-            states_explored: 0,
-            trace: None,
-            dot: None,
-            warnings,
-        },
-        CheckResult::AssumeError(idx, e) => WasmCheckResult {
-            success: false,
-            error_type: Some("AssumeError".into()),
-            error_message: Some(format!("Assume {} error: {}", idx, format_eval_error(&e))),
-            states_explored: 0,
-            trace: None,
-            dot: None,
-            warnings,
-        },
         CheckResult::MaxStatesExceeded(stats) => WasmCheckResult {
             success: false,
             error_type: Some("MaxStatesExceeded".into()),
@@ -359,7 +343,16 @@ fn result_to_wasm(
             dot: None,
             warnings,
         },
-        CheckResult::MissingConstants(missing) => WasmCheckResult {
+        CheckResult::PrepareError(PrepareSpecError::InstanceError(e)) => WasmCheckResult {
+            success: false,
+            error_type: Some("InstanceError".into()),
+            error_message: Some(format_eval_error(&e)),
+            states_explored: 0,
+            trace: None,
+            dot: None,
+            warnings,
+        },
+        CheckResult::PrepareError(PrepareSpecError::MissingConstants(missing)) => WasmCheckResult {
             success: false,
             error_type: Some("MissingConstants".into()),
             error_message: Some(format!(
@@ -370,6 +363,24 @@ fn result_to_wasm(
                     .collect::<Vec<_>>()
                     .join(", ")
             )),
+            states_explored: 0,
+            trace: None,
+            dot: None,
+            warnings,
+        },
+        CheckResult::PrepareError(PrepareSpecError::AssumeViolation(idx)) => WasmCheckResult {
+            success: false,
+            error_type: Some("AssumeViolation".into()),
+            error_message: Some(format!("Assume {} violated", idx)),
+            states_explored: 0,
+            trace: None,
+            dot: None,
+            warnings,
+        },
+        CheckResult::PrepareError(PrepareSpecError::AssumeError(idx, e)) => WasmCheckResult {
+            success: false,
+            error_type: Some("AssumeError".into()),
+            error_message: Some(format!("Assume {} error: {}", idx, format_eval_error(&e))),
             states_explored: 0,
             trace: None,
             dot: None,
