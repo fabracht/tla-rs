@@ -67,7 +67,7 @@ impl CheckerStats {
 }
 
 thread_local! {
-    pub(super) static RNG: RefCell<fastrand::Rng> = RefCell::new(fastrand::Rng::with_seed(0));
+    pub(super) static RNG: RefCell<fastrand::Rng> = const { RefCell::new(fastrand::Rng::with_seed(0)) };
     pub(super) static TLC_STATE: RefCell<BTreeMap<i64, Value>> = const { RefCell::new(BTreeMap::new()) };
     pub(super) static CHECKER_STATS: RefCell<CheckerStats> = const { RefCell::new(CheckerStats::new()) };
     pub(super) static RESOLVED_INSTANCES: RefCell<ResolvedInstances> = const { RefCell::new(BTreeMap::new()) };
