@@ -12,6 +12,13 @@
 - Internal consolidation of `src/wasm.rs`: all four `wasm_bindgen` entry points now flow through a single `check_internal` helper, with shared `WasmCheckResult` constructors for the `CheckResult → JSON` mapping (no public API change)
 - `prepare_spec` and `CheckerConfig::spec_path` are now compiled on `wasm32-unknown-unknown`, fixing the previously broken target build
 
+## [0.3.8] - 2026-04-07
+
+### Fixed
+
+- Variant names in wasm.rs (`CheckResult` arm names matched against wrong string literals)
+- Clippy `missing_const_for_thread_local` warning on `RNG` thread-local
+
 ## [0.3.7] - 2026-04-03
 
 ### Fixed
