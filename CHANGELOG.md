@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.9] - 2026-04-08
+
+### Added
+
+- CI jobs `clippy-wasm`, `test-wasm`, and `build-wasm32` exercising the `wasm` feature on host and the real `wasm32-unknown-unknown` target
+- Host-runnable tests covering every `CheckResult` and `PrepareSpecError` variant exposed through the wasm bindings
+
+### Changed
+
+- Internal consolidation of `src/wasm.rs`: all four `wasm_bindgen` entry points now flow through a single `check_internal` helper, with shared `WasmCheckResult` constructors for the `CheckResult → JSON` mapping (no public API change)
+- `prepare_spec` and `CheckerConfig::spec_path` are now compiled on `wasm32-unknown-unknown`, fixing the previously broken target build
+
 ## [0.3.7] - 2026-04-03
 
 ### Fixed
