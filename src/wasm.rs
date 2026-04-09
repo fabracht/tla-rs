@@ -4,9 +4,10 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-use crate::ast::{Env, Value};
+use crate::ast::{Env, Spec, Value};
 use crate::checker::{
-    CheckResult, CheckerConfig, PrepareSpecError, check, format_eval_error, format_trace,
+    CheckResult, CheckStats, CheckerConfig, PrepareSpecError, check, format_eval_error,
+    format_trace,
 };
 use crate::config::{apply_config, parse_cfg};
 use crate::export::DotMode;
@@ -34,6 +35,75 @@ pub struct WasmCheckResult {
     pub warnings: Vec<String>,
 }
 
+impl WasmCheckResult {
+    fn ok(stats: CheckStats, warnings: Vec<String>) -> Self {
+        Self {
+            success: true,
+            error_type: None,
+            error_message: None,
+            states_explored: stats.states_explored,
+            trace: None,
+            dot: stats.dot_graph,
+            warnings,
+        }
+    }
+
+    fn err(error_type: &str, error_message: String, warnings: Vec<String>) -> Self {
+        Self {
+            success: false,
+            error_type: Some(error_type.into()),
+            error_message: Some(error_message),
+            states_explored: 0,
+            trace: None,
+            dot: None,
+            warnings,
+        }
+    }
+
+    fn err_with_stats(
+        error_type: &str,
+        error_message: String,
+        stats: CheckStats,
+        trace: Option<Vec<String>>,
+        warnings: Vec<String>,
+    ) -> Self {
+        Self {
+            success: false,
+            error_type: Some(error_type.into()),
+            error_message: Some(error_message),
+            states_explored: stats.states_explored,
+            trace,
+            dot: stats.dot_graph,
+            warnings,
+        }
+    }
+
+    fn err_with_trace(
+        error_type: &str,
+        error_message: String,
+        trace: Vec<String>,
+        dot: Option<String>,
+        warnings: Vec<String>,
+    ) -> Self {
+        Self {
+            success: false,
+            error_type: Some(error_type.into()),
+            error_message: Some(error_message),
+            states_explored: 0,
+            trace: Some(trace),
+            dot,
+            warnings,
+        }
+    }
+}
+
+struct WasmInputs {
+    spec: Spec,
+    domains: Env,
+    config: CheckerConfig,
+    warnings: Vec<String>,
+}
+
 #[wasm_bindgen]
 pub fn check_spec(spec_source: &str, constants_json: &str) -> String {
     let spec = match parse(spec_source) {
@@ -41,18 +111,16 @@ pub fn check_spec(spec_source: &str, constants_json: &str) -> String {
         Err(e) => return wasm_error("ParseError", format!("{e:?}")),
     };
 
-    let constants: BTreeMap<String, serde_json::Value> =
-        serde_json::from_str(constants_json).unwrap_or_default();
-
     let mut domains = Env::new();
-    for (k, v) in constants {
-        domains.insert(Arc::from(k), json_to_value(v));
-    }
+    apply_constants_json(&mut domains, constants_json);
 
-    let config = CheckerConfig::default();
-    let result = check(&spec, &domains, &config);
-
-    serde_json::to_string(&result_to_wasm(result, &spec.vars, vec![])).unwrap_or_default()
+    serde_json::to_string(&check_internal(WasmInputs {
+        spec,
+        domains,
+        config: CheckerConfig::default(),
+        warnings: Vec::new(),
+    }))
+    .unwrap_or_default()
 }
 
 #[wasm_bindgen]
@@ -69,19 +137,16 @@ pub fn check_spec_with_config(
         Err(e) => return wasm_error("ParseError", format!("{e:?}")),
     };
 
-    let constants: BTreeMap<String, serde_json::Value> =
-        serde_json::from_str(constants_json).unwrap_or_default();
-
     let mut domains = Env::new();
-    for (k, v) in constants {
-        domains.insert(Arc::from(k), json_to_value(v));
-    }
+    apply_constants_json(&mut domains, constants_json);
 
-    let config = build_config(max_states, max_depth, allow_deadlock, export_dot);
-
-    let result = check(&spec, &domains, &config);
-
-    serde_json::to_string(&result_to_wasm(result, &spec.vars, vec![])).unwrap_or_default()
+    serde_json::to_string(&check_internal(WasmInputs {
+        spec,
+        domains,
+        config: build_config(max_states, max_depth, allow_deadlock, export_dot),
+        warnings: Vec::new(),
+    }))
+    .unwrap_or_default()
 }
 
 #[wasm_bindgen]
@@ -104,9 +169,6 @@ pub fn check_spec_with_cfg(
         Err(e) => return wasm_error("ConfigError", e),
     };
 
-    let constants: BTreeMap<String, serde_json::Value> =
-        serde_json::from_str(constants_json).unwrap_or_default();
-
     let mut domains = Env::new();
     let mut config = build_config(max_states, max_depth, allow_deadlock, export_dot);
 
@@ -123,13 +185,15 @@ pub fn check_spec_with_cfg(
         Err(e) => return wasm_error("ConfigError", e),
     };
 
-    for (k, v) in constants {
-        domains.insert(Arc::from(k), json_to_value(v));
-    }
+    apply_constants_json(&mut domains, constants_json);
 
-    let result = check(&spec, &domains, &config);
-
-    serde_json::to_string(&result_to_wasm(result, &spec.vars, warnings)).unwrap_or_default()
+    serde_json::to_string(&check_internal(WasmInputs {
+        spec,
+        domains,
+        config,
+        warnings,
+    }))
+    .unwrap_or_default()
 }
 
 #[wasm_bindgen]
@@ -192,17 +256,37 @@ pub fn check_spec_with_options(spec_source: &str, options_json: &str) -> String 
         }
     }
 
+    serde_json::to_string(&check_internal(WasmInputs {
+        spec,
+        domains,
+        config,
+        warnings,
+    }))
+    .unwrap_or_default()
+}
+
+fn check_internal(inputs: WasmInputs) -> WasmCheckResult {
+    let WasmInputs {
+        spec,
+        domains,
+        config,
+        warnings,
+    } = inputs;
     let result = check(&spec, &domains, &config);
-    serde_json::to_string(&result_to_wasm(result, &spec.vars, warnings)).unwrap_or_default()
+    result_to_wasm(result, &spec.vars, warnings)
+}
+
+fn apply_constants_json(domains: &mut Env, constants_json: &str) {
+    let constants: BTreeMap<String, serde_json::Value> =
+        serde_json::from_str(constants_json).unwrap_or_default();
+    for (k, v) in constants {
+        domains.insert(Arc::from(k), json_to_value(v));
+    }
 }
 
 fn wasm_error(error_type: &str, message: String) -> String {
-    serde_json::to_string(&WasmCheckResult {
-        error_type: Some(error_type.into()),
-        error_message: Some(message),
-        ..Default::default()
-    })
-    .unwrap_or_default()
+    serde_json::to_string(&WasmCheckResult::err(error_type, message, Vec::new()))
+        .unwrap_or_default()
 }
 
 fn json_to_value(v: serde_json::Value) -> Value {
@@ -247,145 +331,94 @@ fn result_to_wasm(
     warnings: Vec<String>,
 ) -> WasmCheckResult {
     match result {
-        CheckResult::Ok(stats) => WasmCheckResult {
-            success: true,
-            error_type: None,
-            error_message: None,
-            states_explored: stats.states_explored,
-            trace: None,
-            dot: stats.dot_graph,
+        CheckResult::Ok(stats) => WasmCheckResult::ok(stats, warnings),
+        CheckResult::InvariantViolation(ce, stats) => WasmCheckResult::err_with_stats(
+            "InvariantViolation",
+            format!("Invariant {} violated", ce.violated_invariant),
+            stats,
+            Some(vec![format_trace(&ce.trace, vars)]),
             warnings,
-        },
-        CheckResult::InvariantViolation(ce, stats) => WasmCheckResult {
-            success: false,
-            error_type: Some("InvariantViolation".into()),
-            error_message: Some(format!("Invariant {} violated", ce.violated_invariant)),
-            states_explored: stats.states_explored,
-            trace: Some(vec![format_trace(&ce.trace, vars)]),
-            dot: stats.dot_graph,
-            warnings,
-        },
-        CheckResult::LivenessViolation(violation, stats) => WasmCheckResult {
-            success: false,
-            error_type: Some("LivenessViolation".into()),
-            error_message: Some(format!(
-                "Liveness property violated: {}",
-                violation.property
-            )),
-            states_explored: stats.states_explored,
-            trace: Some(vec![
+        ),
+        CheckResult::LivenessViolation(violation, stats) => WasmCheckResult::err_with_stats(
+            "LivenessViolation",
+            format!("Liveness property violated: {}", violation.property),
+            stats,
+            Some(vec![
                 format_trace(&violation.prefix, vars),
                 format_trace(&violation.cycle, vars),
             ]),
-            dot: stats.dot_graph,
             warnings,
-        },
-        CheckResult::Deadlock(trace, _, stats) => WasmCheckResult {
-            success: false,
-            error_type: Some("Deadlock".into()),
-            error_message: Some("Deadlock detected".into()),
-            states_explored: stats.states_explored,
-            trace: Some(vec![format_trace(&trace, vars)]),
-            dot: stats.dot_graph,
+        ),
+        CheckResult::Deadlock(trace, _, stats) => WasmCheckResult::err_with_stats(
+            "Deadlock",
+            "Deadlock detected".into(),
+            stats,
+            Some(vec![format_trace(&trace, vars)]),
             warnings,
-        },
-        CheckResult::InitError(e) => WasmCheckResult {
-            success: false,
-            error_type: Some("InitError".into()),
-            error_message: Some(format_eval_error(&e)),
-            states_explored: 0,
-            trace: None,
-            dot: None,
-            warnings,
-        },
-        CheckResult::NextError(e, trace, dot) => WasmCheckResult {
-            success: false,
-            error_type: Some("NextError".into()),
-            error_message: Some(format_eval_error(&e)),
-            states_explored: 0,
-            trace: Some(vec![format_trace(&trace, vars)]),
+        ),
+        CheckResult::InitError(e) => {
+            WasmCheckResult::err("InitError", format_eval_error(&e), warnings)
+        }
+        CheckResult::NextError(e, trace, dot) => WasmCheckResult::err_with_trace(
+            "NextError",
+            format_eval_error(&e),
+            vec![format_trace(&trace, vars)],
             dot,
             warnings,
-        },
-        CheckResult::InvariantError(e, trace, dot) => WasmCheckResult {
-            success: false,
-            error_type: Some("InvariantError".into()),
-            error_message: Some(format_eval_error(&e)),
-            states_explored: 0,
-            trace: Some(vec![format_trace(&trace, vars)]),
+        ),
+        CheckResult::InvariantError(e, trace, dot) => WasmCheckResult::err_with_trace(
+            "InvariantError",
+            format_eval_error(&e),
+            vec![format_trace(&trace, vars)],
             dot,
             warnings,
-        },
-        CheckResult::MaxStatesExceeded(stats) => WasmCheckResult {
-            success: false,
-            error_type: Some("MaxStatesExceeded".into()),
-            error_message: Some(format!("Max states exceeded: {}", stats.states_explored)),
-            states_explored: stats.states_explored,
-            trace: None,
-            dot: stats.dot_graph,
+        ),
+        CheckResult::MaxStatesExceeded(stats) => WasmCheckResult::err_with_stats(
+            "MaxStatesExceeded",
+            format!("Max states exceeded: {}", stats.states_explored),
+            stats,
+            None,
             warnings,
-        },
-        CheckResult::MaxDepthExceeded(stats) => WasmCheckResult {
-            success: false,
-            error_type: Some("MaxDepthExceeded".into()),
-            error_message: Some(format!("Max depth exceeded: {}", stats.max_depth_reached)),
-            states_explored: stats.states_explored,
-            trace: None,
-            dot: stats.dot_graph,
+        ),
+        CheckResult::MaxDepthExceeded(stats) => WasmCheckResult::err_with_stats(
+            "MaxDepthExceeded",
+            format!("Max depth exceeded: {}", stats.max_depth_reached),
+            stats,
+            None,
             warnings,
-        },
-        CheckResult::NoInitialStates => WasmCheckResult {
-            success: false,
-            error_type: Some("NoInitialStates".into()),
-            error_message: Some("No initial states found".into()),
-            states_explored: 0,
-            trace: None,
-            dot: None,
+        ),
+        CheckResult::NoInitialStates => WasmCheckResult::err(
+            "NoInitialStates",
+            "No initial states found".into(),
             warnings,
-        },
-        CheckResult::PrepareError(PrepareSpecError::InstanceError(e)) => WasmCheckResult {
-            success: false,
-            error_type: Some("InstanceError".into()),
-            error_message: Some(format_eval_error(&e)),
-            states_explored: 0,
-            trace: None,
-            dot: None,
+        ),
+        CheckResult::PrepareError(PrepareSpecError::InstanceError(e)) => {
+            WasmCheckResult::err("InstanceError", format_eval_error(&e), warnings)
+        }
+        CheckResult::PrepareError(PrepareSpecError::MissingConstants(missing)) => {
+            WasmCheckResult::err(
+                "MissingConstants",
+                format!(
+                    "Missing constants: {}",
+                    missing
+                        .iter()
+                        .map(|s| s.as_ref())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                warnings,
+            )
+        }
+        CheckResult::PrepareError(PrepareSpecError::AssumeViolation(idx)) => WasmCheckResult::err(
+            "AssumeViolation",
+            format!("Assume {} violated", idx),
             warnings,
-        },
-        CheckResult::PrepareError(PrepareSpecError::MissingConstants(missing)) => WasmCheckResult {
-            success: false,
-            error_type: Some("MissingConstants".into()),
-            error_message: Some(format!(
-                "Missing constants: {}",
-                missing
-                    .iter()
-                    .map(|s| s.as_ref())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )),
-            states_explored: 0,
-            trace: None,
-            dot: None,
+        ),
+        CheckResult::PrepareError(PrepareSpecError::AssumeError(idx, e)) => WasmCheckResult::err(
+            "AssumeError",
+            format!("Assume {} error: {}", idx, format_eval_error(&e)),
             warnings,
-        },
-        CheckResult::PrepareError(PrepareSpecError::AssumeViolation(idx)) => WasmCheckResult {
-            success: false,
-            error_type: Some("AssumeViolation".into()),
-            error_message: Some(format!("Assume {} violated", idx)),
-            states_explored: 0,
-            trace: None,
-            dot: None,
-            warnings,
-        },
-        CheckResult::PrepareError(PrepareSpecError::AssumeError(idx, e)) => WasmCheckResult {
-            success: false,
-            error_type: Some("AssumeError".into()),
-            error_message: Some(format!("Assume {} error: {}", idx, format_eval_error(&e))),
-            states_explored: 0,
-            trace: None,
-            dot: None,
-            warnings,
-        },
+        ),
     }
 }
 
@@ -419,6 +452,10 @@ Inv == count >= 0 /\\ count <= MAX
 
     fn parse_result(json: &str) -> WasmCheckResult {
         serde_json::from_str(json).expect("valid JSON result")
+    }
+
+    fn run(spec: &str, options: serde_json::Value) -> WasmCheckResult {
+        parse_result(&check_spec_with_options(spec, &options.to_string()))
     }
 
     #[test]
@@ -486,5 +523,197 @@ Inv == count >= 0 /\\ count <= MAX
         assert!(result.dot.is_some());
         let dot = result.dot.unwrap();
         assert!(dot.contains("digraph"));
+    }
+
+    #[test]
+    fn test_invariant_violation() {
+        let spec = "\
+VARIABLES count
+
+Init == count = 0
+
+Next == count' = count + 1
+
+Inv == count = 0
+";
+        let result = run(spec, serde_json::json!({"max_states": 10}));
+        assert!(!result.success);
+        assert_eq!(result.error_type.as_deref(), Some("InvariantViolation"));
+        assert!(
+            result
+                .error_message
+                .as_deref()
+                .unwrap_or("")
+                .contains("violated")
+        );
+    }
+
+    #[test]
+    fn test_deadlock() {
+        let spec = "\
+VARIABLES count
+
+Init == count = 0
+
+Next == count < 0 /\\ count' = count - 1
+";
+        let result = run(spec, serde_json::json!({}));
+        assert!(!result.success);
+        assert_eq!(result.error_type.as_deref(), Some("Deadlock"));
+        assert!(
+            result
+                .error_message
+                .as_deref()
+                .unwrap_or("")
+                .contains("Deadlock")
+        );
+    }
+
+    #[test]
+    fn test_init_error() {
+        let spec = "\
+VARIABLES x
+
+Init == x = 0 /\\ (1 + TRUE) > 0
+
+Next == x' = x
+";
+        let result = run(spec, serde_json::json!({}));
+        assert!(!result.success);
+        assert_eq!(result.error_type.as_deref(), Some("InitError"));
+    }
+
+    #[test]
+    fn test_next_error() {
+        let spec = "\
+VARIABLES count
+
+Init == count = 0
+
+Next == count' = undefined_var
+";
+        let result = run(spec, serde_json::json!({}));
+        assert!(!result.success);
+        assert_eq!(result.error_type.as_deref(), Some("NextError"));
+    }
+
+    #[test]
+    fn test_invariant_error() {
+        let spec = "\
+VARIABLES count
+
+Init == count = 0
+
+Next == count' = count + 1
+
+Inv == undefined_var > 0
+";
+        let result = run(spec, serde_json::json!({"max_states": 10}));
+        assert!(!result.success);
+        assert_eq!(result.error_type.as_deref(), Some("InvariantError"));
+    }
+
+    #[test]
+    fn test_max_states_exceeded() {
+        let spec = "\
+VARIABLES count
+
+Init == count = 0
+
+Next == \\/ (count < 1000 /\\ count' = count + 1)
+        \\/ (count = 1000 /\\ count' = 0)
+";
+        let result = run(
+            spec,
+            serde_json::json!({"max_states": 5, "allow_deadlock": true}),
+        );
+        assert!(!result.success);
+        assert_eq!(result.error_type.as_deref(), Some("MaxStatesExceeded"));
+    }
+
+    #[test]
+    fn test_max_depth_exceeded() {
+        let spec = "\
+VARIABLES count
+
+Init == count = 0
+
+Next == count' = count + 1
+";
+        let result = run(
+            spec,
+            serde_json::json!({"max_depth": 2, "allow_deadlock": true}),
+        );
+        assert!(!result.success);
+        assert_eq!(result.error_type.as_deref(), Some("MaxDepthExceeded"));
+    }
+
+    #[test]
+    fn test_no_initial_states() {
+        let spec = "\
+VARIABLES x
+
+Init == FALSE
+
+Next == x' = x
+";
+        let result = run(spec, serde_json::json!({}));
+        assert!(!result.success);
+        assert_eq!(result.error_type.as_deref(), Some("NoInitialStates"));
+    }
+
+    #[test]
+    fn test_missing_constants() {
+        let spec = "\
+CONSTANT MAX
+
+VARIABLES count
+
+Init == count = 0
+
+Next == count' = (count + 1) % MAX
+";
+        let result = run(spec, serde_json::json!({}));
+        assert!(!result.success);
+        assert_eq!(result.error_type.as_deref(), Some("MissingConstants"));
+        assert!(
+            result
+                .error_message
+                .as_deref()
+                .unwrap_or("")
+                .contains("MAX")
+        );
+    }
+
+    #[test]
+    fn test_assume_violation() {
+        let spec = "\
+VARIABLES x
+
+ASSUME 1 = 2
+
+Init == x = 0
+
+Next == x' = x
+";
+        let result = run(spec, serde_json::json!({}));
+        assert!(!result.success);
+        assert_eq!(result.error_type.as_deref(), Some("AssumeViolation"));
+    }
+
+    #[test]
+    fn test_assume_error() {
+        let spec = "\
+VARIABLES x
+
+ASSUME undefined_const > 0
+
+Init == x = 0
+
+Next == x' = x
+";
+        let result = run(spec, serde_json::json!({}));
+        assert!(!result.success);
+        assert_eq!(result.error_type.as_deref(), Some("AssumeError"));
     }
 }
