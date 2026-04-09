@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, VecDeque};
 use std::fs::File;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::BufWriter;
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
@@ -44,7 +43,6 @@ pub struct CheckerConfig {
     pub count_properties: Vec<Arc<str>>,
     pub export_dot_string: bool,
     pub dot_mode: DotMode,
-    #[cfg(not(target_arch = "wasm32"))]
     pub spec_path: Option<PathBuf>,
     #[cfg(not(target_arch = "wasm32"))]
     pub trace_json_path: Option<PathBuf>,
@@ -68,7 +66,6 @@ impl Default for CheckerConfig {
             count_properties: Vec::new(),
             export_dot_string: false,
             dot_mode: DotMode::default(),
-            #[cfg(not(target_arch = "wasm32"))]
             spec_path: None,
             #[cfg(not(target_arch = "wasm32"))]
             trace_json_path: None,
@@ -215,8 +212,8 @@ fn load_module_extends(
 pub fn prepare_spec(
     spec: &Spec,
     domains: &Env,
-    spec_path: Option<&PathBuf>,
-    quiet: bool,
+    #[cfg(not(target_arch = "wasm32"))] spec_path: Option<&PathBuf>,
+    #[cfg(not(target_arch = "wasm32"))] quiet: bool,
 ) -> Result<(Env, Definitions), PrepareSpecError> {
     let user_constants = domains.clone();
     let mut domains = Env::new();
@@ -331,8 +328,11 @@ pub fn prepare_spec(
 }
 
 pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult {
-    let (domains, defs) = match prepare_spec(spec, domains, config.spec_path.as_ref(), config.quiet)
-    {
+    #[cfg(not(target_arch = "wasm32"))]
+    let prep = prepare_spec(spec, domains, config.spec_path.as_ref(), config.quiet);
+    #[cfg(target_arch = "wasm32")]
+    let prep = prepare_spec(spec, domains);
+    let (domains, defs) = match prep {
         Ok(r) => r,
         Err(e) => return CheckResult::PrepareError(e),
     };
