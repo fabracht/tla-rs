@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.10] - 2026-04-19
+
+### Fixed
+
+- `~` (negation) operator precedence: `~state \in S` now correctly parses as `~(state \in S)` instead of `(~state) \in S` (#33)
+
 ## [0.3.9] - 2026-04-08
 
 ### Added
