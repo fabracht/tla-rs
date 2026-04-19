@@ -229,6 +229,34 @@ mod tests {
     }
 
     #[test]
+    fn negation_binds_looser_than_in() {
+        let expr = parse_expr("~state \\in {\"bar\", \"baz\"}").unwrap();
+        if let Expr::Not(inner) = expr {
+            assert!(
+                matches!(*inner, Expr::In(_, _)),
+                "~state \\in S should parse as ~(state \\in S), got {:?}",
+                inner
+            );
+        } else {
+            panic!("expected Not at top level");
+        }
+    }
+
+    #[test]
+    fn negation_binds_looser_than_eq() {
+        let expr = parse_expr("~x = y").unwrap();
+        if let Expr::Not(inner) = expr {
+            assert!(
+                matches!(*inner, Expr::Eq(_, _)),
+                "~x = y should parse as ~(x = y), got {:?}",
+                inner
+            );
+        } else {
+            panic!("expected Not at top level");
+        }
+    }
+
+    #[test]
     fn parse_spec_counter() {
         let input = r#"
             VARIABLES count
