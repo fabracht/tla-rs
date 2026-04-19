@@ -325,6 +325,11 @@ impl Parser {
     }
 
     pub(super) fn parse_comparison(&mut self) -> Result<Expr> {
+        if matches!(self.peek(), Token::Not) {
+            self.advance();
+            let expr = self.parse_comparison()?;
+            return Ok(Expr::Not(Box::new(expr)));
+        }
         let left = self.parse_range()?;
         match self.peek() {
             Token::Eq => {

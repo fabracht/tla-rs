@@ -76,6 +76,17 @@ fn test_should_pass_traffic_light() {
 }
 
 #[test]
+fn test_negation_in_precedence() {
+    let path = Path::new("test_cases/should_pass/negation_in.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "negation_in.tla should pass (~x \\in S parses as ~(x \\in S)), got: {:?}",
+        result
+    );
+}
+
+#[test]
 fn test_should_violate_counter_overflow() {
     let path = Path::new("test_cases/should_violate/counter_overflow.tla");
     let result = check_spec_file(path);
