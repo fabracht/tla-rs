@@ -1030,22 +1030,35 @@ fn test_parameterized_inv_prefix_not_misclassified() {
     );
 }
 
+fn run_with_large_stack<F: FnOnce() + Send + 'static>(f: F) {
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(f)
+        .expect("failed to spawn thread")
+        .join()
+        .expect("thread panicked");
+}
+
 #[test]
 fn test_should_pass_fr_list() {
-    let path = Path::new("test_cases/should_pass/FRList.tla");
-    let result = check_spec_file_allow_deadlock(path);
-    assert!(
-        matches!(result, CheckResult::Ok(_)),
-        "FRList.tla should pass all structural invariants, got: {result:?}"
-    );
+    run_with_large_stack(|| {
+        let path = Path::new("test_cases/should_pass/FRList.tla");
+        let result = check_spec_file_allow_deadlock(path);
+        assert!(
+            matches!(result, CheckResult::Ok(_)),
+            "FRList.tla should pass all structural invariants, got: {result:?}"
+        );
+    });
 }
 
 #[test]
 fn test_should_pass_fr_list_lin() {
-    let path = Path::new("test_cases/should_pass/FRListLin.tla");
-    let result = check_spec_file_allow_deadlock(path);
-    assert!(
-        matches!(result, CheckResult::Ok(_)),
-        "FRListLin.tla should pass linearizability + structural invariants, got: {result:?}"
-    );
+    run_with_large_stack(|| {
+        let path = Path::new("test_cases/should_pass/FRListLin.tla");
+        let result = check_spec_file_allow_deadlock(path);
+        assert!(
+            matches!(result, CheckResult::Ok(_)),
+            "FRListLin.tla should pass linearizability + structural invariants, got: {result:?}"
+        );
+    });
 }
