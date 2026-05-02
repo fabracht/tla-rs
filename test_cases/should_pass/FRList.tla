@@ -139,14 +139,4 @@ InvNoDupKeys ==
      /\ node[n1].key = node[n2].key /\ n1 # n2)
       => FALSE
 
-InvAll ==
-  /\ InvTypeOK
-  /\ InvNoMarkFlag
-  /\ InvSorted
-  /\ InvFlaggedPred
-  /\ InvBacklink
-  /\ InvUniquePred
-  /\ InvHasPred
-  /\ InvHeadNoPred
-  /\ InvNoDupKeys
 ====

@@ -173,6 +173,14 @@ InvUniquePred ==
      /\ node[m1].right = n /\ node[m2].right = n /\ m1 # m2)
       => FALSE
 
+InvHasPred ==
+  \A n \in NodeIds :
+    (InList(n) /\ n # HEAD)
+      => \E m \in NodeIds : InList(m) /\ node[m].right = n
+
+InvHeadNoPred ==
+  \A m \in NodeIds : node[m].exists => node[m].right # HEAD
+
 ValidResult(p) ==
   \/ op[p].kind = "none"
   \/ op[p].kind = "insert" /\ op[p].result \in {"none", "ok", "duplicate"}
