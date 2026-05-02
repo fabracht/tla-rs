@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.11] - 2026-05-02
+
+### Fixed
+
+- Parser auto-detection for `Init` / `Next` / invariant names no longer misclassifies parameterized helpers. Operators like `InvokeAction(p)`, `InitNode(k)`, or `NextStep(n)` were being treated as the spec's Init/Next or as invariants and evaluated with their parameters unbound, causing `undefined variable` errors at state 0. Fix gates all three classifications on `params.is_none()` (#35)
+
+### Added
+
+- `test_cases/should_pass/FRList.tla` — Fomitchev–Ruppert lock-free linked list, structural correctness (paper Inv 1–5 plus three derived invariants), with auto-loaded `FRList.cfg` and oracle test
+- `test_cases/should_pass/FRListLin.tla` — adds a per-process operation layer with an abstract dictionary, checks the refinement invariant `dict = RegularKeys` plus per-op response validity, with auto-loaded `FRListLin.cfg` and oracle test
+- `test_cases/should_pass/parameterized_inv_prefix.tla` — regression test locking in the auto-detection fix
+
 ## [0.3.10] - 2026-04-19
 
 ### Fixed
