@@ -22,12 +22,27 @@ fn check_spec_file_allow_deadlock(path: &Path) -> CheckResult {
 
 fn check_spec_file_with_config(path: &Path, mut config: CheckerConfig) -> CheckResult {
     let input = fs::read_to_string(path).expect("failed to read spec file");
-    let spec = match parse(&input) {
+    let mut spec = match parse(&input) {
         Ok(s) => s,
         Err(e) => panic!("parse error in {}: {}", path.display(), e.message),
     };
     config.spec_path = Some(path.to_path_buf());
-    let domains = Env::new();
+    let mut domains = Env::new();
+    let cfg_path = path.with_extension("cfg");
+    if cfg_path.exists() {
+        let cfg_input = fs::read_to_string(&cfg_path).expect("failed to read cfg file");
+        let tlc_cfg = parse_cfg(&cfg_input).expect("failed to parse cfg");
+        apply_config(
+            &tlc_cfg,
+            &mut spec,
+            &mut domains,
+            &mut config,
+            &[],
+            &[],
+            false,
+        )
+        .expect("failed to apply config");
+    }
     check(&spec, &domains, &config)
 }
 
@@ -997,4 +1012,53 @@ fn test_parameterized_instance_init_unbound_var() {
         }
         other => panic!("param_instance_init_unbound.tla should pass, got: {other:?}"),
     }
+}
+
+#[test]
+fn test_parameterized_inv_prefix_not_misclassified() {
+    let path = Path::new("test_cases/should_pass/parameterized_inv_prefix.tla");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let spec = parse(&input).expect("parse should succeed");
+    assert_eq!(
+        spec.invariants.len(),
+        1,
+        "only zero-arg InvCounter should be auto-detected, not InvokeAction/InitNode/NextStep"
+    );
+    assert_eq!(
+        spec.invariant_names[0].as_deref().map(|n| n.as_ref()),
+        Some("InvCounter")
+    );
+}
+
+fn run_with_large_stack<F: FnOnce() + Send + 'static>(f: F) {
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(f)
+        .expect("failed to spawn thread")
+        .join()
+        .expect("thread panicked");
+}
+
+#[test]
+fn test_should_pass_fr_list() {
+    run_with_large_stack(|| {
+        let path = Path::new("test_cases/should_pass/FRList.tla");
+        let result = check_spec_file_allow_deadlock(path);
+        assert!(
+            matches!(result, CheckResult::Ok(_)),
+            "FRList.tla should pass all structural invariants, got: {result:?}"
+        );
+    });
+}
+
+#[test]
+fn test_should_pass_fr_list_lin() {
+    run_with_large_stack(|| {
+        let path = Path::new("test_cases/should_pass/FRListLin.tla");
+        let result = check_spec_file_allow_deadlock(path);
+        assert!(
+            matches!(result, CheckResult::Ok(_)),
+            "FRListLin.tla should pass linearizability + structural invariants, got: {result:?}"
+        );
+    });
 }

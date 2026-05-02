@@ -184,12 +184,15 @@ impl Parser {
                         }
                     };
 
-                    let is_init_name = name.as_ref() == "Init"
-                        || (name.ends_with("Init")
-                            && Self::is_module_prefix(&name[..name.len() - 4]));
-                    let is_next_name = name.as_ref() == "Next"
-                        || (name.ends_with("Next")
-                            && Self::is_module_prefix(&name[..name.len() - 4]));
+                    let is_zero_arg = params.is_none();
+                    let is_init_name = is_zero_arg
+                        && (name.as_ref() == "Init"
+                            || (name.ends_with("Init")
+                                && Self::is_module_prefix(&name[..name.len() - 4])));
+                    let is_next_name = is_zero_arg
+                        && (name.as_ref() == "Next"
+                            || (name.ends_with("Next")
+                                && Self::is_module_prefix(&name[..name.len() - 4])));
 
                     if is_init_name {
                         init = Some(expr.clone());
@@ -197,7 +200,7 @@ impl Parser {
                     } else if is_next_name {
                         next = Some(expr.clone());
                         self.definitions.insert(name, expr);
-                    } else if Self::is_invariant_name(&name) {
+                    } else if is_zero_arg && Self::is_invariant_name(&name) {
                         invariants.push(expr.clone());
                         invariant_names.push(Some(name.clone()));
                         self.definitions.insert(name, expr);
