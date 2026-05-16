@@ -164,6 +164,8 @@ pub struct CheckSpecInput {
     #[serde(default)]
     pub continue_on_violation: bool,
     #[serde(default)]
+    pub state_constraint: Option<String>,
+    #[serde(default)]
     pub config_path: Option<String>,
 }
 

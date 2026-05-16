@@ -10,7 +10,7 @@ use crate::checker::{
 };
 use crate::config::{apply_config, parse_cfg, parse_constant_value};
 use crate::liveness::LivenessViolation;
-use crate::parser::parse_with_warnings;
+use crate::parser::{parse_expr, parse_with_warnings};
 use crate::scenario::{ScenarioResult, execute_scenario, parse_scenario};
 
 use super::schema::{
@@ -218,6 +218,22 @@ pub fn check_spec(input: &CheckSpecInput) -> CheckSpecOutput {
             .any(|s| s == &sym_arc)
         {
             loaded.checker_config.symmetric_constants.push(sym_arc);
+        }
+    }
+
+    if let Some(constraint_src) = &input.state_constraint {
+        match parse_expr(constraint_src) {
+            Ok(expr) => loaded.checker_config.state_constraints.push(expr),
+            Err(err) => {
+                return CheckSpecOutput::new(CheckOutcome::Error {
+                    phase: ErrorPhase::Config,
+                    error: StructuredError::parse(
+                        format!("state_constraint parse error: {}", err.message),
+                        None,
+                    ),
+                    partial_stats: None,
+                });
+            }
         }
     }
 

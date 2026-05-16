@@ -46,6 +46,7 @@ pub struct CheckerConfig {
     pub spec_path: Option<PathBuf>,
     #[cfg(not(target_arch = "wasm32"))]
     pub trace_json_path: Option<PathBuf>,
+    pub state_constraints: Vec<Expr>,
 }
 
 impl Default for CheckerConfig {
@@ -69,6 +70,7 @@ impl Default for CheckerConfig {
             spec_path: None,
             #[cfg(not(target_arch = "wasm32"))]
             trace_json_path: None,
+            state_constraints: Vec::new(),
         }
     }
 }
@@ -494,7 +496,36 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         })
         .collect();
 
+    let state_passes_constraints =
+        |state: &State, reusable_env: &mut Env| -> Result<bool, EvalError> {
+            if config.state_constraints.is_empty() {
+                return Ok(true);
+            }
+            for (i, var) in spec.vars.iter().enumerate() {
+                if let Some(val) = state.values.get(i) {
+                    reusable_env.insert(var.clone(), val.clone());
+                }
+            }
+            for constraint in &config.state_constraints {
+                match eval(constraint, reusable_env, &defs) {
+                    Ok(Value::Bool(true)) => continue,
+                    Ok(Value::Bool(false)) => return Ok(false),
+                    Ok(other) => {
+                        return Err(EvalError::type_mismatch_ctx("Bool", other, "CONSTRAINT"));
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(true)
+        };
+
     for state in initial {
+        let mut constraint_env = base_env.clone();
+        match state_passes_constraints(&state, &mut constraint_env) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(e) => return CheckResult::InitError(e),
+        }
         let canonical = symmetry.canonicalize(&state).into_owned();
         let (idx, is_new) = states.insert_full(canonical);
         if is_new {
@@ -749,6 +780,17 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
         for transition in successors {
             stats.transitions += 1;
+            let mut constraint_env = base_env.clone();
+            match state_passes_constraints(&transition.state, &mut constraint_env) {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(e) => {
+                    let (trace, _actions) =
+                        reconstruct_trace(current_idx, &states, &parent, &parent_action);
+                    let dot = do_export(&states, &parent, Some(current_idx), &all_edges);
+                    return CheckResult::NextError(e, trace, dot);
+                }
+            }
             let canonical = symmetry.canonicalize(&transition.state).into_owned();
             let (succ_idx, is_new) = states.insert_full(canonical);
             if is_new {

@@ -290,6 +290,8 @@ The boolean toggles `allow_deadlock` and `check_liveness` are `Option<bool>` —
 
 `validate_spec` and `list_invariants` include a `warnings` array surfacing parser-tolerance warnings — when the parser fails to parse an operator body it silently skips that operator and emits a warning. Without the warnings array, a typo in an invariant's body would let `check_spec` "pass" without ever checking that invariant.
 
+`check_spec` honors the cfg's `CONSTRAINT` directive (state-space pruning predicate) and accepts an inline `state_constraint: "<TLA+ expression>"` parameter. Constraints are evaluated on every state — states where the expression is false are dropped from the reachable set and not explored further. Use this to bound otherwise-explosive state spaces (e.g., `state_constraint: "Len(queue) <= 3"`) without modifying the spec.
+
 ### Counterexample format
 
 Each state in a trace is `{ vars: { var_name: { display, json } } }`. The `display` field is the TLA+-formatted value (`"{1, 2, 3}"`, `"<<a, b>>"`); the `json` field is a typed JSON form preserving set/tuple/record/function structure via a `kind` tag.

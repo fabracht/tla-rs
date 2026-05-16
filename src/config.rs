@@ -589,9 +589,20 @@ pub fn apply_config(
         checker_config.allow_deadlock = !check_dl;
     }
 
-    if !cfg.constraints.is_empty() {
-        for c in &cfg.constraints {
-            warnings.push(format!("CONSTRAINT '{}' is not yet supported, ignoring", c));
+    for c in &cfg.constraints {
+        match spec.definitions.get(c.as_ref()) {
+            Some((params, expr)) if params.is_empty() => {
+                checker_config.state_constraints.push(expr.clone());
+            }
+            Some(_) => {
+                return Err(format!(
+                    "CONSTRAINT definition '{}' must have zero parameters",
+                    c
+                ));
+            }
+            None => {
+                return Err(format!("CONSTRAINT definition '{}' not found in spec", c));
+            }
         }
     }
 

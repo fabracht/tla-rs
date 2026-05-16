@@ -86,6 +86,7 @@ fn check_spec_returns_invariant_violation_with_trace() {
         check_liveness: None,
         count_satisfying: vec![],
         continue_on_violation: false,
+        state_constraint: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -122,6 +123,7 @@ fn check_spec_reports_limit_reached_when_budget_exhausted() {
         check_liveness: None,
         count_satisfying: vec![],
         continue_on_violation: false,
+        state_constraint: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -146,6 +148,7 @@ fn check_spec_reports_missing_constant_as_structured_error() {
         check_liveness: None,
         count_satisfying: vec![],
         continue_on_violation: false,
+        state_constraint: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -172,6 +175,7 @@ fn check_spec_reports_parse_error_with_span() {
         check_liveness: None,
         count_satisfying: vec![],
         continue_on_violation: false,
+        state_constraint: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -198,6 +202,7 @@ fn check_spec_passes_for_safe_spec() {
         check_liveness: None,
         count_satisfying: vec![],
         continue_on_violation: false,
+        state_constraint: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -230,6 +235,7 @@ fn check_spec_honors_cfg_check_deadlock_false_when_input_unset() {
         check_liveness: None,
         count_satisfying: vec![],
         continue_on_violation: false,
+        state_constraint: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -265,6 +271,7 @@ fn check_spec_reports_deadlock_by_default_when_neither_cfg_nor_input_allows() {
         check_liveness: None,
         count_satisfying: vec![],
         continue_on_violation: false,
+        state_constraint: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -352,4 +359,121 @@ fn replay_scenario_reports_failure_with_available_actions() {
     let failure = out.failure.expect("failure info present");
     assert_eq!(failure.step_index, 0);
     assert!(!failure.available_actions.is_empty());
+}
+
+#[test]
+fn check_spec_honors_cfg_constraint_directive() {
+    let dir = std::env::temp_dir().join("tla_mcp_cfg_constraint");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("Counter.tla");
+    let cfg_path = dir.join("Counter.cfg");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE Counter ----\nVARIABLE x\nInit == x = 0\nNext == x' = x + 1\nBounded == x < 5\n====\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &cfg_path,
+        "INIT Init\nNEXT Next\nCONSTRAINT Bounded\nCHECK_DEADLOCK FALSE\n",
+    )
+    .unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 100,
+        max_depth: 50,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match out.outcome {
+        CheckOutcome::Ok { stats } => {
+            assert_eq!(
+                stats.states_explored, 5,
+                "Bounded constraint should cap at 5 states (x=0..4); got {}",
+                stats.states_explored
+            );
+        }
+        other => panic!("expected ok with bounded state space, got {:?}", other),
+    }
+}
+
+#[test]
+fn check_spec_honors_input_state_constraint() {
+    let dir = std::env::temp_dir().join("tla_mcp_input_constraint");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("Counter2.tla");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE Counter2 ----\nVARIABLE x\nInit == x = 0\nNext == x' = x + 1\n====\n",
+    )
+    .unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 100,
+        max_depth: 50,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: Some(true),
+        check_liveness: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: Some("x < 3".to_string()),
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match out.outcome {
+        CheckOutcome::Ok { stats } => {
+            assert_eq!(
+                stats.states_explored, 3,
+                "x<3 should cap at 3 states (x=0,1,2); got {}",
+                stats.states_explored
+            );
+        }
+        other => panic!("expected ok with bounded state space, got {:?}", other),
+    }
+}
+
+#[test]
+fn check_spec_reports_state_constraint_parse_error() {
+    let input = CheckSpecInput {
+        spec_path: pass_spec("base_counter"),
+        max_states: 10,
+        max_depth: 10,
+        constants: [("start_val".to_string(), "0".to_string())]
+            .into_iter()
+            .collect(),
+        symmetry: None,
+        allow_deadlock: Some(true),
+        check_liveness: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: Some(")))".to_string()),
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    match out.outcome {
+        CheckOutcome::Error { phase, error, .. } => {
+            assert!(matches!(phase, ErrorPhase::Config));
+            assert!(error.message.contains("state_constraint"));
+        }
+        other => panic!(
+            "expected config error for bad state_constraint, got {:?}",
+            other
+        ),
+    }
 }

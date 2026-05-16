@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `CONSTRAINT` directive in cfg files is now honored — the checker prunes states where the constraint expression is false (matches TLC's `CONSTRAINT` semantics). Previously parsed but warned "not yet supported"
+- `check_spec` MCP tool accepts `state_constraint: "<TLA+ expression>"` for inline state-space bounding without modifying the spec or cfg
+- `CheckerConfig.state_constraints: Vec<Expr>` — the underlying field; populated either from cfg `CONSTRAINT` or library callers
+
+### Notes
+
+- Constraint expressions are evaluated against unprimed variables (state predicates). They run at both initial-state enumeration and successor expansion, before symmetry canonicalization. `ACTION_CONSTRAINT` (transition predicate) remains unsupported and still warns
+
 ## [0.4.0] - 2026-05-14
 
 ### Added
