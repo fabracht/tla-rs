@@ -14,10 +14,11 @@ use crate::parser::{parse_expr, parse_with_warnings};
 use crate::scenario::{ScenarioResult, execute_scenario, parse_scenario};
 
 use super::schema::{
-    CheckOutcome, CheckSpecInput, CheckSpecOutput, CheckStatsSummary, ErrorPhase, InvariantSummary,
-    LimitKind, ListInvariantsInput, ListInvariantsOutput, ParseWarning, PropertySummary,
-    ReplayScenarioInput, ReplayScenarioOutput, ScenarioFailureInfo, ScenarioTraceState, SourceSpan,
-    SpecSummary, StateSnapshot, StructuredError, ValidateSpecInput, ValidateSpecOutput,
+    CheckOutcome, CheckSpecInput, CheckSpecOutput, CheckStatsSummary, ConstantBinding, ErrorPhase,
+    InvariantSummary, LimitKind, ListInvariantsInput, ListInvariantsOutput, ParseWarning,
+    PropertySummary, ReplayScenarioInput, ReplayScenarioOutput, ScenarioFailureInfo,
+    ScenarioTraceState, SourceSpan, SpecSummary, StateSnapshot, StructuredError, TlaValue,
+    ValidateSpecInput, ValidateSpecOutput,
 };
 
 pub struct LoadedSpec {
@@ -115,7 +116,10 @@ pub fn validate_spec(input: &ValidateSpecInput) -> ValidateSpecOutput {
         input.config_path.as_deref(),
         &input.constants,
     ) {
-        Ok(loaded) => ValidateSpecOutput::ok(summarize_spec(&loaded.spec), loaded.warnings),
+        Ok(loaded) => ValidateSpecOutput::ok(
+            summarize_spec(&loaded.spec, &loaded.domains),
+            loaded.warnings,
+        ),
         Err(err) => ValidateSpecOutput::error(err),
     }
 }
@@ -197,6 +201,7 @@ pub fn check_spec(input: &CheckSpecInput) -> CheckSpecOutput {
 
     loaded.checker_config.max_states = input.max_states as usize;
     loaded.checker_config.max_depth = input.max_depth as usize;
+    loaded.checker_config.max_seconds = Some(input.max_seconds);
     if let Some(allow_deadlock) = input.allow_deadlock {
         loaded.checker_config.allow_deadlock = allow_deadlock;
     }
@@ -288,6 +293,10 @@ fn map_check_result(result: CheckResult, spec: &Spec, source: &Source) -> CheckO
         },
         CheckResult::MaxDepthExceeded(stats) => CheckOutcome::LimitReached {
             limit: LimitKind::MaxDepth,
+            stats: summarize_stats(&stats),
+        },
+        CheckResult::MaxTimeExceeded(stats) => CheckOutcome::LimitReached {
+            limit: LimitKind::MaxSeconds,
             stats: summarize_stats(&stats),
         },
         CheckResult::InitError(err) => CheckOutcome::Error {
@@ -420,9 +429,18 @@ fn summarize_property(p: &PropertyStats) -> PropertySummary {
     }
 }
 
-fn summarize_spec(spec: &Spec) -> SpecSummary {
+fn summarize_spec(spec: &Spec, domains: &Env) -> SpecSummary {
+    let constants = spec
+        .constants
+        .iter()
+        .map(|name| ConstantBinding {
+            name: name.to_string(),
+            value: domains.get(name).map(TlaValue::from_value),
+        })
+        .collect();
     SpecSummary {
         vars: spec.vars.iter().map(|v| v.to_string()).collect(),
+        constants,
         invariants: invariant_summaries(spec),
         has_init: spec.init.is_some(),
         has_next: spec.next.is_some(),

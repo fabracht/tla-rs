@@ -387,6 +387,13 @@ fn result_to_wasm(
             None,
             warnings,
         ),
+        CheckResult::MaxTimeExceeded(stats) => WasmCheckResult::err_with_stats(
+            "MaxTimeExceeded",
+            format!("Max seconds exceeded: {:.3}s", stats.elapsed_secs),
+            stats,
+            None,
+            warnings,
+        ),
         CheckResult::NoInitialStates => WasmCheckResult::err(
             "NoInitialStates",
             "No initial states found".into(),

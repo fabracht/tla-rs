@@ -30,6 +30,7 @@ use crate::symmetry::SymmetryConfig;
 pub struct CheckerConfig {
     pub max_states: usize,
     pub max_depth: usize,
+    pub max_seconds: Option<u64>,
     pub symmetric_constants: Vec<Arc<str>>,
     #[cfg(not(target_arch = "wasm32"))]
     pub export_dot_path: Option<PathBuf>,
@@ -54,6 +55,7 @@ impl Default for CheckerConfig {
         Self {
             max_states: 1_000_000,
             max_depth: 100,
+            max_seconds: None,
             symmetric_constants: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
             export_dot_path: None,
@@ -122,6 +124,7 @@ pub enum CheckResult {
     InvariantError(EvalError, Vec<State>, Option<String>),
     MaxStatesExceeded(CheckStats),
     MaxDepthExceeded(CheckStats),
+    MaxTimeExceeded(CheckStats),
     NoInitialStates,
     PrepareError(PrepareSpecError),
 }
@@ -655,6 +658,14 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             stats.elapsed_secs = elapsed_secs();
             stats.dot_graph = do_export(&states, &parent, None, &all_edges);
             return CheckResult::MaxDepthExceeded(stats);
+        }
+
+        if let Some(max_secs) = config.max_seconds
+            && elapsed_secs() as u64 >= max_secs
+        {
+            stats.elapsed_secs = elapsed_secs();
+            stats.dot_graph = do_export(&states, &parent, None, &all_edges);
+            return CheckResult::MaxTimeExceeded(stats);
         }
 
         let Some(current) = states.get_index(current_idx) else {
@@ -1346,6 +1357,15 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
         CheckResult::MaxDepthExceeded(stats) => {
             format!(
                 r#"{{"status": "max_depth_exceeded", "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
+                stats.states_explored,
+                stats.transitions,
+                stats.max_depth_reached,
+                stats.elapsed_secs
+            )
+        }
+        CheckResult::MaxTimeExceeded(stats) => {
+            format!(
+                r#"{{"status": "max_time_exceeded", "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
                 stats.states_explored,
                 stats.transitions,
                 stats.max_depth_reached,

@@ -44,7 +44,8 @@ fn extract_stats(result: &CheckResult) -> Option<&CheckStats> {
     match result {
         CheckResult::Ok(stats)
         | CheckResult::MaxStatesExceeded(stats)
-        | CheckResult::MaxDepthExceeded(stats) => Some(stats),
+        | CheckResult::MaxDepthExceeded(stats)
+        | CheckResult::MaxTimeExceeded(stats) => Some(stats),
         CheckResult::InvariantViolation(_, stats) | CheckResult::LivenessViolation(_, stats) => {
             Some(stats)
         }
@@ -1052,6 +1053,14 @@ fn main() -> ExitCode {
             println!("  Time: {:.3}s", stats.elapsed_secs);
             println!();
             println!("Increase with --max-depth N");
+            ExitCode::FAILURE
+        }
+        CheckResult::MaxTimeExceeded(stats) => {
+            println!("Time limit exceeded ({:.3}s)", stats.elapsed_secs);
+            println!();
+            println!("  States explored: {}", stats.states_explored);
+            println!("  Transitions: {}", stats.transitions);
+            println!("  Max depth reached: {}", stats.max_depth_reached);
             ExitCode::FAILURE
         }
         CheckResult::NoInitialStates => {

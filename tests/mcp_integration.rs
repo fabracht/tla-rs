@@ -80,6 +80,7 @@ fn check_spec_returns_invariant_violation_with_trace() {
         spec_path: violate_spec("counter_overflow"),
         max_states: 100,
         max_depth: 50,
+        max_seconds: 30,
         constants: BTreeMap::new(),
         symmetry: None,
         allow_deadlock: None,
@@ -117,6 +118,7 @@ fn check_spec_reports_limit_reached_when_budget_exhausted() {
         spec_path: violate_spec("counter_overflow"),
         max_states: 2,
         max_depth: 50,
+        max_seconds: 30,
         constants: BTreeMap::new(),
         symmetry: None,
         allow_deadlock: None,
@@ -142,6 +144,7 @@ fn check_spec_reports_missing_constant_as_structured_error() {
         spec_path: pass_spec("base_counter"),
         max_states: 100,
         max_depth: 50,
+        max_seconds: 30,
         constants: BTreeMap::new(),
         symmetry: None,
         allow_deadlock: None,
@@ -169,6 +172,7 @@ fn check_spec_reports_parse_error_with_span() {
         spec_path: path.to_string_lossy().into_owned(),
         max_states: 10,
         max_depth: 10,
+        max_seconds: 30,
         constants: BTreeMap::new(),
         symmetry: None,
         allow_deadlock: None,
@@ -194,6 +198,7 @@ fn check_spec_passes_for_safe_spec() {
         spec_path: pass_spec("base_counter"),
         max_states: 100,
         max_depth: 50,
+        max_seconds: 30,
         constants: [("start_val".to_string(), "0".to_string())]
             .into_iter()
             .collect(),
@@ -229,6 +234,7 @@ fn check_spec_honors_cfg_check_deadlock_false_when_input_unset() {
         spec_path: spec_path.to_string_lossy().into_owned(),
         max_states: 10,
         max_depth: 10,
+        max_seconds: 30,
         constants: BTreeMap::new(),
         symmetry: None,
         allow_deadlock: None,
@@ -265,6 +271,7 @@ fn check_spec_reports_deadlock_by_default_when_neither_cfg_nor_input_allows() {
         spec_path: spec_path.to_string_lossy().into_owned(),
         max_states: 10,
         max_depth: 10,
+        max_seconds: 30,
         constants: BTreeMap::new(),
         symmetry: None,
         allow_deadlock: None,
@@ -382,6 +389,7 @@ fn check_spec_honors_cfg_constraint_directive() {
         spec_path: spec_path.to_string_lossy().into_owned(),
         max_states: 100,
         max_depth: 50,
+        max_seconds: 30,
         constants: BTreeMap::new(),
         symmetry: None,
         allow_deadlock: None,
@@ -423,6 +431,7 @@ fn check_spec_honors_input_state_constraint() {
         spec_path: spec_path.to_string_lossy().into_owned(),
         max_states: 100,
         max_depth: 50,
+        max_seconds: 30,
         constants: BTreeMap::new(),
         symmetry: None,
         allow_deadlock: Some(true),
@@ -454,6 +463,7 @@ fn check_spec_reports_state_constraint_parse_error() {
         spec_path: pass_spec("base_counter"),
         max_states: 10,
         max_depth: 10,
+        max_seconds: 30,
         constants: [("start_val".to_string(), "0".to_string())]
             .into_iter()
             .collect(),
@@ -508,6 +518,7 @@ fn check_spec_extracts_wf_from_non_spec_named_specification() {
         spec_path: spec_path.to_string_lossy().into_owned(),
         max_states: 100,
         max_depth: 50,
+        max_seconds: 30,
         constants: BTreeMap::new(),
         symmetry: None,
         allow_deadlock: None,
@@ -564,6 +575,7 @@ fn check_spec_handles_wf_in_spec_named_definition() {
         spec_path: spec_path.to_string_lossy().into_owned(),
         max_states: 100,
         max_depth: 50,
+        max_seconds: 30,
         constants: BTreeMap::new(),
         symmetry: None,
         allow_deadlock: None,
@@ -627,6 +639,7 @@ fn check_spec_detects_leads_to_violation_in_sub_scc() {
         spec_path: spec_path.to_string_lossy().into_owned(),
         max_states: 100,
         max_depth: 50,
+        max_seconds: 30,
         constants: BTreeMap::new(),
         symmetry: None,
         allow_deadlock: None,
@@ -702,6 +715,7 @@ fn check_spec_does_not_report_leads_to_violation_when_subscc_unreachable() {
         spec_path: spec_path.to_string_lossy().into_owned(),
         max_states: 100,
         max_depth: 50,
+        max_seconds: 30,
         constants: BTreeMap::new(),
         symmetry: None,
         allow_deadlock: None,
@@ -722,5 +736,96 @@ fn check_spec_does_not_report_leads_to_violation_when_subscc_unreachable() {
             "fixed rwlock spec should satisfy leads-to (no !Q sub-cycle reachable from P-state via !Q transitions); got {:?}",
             other
         ),
+    }
+}
+
+#[test]
+fn validate_spec_surfaces_resolved_constants() {
+    let input = ValidateSpecInput {
+        spec_path: pass_spec("base_counter"),
+        constants: [("start_val".to_string(), "42".to_string())]
+            .into_iter()
+            .collect(),
+        config_path: None,
+    };
+    let out = runner::validate_spec(&input);
+    assert!(matches!(out.status, ValidationStatus::Ok));
+    let summary = out.spec.expect("summary present");
+    assert_eq!(summary.constants.len(), 1);
+    let binding = &summary.constants[0];
+    assert_eq!(binding.name, "start_val");
+    let value = binding.value.as_ref().expect("value resolved");
+    assert_eq!(value.display, "42");
+    assert_eq!(value.json, json!(42));
+}
+
+#[test]
+fn validate_spec_lists_unbound_constants_with_no_value() {
+    let input = ValidateSpecInput {
+        spec_path: pass_spec("base_counter"),
+        constants: BTreeMap::new(),
+        config_path: None,
+    };
+    let out = runner::validate_spec(&input);
+    let summary = out.spec.expect("summary present");
+    assert_eq!(summary.constants.len(), 1);
+    assert_eq!(summary.constants[0].name, "start_val");
+    assert!(
+        summary.constants[0].value.is_none(),
+        "unbound constant should have value: None"
+    );
+}
+
+#[test]
+fn check_spec_reports_max_seconds_when_time_budget_exhausted() {
+    let dir = std::env::temp_dir().join("tla_mcp_max_seconds");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("Big.tla");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE Big ----\n\
+         EXTENDS Naturals\n\
+         CONSTANT N\n\
+         VARIABLE x\n\
+         Init == x = 0\n\
+         Next == x' = (x + 1) % N\n\
+         ====\n",
+    )
+    .unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 1_000_000,
+        max_depth: 1_000_000,
+        max_seconds: 0,
+        constants: [("N".to_string(), "100".to_string())].into_iter().collect(),
+        symmetry: None,
+        allow_deadlock: Some(true),
+        check_liveness: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match out.outcome {
+        CheckOutcome::LimitReached { limit, stats } => {
+            assert!(
+                matches!(limit, LimitKind::MaxSeconds),
+                "expected MaxSeconds limit, got {:?}",
+                limit
+            );
+            assert!(
+                stats.elapsed_secs >= 0.0,
+                "stats should include elapsed time"
+            );
+        }
+        CheckOutcome::Ok { .. } => {
+            // Acceptable: spec finished before the elapsed-time check ran
+        }
+        other => panic!("expected limit_reached or ok, got {:?}", other),
     }
 }

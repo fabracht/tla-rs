@@ -91,10 +91,18 @@ pub enum ValidationStatus {
 #[derive(Serialize, JsonSchema, Debug)]
 pub struct SpecSummary {
     pub vars: Vec<String>,
+    pub constants: Vec<ConstantBinding>,
     pub invariants: Vec<InvariantSummary>,
     pub has_init: bool,
     pub has_next: bool,
     pub definition_count: usize,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct ConstantBinding {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<TlaValue>,
 }
 
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
@@ -151,6 +159,7 @@ pub struct CheckSpecInput {
     pub spec_path: String,
     pub max_states: u64,
     pub max_depth: u64,
+    pub max_seconds: u64,
     #[serde(default)]
     pub constants: BTreeMap<String, String>,
     #[serde(default)]
@@ -226,6 +235,7 @@ pub enum CheckOutcome {
 pub enum LimitKind {
     MaxStates,
     MaxDepth,
+    MaxSeconds,
 }
 
 #[derive(Serialize, JsonSchema, Debug, Clone, Copy)]

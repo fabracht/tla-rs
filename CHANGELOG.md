@@ -4,6 +4,11 @@
 
 ### Added
 
+- `SpecSummary.constants: Vec<{ name, value }>` — `validate_spec` now returns the spec's declared CONSTANTS with their resolved values (from cfg + input). Lets agents catch outlier constant values before launching a check that would have timed out
+- `check_spec` requires a third budget: `max_seconds: u64` (no default). The BFS loop checks elapsed wall-clock time and returns `status: "limit_reached"` with `limit: "max_seconds"` when the budget is hit. Previous behavior: long-running checks could exceed the MCP client's transport timeout, returning nothing structured
+- `LimitKind::MaxSeconds` variant added to the schema; `CheckResult::MaxTimeExceeded(CheckStats)` variant added to the engine
+- `check_spec` and `validate_spec` tool descriptions now point at the validate-first workflow: call `validate_spec`, inspect `constants`, then `check_spec` with deliberate budgets
+
 - `CONSTRAINT` directive in cfg files is now honored — the checker prunes states where the constraint expression is false (matches TLC's `CONSTRAINT` semantics). Previously parsed but warned "not yet supported"
 - `check_spec` MCP tool accepts `state_constraint: "<TLA+ expression>"` for inline state-space bounding without modifying the spec or cfg
 - `CheckerConfig.state_constraints: Vec<Expr>` — the underlying field; populated either from cfg `CONSTRAINT` or library callers
