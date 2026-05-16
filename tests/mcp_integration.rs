@@ -1,0 +1,355 @@
+use std::collections::BTreeMap;
+
+use serde_json::json;
+use tla_checker::mcp::runner;
+use tla_checker::mcp::schema::{
+    CheckOutcome, CheckSpecInput, ErrorPhase, LimitKind, ListInvariantsInput, ReplayScenarioInput,
+    ScenarioStatus, ValidateSpecInput, ValidationStatus,
+};
+
+fn pass_spec(name: &str) -> String {
+    format!("test_cases/should_pass/{}.tla", name)
+}
+
+fn violate_spec(name: &str) -> String {
+    format!("test_cases/should_violate/{}.tla", name)
+}
+
+#[test]
+fn validate_spec_returns_summary_for_valid_spec() {
+    let input = ValidateSpecInput {
+        spec_path: pass_spec("base_counter"),
+        constants: [("start_val".to_string(), "0".to_string())]
+            .into_iter()
+            .collect(),
+        config_path: None,
+    };
+    let out = runner::validate_spec(&input);
+    assert_eq!(out.schema_version, "1");
+    assert!(matches!(out.status, ValidationStatus::Ok));
+    let spec = out.spec.expect("spec summary present on Ok");
+    assert_eq!(spec.vars, vec!["x".to_string()]);
+    assert!(spec.has_init);
+    assert!(spec.has_next);
+    assert!(
+        spec.invariants
+            .iter()
+            .any(|i| i.name.as_deref() == Some("InvBounded"))
+    );
+}
+
+#[test]
+fn validate_spec_reports_io_error_for_missing_file() {
+    let input = ValidateSpecInput {
+        spec_path: "does_not_exist.tla".into(),
+        constants: BTreeMap::new(),
+        config_path: None,
+    };
+    let out = runner::validate_spec(&input);
+    assert!(matches!(out.status, ValidationStatus::Error));
+    let err = out.error.expect("error present");
+    let body = serde_json::to_value(&err).unwrap();
+    assert_eq!(body["kind"], json!("io"));
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("does_not_exist.tla")
+    );
+}
+
+#[test]
+fn list_invariants_returns_invariant_names() {
+    let input = ListInvariantsInput {
+        spec_path: pass_spec("base_counter"),
+        constants: [("start_val".to_string(), "0".to_string())]
+            .into_iter()
+            .collect(),
+        config_path: None,
+    };
+    let out = runner::list_invariants(&input);
+    assert_eq!(out.schema_version, "1");
+    assert!(matches!(out.status, ValidationStatus::Ok));
+    assert_eq!(out.invariants.len(), 1);
+    assert_eq!(out.invariants[0].name.as_deref(), Some("InvBounded"));
+}
+
+#[test]
+fn check_spec_returns_invariant_violation_with_trace() {
+    let input = CheckSpecInput {
+        spec_path: violate_spec("counter_overflow"),
+        max_states: 100,
+        max_depth: 50,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    assert_eq!(out.schema_version, "1");
+    match out.outcome {
+        CheckOutcome::InvariantViolation {
+            invariant,
+            trace,
+            actions,
+            stats,
+        } => {
+            assert_eq!(invariant.as_deref(), Some("Inv"));
+            assert!(!trace.is_empty());
+            assert_eq!(trace.len(), actions.len());
+            let first = trace.first().unwrap();
+            let val = first.vars.get("count").expect("count var present");
+            assert_eq!(val.display, "0");
+            assert_eq!(val.json, json!(0));
+            assert!(stats.states_explored > 0);
+        }
+        other => panic!("expected invariant_violation, got {:?}", other),
+    }
+}
+
+#[test]
+fn check_spec_reports_limit_reached_when_budget_exhausted() {
+    let input = CheckSpecInput {
+        spec_path: violate_spec("counter_overflow"),
+        max_states: 2,
+        max_depth: 50,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    match out.outcome {
+        CheckOutcome::LimitReached { limit, stats } => {
+            assert!(matches!(limit, LimitKind::MaxStates));
+            assert!(stats.states_explored >= 2);
+        }
+        other => panic!("expected limit_reached, got {:?}", other),
+    }
+}
+
+#[test]
+fn check_spec_reports_missing_constant_as_structured_error() {
+    let input = CheckSpecInput {
+        spec_path: pass_spec("base_counter"),
+        max_states: 100,
+        max_depth: 50,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    match out.outcome {
+        CheckOutcome::Error { phase, error, .. } => {
+            assert!(matches!(phase, ErrorPhase::Constant));
+            assert!(error.message.contains("start_val"));
+        }
+        other => panic!("expected error, got {:?}", other),
+    }
+}
+
+#[test]
+fn check_spec_reports_parse_error_with_span() {
+    let path = std::env::temp_dir().join("tla_mcp_bad_spec.tla");
+    std::fs::write(&path, "this is not a tla spec at all\n").unwrap();
+    let input = CheckSpecInput {
+        spec_path: path.to_string_lossy().into_owned(),
+        max_states: 10,
+        max_depth: 10,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&path);
+    match out.outcome {
+        CheckOutcome::Error { phase, .. } => {
+            assert!(matches!(phase, ErrorPhase::Parse));
+        }
+        other => panic!("expected parse error, got {:?}", other),
+    }
+}
+
+#[test]
+fn check_spec_passes_for_safe_spec() {
+    let input = CheckSpecInput {
+        spec_path: pass_spec("base_counter"),
+        max_states: 100,
+        max_depth: 50,
+        constants: [("start_val".to_string(), "0".to_string())]
+            .into_iter()
+            .collect(),
+        symmetry: None,
+        allow_deadlock: Some(true),
+        check_liveness: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    match out.outcome {
+        CheckOutcome::Ok { .. } | CheckOutcome::InvariantViolation { .. } => {}
+        other => panic!("expected ok or violation, got {:?}", other),
+    }
+}
+
+#[test]
+fn check_spec_honors_cfg_check_deadlock_false_when_input_unset() {
+    let dir = std::env::temp_dir().join("tla_mcp_cfg_deadlock");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("Stuck.tla");
+    let cfg_path = dir.join("Stuck.cfg");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE Stuck ----\nVARIABLE x\nInit == x = 0\nNext == x = 1 /\\ x' = 2\n====\n",
+    )
+    .unwrap();
+    std::fs::write(&cfg_path, "INIT Init\nNEXT Next\nCHECK_DEADLOCK FALSE\n").unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 10,
+        max_depth: 10,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    assert!(
+        matches!(out.outcome, CheckOutcome::Ok { .. }),
+        "cfg CHECK_DEADLOCK FALSE should make deadlock acceptable; got {:?}",
+        out.outcome
+    );
+}
+
+#[test]
+fn check_spec_reports_deadlock_by_default_when_neither_cfg_nor_input_allows() {
+    let dir = std::env::temp_dir().join("tla_mcp_no_cfg_deadlock");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("Stuck2.tla");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE Stuck2 ----\nVARIABLE x\nInit == x = 0\nNext == x = 1 /\\ x' = 2\n====\n",
+    )
+    .unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 10,
+        max_depth: 10,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    assert!(
+        matches!(out.outcome, CheckOutcome::Deadlock { .. }),
+        "with no cfg and allow_deadlock unset, deadlock should be reported; got {:?}",
+        out.outcome
+    );
+}
+
+#[test]
+fn validate_spec_surfaces_parser_warnings() {
+    let path = std::env::temp_dir().join("tla_mcp_warn_spec.tla");
+    std::fs::write(
+        &path,
+        "---- MODULE WarnSpec ----\nVARIABLE x\nInit == x = 0\nNext == x' = x + 1\nBadOp ==\n====\n",
+    )
+    .unwrap();
+    let input = ValidateSpecInput {
+        spec_path: path.to_string_lossy().into_owned(),
+        constants: BTreeMap::new(),
+        config_path: None,
+    };
+    let out = runner::validate_spec(&input);
+    let _ = std::fs::remove_file(&path);
+
+    assert!(matches!(out.status, ValidationStatus::Ok));
+    assert!(
+        !out.warnings.is_empty(),
+        "expected parser warning for malformed BadOp body; got none"
+    );
+    assert!(
+        out.warnings.iter().any(|w| w.message.contains("BadOp")),
+        "warning should mention BadOp; got {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn replay_scenario_returns_step_by_step_trace() {
+    let input = ReplayScenarioInput {
+        spec_path: pass_spec("base_counter"),
+        scenario: "step: x' = 1\nstep: x' = 2\n".to_string(),
+        constants: [("start_val".to_string(), "0".to_string())]
+            .into_iter()
+            .collect(),
+        config_path: None,
+    };
+    let out = runner::replay_scenario(&input);
+    assert_eq!(out.schema_version, "1");
+    assert!(
+        matches!(out.status, ScenarioStatus::Ok),
+        "expected ok, got {:?}",
+        out.status
+    );
+    assert_eq!(out.trace.len(), 3, "initial state + 2 steps");
+    assert_eq!(out.trace[0].step_index, None);
+    assert_eq!(out.trace[1].step_index, Some(0));
+    assert_eq!(out.trace[2].step_index, Some(1));
+    let first = &out.trace[0].state;
+    assert_eq!(first.vars.get("x").unwrap().display, "0");
+    let last = &out.trace[2].state;
+    assert_eq!(last.vars.get("x").unwrap().display, "2");
+}
+
+#[test]
+fn replay_scenario_reports_failure_with_available_actions() {
+    let input = ReplayScenarioInput {
+        spec_path: pass_spec("base_counter"),
+        scenario: "step: x' = 42\n".to_string(),
+        constants: [("start_val".to_string(), "0".to_string())]
+            .into_iter()
+            .collect(),
+        config_path: None,
+    };
+    let out = runner::replay_scenario(&input);
+    assert!(
+        matches!(out.status, ScenarioStatus::Failed),
+        "expected failed, got {:?}",
+        out.status
+    );
+    let failure = out.failure.expect("failure info present");
+    assert_eq!(failure.step_index, 0);
+    assert!(!failure.available_actions.is_empty());
+}

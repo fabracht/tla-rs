@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -20,6 +20,20 @@ pub(crate) enum InputMode {
     StepUntil,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum DisplayedRow {
+    Action {
+        transition_idx: usize,
+        group_name: String,
+        is_variant: bool,
+    },
+    GroupHeader {
+        group_name: String,
+        transition_indices: Vec<usize>,
+        expanded: bool,
+    },
+}
+
 pub(crate) struct ExplorerState {
     pub(crate) current: State,
     pub(crate) history: Vec<(State, Option<Arc<str>>)>,
@@ -39,6 +53,7 @@ pub(crate) struct ExplorerState {
     pub(crate) step_until_input: String,
     pub(crate) show_guards: bool,
     pub(crate) expanded_actions: HashSet<usize>,
+    pub(crate) expanded_groups: HashSet<String>,
     pub(crate) replay_mode: bool,
     pub(crate) replay_trace: Vec<(State, Option<Arc<str>>)>,
     pub(crate) replay_position: usize,
@@ -69,26 +84,113 @@ impl ExplorerState {
             step_until_input: String::new(),
             show_guards: false,
             expanded_actions: HashSet::new(),
+            expanded_groups: HashSet::new(),
             replay_mode: false,
             replay_trace: Vec::new(),
             replay_position: 0,
         }
     }
 
+    pub(crate) fn displayed_rows(&self) -> Vec<DisplayedRow> {
+        let mut group_order: Vec<String> = Vec::new();
+        let mut group_map: HashMap<String, Vec<usize>> = HashMap::new();
+
+        for (i, t) in self.available_actions.iter().enumerate() {
+            let name = t
+                .action
+                .as_ref()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "(unnamed)".to_string());
+            if !group_map.contains_key(&name) {
+                group_order.push(name.clone());
+            }
+            group_map.entry(name).or_default().push(i);
+        }
+
+        let mut rows = Vec::new();
+        for name in group_order {
+            let indices = group_map.remove(&name).unwrap_or_default();
+            if indices.len() == 1 {
+                rows.push(DisplayedRow::Action {
+                    transition_idx: indices[0],
+                    group_name: name,
+                    is_variant: false,
+                });
+            } else {
+                let expanded = self.expanded_groups.contains(&name);
+                rows.push(DisplayedRow::GroupHeader {
+                    group_name: name.clone(),
+                    transition_indices: indices.clone(),
+                    expanded,
+                });
+                if expanded {
+                    for idx in indices {
+                        rows.push(DisplayedRow::Action {
+                            transition_idx: idx,
+                            group_name: name.clone(),
+                            is_variant: true,
+                        });
+                    }
+                }
+            }
+        }
+        rows
+    }
+
+    fn selected_row(&self) -> Option<DisplayedRow> {
+        self.displayed_rows().into_iter().nth(self.selected_action)
+    }
+
     pub(crate) fn toggle_expand(&mut self) {
-        if self.expanded_actions.contains(&self.selected_action) {
-            self.expanded_actions.remove(&self.selected_action);
-        } else {
-            self.expanded_actions.insert(self.selected_action);
+        match self.selected_row() {
+            Some(DisplayedRow::GroupHeader { group_name, .. }) => {
+                if self.expanded_groups.contains(&group_name) {
+                    self.expanded_groups.remove(&group_name);
+                } else {
+                    self.expanded_groups.insert(group_name);
+                }
+            }
+            Some(DisplayedRow::Action { transition_idx, .. }) => {
+                if self.expanded_actions.contains(&transition_idx) {
+                    self.expanded_actions.remove(&transition_idx);
+                } else {
+                    self.expanded_actions.insert(transition_idx);
+                }
+            }
+            None => {}
         }
     }
 
     pub(crate) fn collapse_selected(&mut self) {
-        self.expanded_actions.remove(&self.selected_action);
+        match self.selected_row() {
+            Some(DisplayedRow::GroupHeader { group_name, .. }) => {
+                self.expanded_groups.remove(&group_name);
+            }
+            Some(DisplayedRow::Action { transition_idx, .. }) => {
+                self.expanded_actions.remove(&transition_idx);
+            }
+            None => {}
+        }
     }
 
     pub(crate) fn take_action(&mut self, spec: &Spec, env: &mut Env, defs: &Definitions) {
-        self.take_action_at(self.selected_action, spec, env, defs);
+        match self.selected_row() {
+            Some(DisplayedRow::Action { transition_idx, .. }) => {
+                self.take_action_at(transition_idx, spec, env, defs);
+            }
+            Some(DisplayedRow::GroupHeader { group_name, .. }) => {
+                if self.expanded_groups.contains(&group_name) {
+                    self.expanded_groups.remove(&group_name);
+                } else {
+                    self.expanded_groups.insert(group_name);
+                }
+            }
+            None => {
+                if self.available_actions.is_empty() {
+                    self.status_message = Some(("No actions available (deadlock)".into(), true));
+                }
+            }
+        }
     }
 
     pub(crate) fn take_action_at(
@@ -128,6 +230,7 @@ impl ExplorerState {
         self.current = transition.state.clone();
         self.selected_action = 0;
         self.expanded_actions.clear();
+        self.expanded_groups.clear();
 
         self.refresh_actions(spec, env, defs);
     }
@@ -275,6 +378,7 @@ impl ExplorerState {
             self.current = prev_state;
             self.selected_action = 0;
             self.expanded_actions.clear();
+            self.expanded_groups.clear();
 
             self.refresh_actions(spec, env, defs);
         }
@@ -292,6 +396,7 @@ impl ExplorerState {
         self.available_actions_with_guards = actions_with_guards;
         self.selected_action = 0;
         self.expanded_actions.clear();
+        self.expanded_groups.clear();
         self.status_message = None;
         self.var_changes.clear();
         self.trace_output = None;
@@ -311,15 +416,16 @@ impl ExplorerState {
     }
 
     pub(crate) fn select_next(&mut self) {
-        if !self.available_actions.is_empty() {
-            self.selected_action = (self.selected_action + 1) % self.available_actions.len();
+        let n = self.displayed_rows().len();
+        if n > 0 {
+            self.selected_action = (self.selected_action + 1) % n;
         }
     }
 
     pub(crate) fn select_prev(&mut self) {
-        if !self.available_actions.is_empty() {
-            self.selected_action = (self.selected_action + self.available_actions.len() - 1)
-                % self.available_actions.len();
+        let n = self.displayed_rows().len();
+        if n > 0 {
+            self.selected_action = (self.selected_action + n - 1) % n;
         }
     }
 
@@ -499,6 +605,7 @@ impl ExplorerState {
             step_until_input: String::new(),
             show_guards: false,
             expanded_actions: HashSet::new(),
+            expanded_groups: HashSet::new(),
             replay_mode: false,
             replay_trace: Vec::new(),
             replay_position: 0,

@@ -172,13 +172,10 @@ impl Parser {
                     let expr = match self.parse_expr() {
                         Ok(e) => e,
                         Err(e) => {
-                            eprintln!(
-                                "  Warning: failed to parse operator '{}': {}",
-                                name, e.message
-                            );
-                            if let Some(span) = e.span {
-                                eprintln!("    at offset {}..{}", span.start, span.end);
-                            }
+                            let message =
+                                format!("failed to parse operator '{}': {}", name, e.message);
+                            let span = e.span.unwrap_or_default();
+                            self.warnings.push(crate::span::Spanned::new(message, span));
                             self.skip_to_next_definition();
                             continue;
                         }

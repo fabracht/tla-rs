@@ -8,12 +8,20 @@ pub use self::error::ParseError;
 pub use self::lexing::Parser;
 
 use crate::ast::{Expr, Spec};
+use crate::span::Spanned;
 
 pub(crate) type Result<T> = std::result::Result<T, ParseError>;
 
 pub fn parse(input: &str) -> Result<Spec> {
     let mut parser = Parser::new(input)?;
     parser.parse_spec()
+}
+
+pub fn parse_with_warnings(input: &str) -> Result<(Spec, Vec<Spanned<String>>)> {
+    let mut parser = Parser::new(input)?;
+    let spec = parser.parse_spec()?;
+    let warnings = parser.take_warnings();
+    Ok((spec, warnings))
 }
 
 pub fn parse_expr(input: &str) -> Result<Expr> {

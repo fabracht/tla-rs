@@ -253,6 +253,51 @@ if (result.dot) {
 | `export_dot` | bool | Include DOT graph in result |
 | `dot_mode` | string | DOT export mode: `full`, `trace`, `clean` (default), `choices` |
 
+## MCP Server
+
+`tla-mcp` exposes the model checker as a Model Context Protocol server over stdio, so agentic clients (Claude Code, Cursor, etc.) can call it as a first-class tool.
+
+Build and register:
+
+```bash
+cargo install --path . --bin tla-mcp
+```
+
+Then add to your MCP client config (Claude Code example, `~/.claude/mcp.json` or `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "tla": {
+      "command": "tla-mcp"
+    }
+  }
+}
+```
+
+### Tools
+
+All tools return a `schema_version: "1"` field — the contract is frozen at version 1 and will be bumped explicitly on breaking changes.
+
+| Tool | Purpose |
+|------|---------|
+| `validate_spec` | Parse a `.tla` file and return a summary (vars, invariants, init/next presence). Returns a structured parse/config error with source span on failure. |
+| `list_invariants` | Return the detected invariants (definitions matching `Inv*`, `TypeOK*`, `NotSolved*`, plus anything declared in a cfg `INVARIANT` directive). |
+| `check_spec` | Run full model checking. **Requires** `max_states` and `max_depth` (no defaults — agents must budget upfront). Returns one of: `ok`, `invariant_violation` (with trace + invariant name + actions), `deadlock`, `liveness_violation` (with prefix + cycle), `limit_reached` (budget exhausted — not an error), or `error` (with structured phase + message + optional source span). |
+| `replay_scenario` | Walk a spec step-by-step through a guided scenario (text of `step: <TLA+ expression>` lines). Returns the same `StateSnapshot` shape as `check_spec`, plus per-step `changes` descriptions. On a step that no transition satisfies, returns `status: "failed"` with `available_actions` to help diagnose the mismatch. |
+
+The boolean toggles `allow_deadlock` and `check_liveness` are `Option<bool>` — omit them to defer to the cfg file (e.g., `CHECK_DEADLOCK FALSE` or `PROPERTY` directives), pass `true` / `false` to override the cfg. The `symmetry` field appends to any constants declared via cfg `SYMMETRY` rather than replacing them.
+
+`validate_spec` and `list_invariants` include a `warnings` array surfacing parser-tolerance warnings — when the parser fails to parse an operator body it silently skips that operator and emits a warning. Without the warnings array, a typo in an invariant's body would let `check_spec` "pass" without ever checking that invariant.
+
+### Counterexample format
+
+Each state in a trace is `{ vars: { var_name: { display, json } } }`. The `display` field is the TLA+-formatted value (`"{1, 2, 3}"`, `"<<a, b>>"`); the `json` field is a typed JSON form preserving set/tuple/record/function structure via a `kind` tag.
+
+### Mid-session reload
+
+MCP clients spawn server processes at session startup. Rebuilding or reinstalling `tla-mcp` while a Claude Code session is already running will not hot-reload the new binary — restart the client (or open a new session) to pick up changes. Verifying outside an MCP client: `tla-mcp` invoked directly will exit with `ConnectionClosed` after stdin EOF, which is the correct behavior for a stdio server with no peer.
+
 ## Limitations
 
 `Nat` and `Int` are bounded (-100 to 100 by default). Temporal operators `[]`, `<>`, `~>` are parsed but cannot be evaluated directly — use `--check-liveness` for fairness/liveness properties via SCC analysis. Unbounded quantifiers (`\E x : P` without `\in S`) and `Seq(S)` enumeration are not supported. Recursive operators must be declared with `RECURSIVE`.

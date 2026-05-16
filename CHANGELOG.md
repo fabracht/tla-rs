@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.4.0] - 2026-05-14
+
+### Added
+
+- `tla-mcp` binary — Model Context Protocol server exposing the model checker as MCP tools for agentic clients (Claude Code, Cursor, etc.) over stdio transport
+- Three MCP tools with versioned JSON schemas: `validate_spec` (parse + summary), `list_invariants` (introspection), `check_spec` (full check with required `max_states` / `max_depth` budgets)
+- `tla_checker::mcp` module: schema types (`ValidateSpecOutput`, `CheckSpecOutput`, `StateSnapshot`, `TlaValue`, `StructuredError`), conversion helpers, and runner functions for direct library use
+
+### Notes
+
+- `check_spec` inputs `allow_deadlock` and `check_liveness` are `Option<bool>`: omit to defer to cfg directives (`CHECK_DEADLOCK`, `PROPERTY`), pass explicitly to override. The `symmetry` field appends to cfg `SYMMETRY` constants rather than replacing them.
+
+### Added (follow-ups)
+
+- `replay_scenario` MCP tool — walks a spec through a guided scenario (`step: <expression>` lines) and returns per-step `StateSnapshot` + `changes`, or a failure with `available_actions` when no transition matches a step
+- `warnings` array on `validate_spec` and `list_invariants` responses — surfaces parser-tolerance warnings (silent operator-body skips) that previously only printed to stderr
+- README section on MCP mid-session reload (clients spawn server processes at startup; rebuilding doesn't hot-reload)
+- New `parser::parse_with_warnings(input)` function returning `(Spec, Vec<Spanned<String>>)` for callers that want structured warnings; `parser::parse(input)` unchanged
+
 ## [0.3.11] - 2026-05-02
 
 ### Fixed
