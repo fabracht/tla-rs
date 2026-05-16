@@ -8,9 +8,21 @@
 - `check_spec` MCP tool accepts `state_constraint: "<TLA+ expression>"` for inline state-space bounding without modifying the spec or cfg
 - `CheckerConfig.state_constraints: Vec<Expr>` — the underlying field; populated either from cfg `CONSTRAINT` or library callers
 
+### Fixed
+
+- `SPECIFICATION` cfg directive now correctly extracts `WF_vars` / `SF_vars` / `<>` / `~>` from the referenced spec body. Previously, only definitions whose name ended in `Spec` were extracted by the parser; cfg `SPECIFICATION SomeOtherName` left temporal subexpressions in the init expression, where they crashed with "WF_vars cannot be evaluated as a state predicate"
+- `collect_init` no longer pulls `WF_vars` / `SF_vars` / `Always` / `Eventually` / `LeadsTo` into the synthesized Init expression — these are temporal operators that must be routed to fairness/liveness, not to initial-state enumeration
+- Temporal operator eval error messages now explain WHY the operator can't be evaluated and point at the correct cfg/spec structure
+- **`<>P` (eventually) and `P ~> Q` (leads-to) liveness checks now use sub-SCC analysis** instead of treating the parent SCC as a single unit. Previous behavior: `check_leads_to` returned satisfied if `Q` held *anywhere* in the SCC, missing cases where the SCC contained sub-cycles staying in `!Q` forever. Now the check finds non-trivial sub-SCCs within the `!Q` (or `!P` for eventually) subset and reports a violation when one is reachable from a P-and-`!Q` state via `!Q` transitions. This catches classic starvation patterns (e.g., a reader/writer lock where the writer's `~>` is violated by an infinite reader-cycle within a larger SCC that happens to include a writer-active state)
+- Leads-to violation reports now include the actual problematic sub-SCC as the cycle, not the full parent SCC. Previously the reported cycle would contain irrelevant `Q`-holding states
+
 ### Notes
 
 - Constraint expressions are evaluated against unprimed variables (state predicates). They run at both initial-state enumeration and successor expansion, before symmetry canonicalization. `ACTION_CONSTRAINT` (transition predicate) remains unsupported and still warns
+- `Spec::extract_fairness_and_liveness(&mut self, &Expr)` is now a public method on `Spec`, callable from both the parser (auto-extraction on `*Spec` definition names) and `apply_config` (when `SPECIFICATION` resolves to a non-`*Spec` name)
+- `scc::compute_sccs_in_subset(graph, allowed: &HashSet<usize>)` — new public function running Tarjan over a filtered node set, used by the liveness checks to find sub-SCCs within `!P` / `!Q` partitions
+- The liveness sub-SCC analysis is sound (any reported violation is real) and complete when the parent SCC is fair, but does not check fairness on the sub-SCC itself — a !Q sub-cycle that happens to be unfair will still be reported. In practice rare for typical specs; flagged here for future tightening
+- `check_leads_to` and `check_eventually` now return `Result<Option<Vec<usize>>>` (Some = sub-SCC states forming the violating cycle, None = property satisfied), enabling accurate cycle reporting
 
 ## [0.4.0] - 2026-05-14
 

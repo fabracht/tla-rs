@@ -477,3 +477,250 @@ fn check_spec_reports_state_constraint_parse_error() {
         ),
     }
 }
+
+#[test]
+fn check_spec_extracts_wf_from_non_spec_named_specification() {
+    let dir = std::env::temp_dir().join("tla_mcp_wf_progress");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("Progress.tla");
+    let cfg_path = dir.join("Progress.cfg");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE Progress ----\n\
+         VARIABLE x\n\
+         Init == x = 0\n\
+         Step == x' = x + 1 /\\ x < 3\n\
+         vars == <<x>>\n\
+         ProgressFormula == Init /\\ [][Step]_vars /\\ WF_vars(Step)\n\
+         EventuallyDone == <>(x = 3)\n\
+         ====\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &cfg_path,
+        "SPECIFICATION ProgressFormula\n\
+         PROPERTY EventuallyDone\n\
+         CHECK_DEADLOCK FALSE\n",
+    )
+    .unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 100,
+        max_depth: 50,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: Some(true),
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match out.outcome {
+        CheckOutcome::Ok { .. } => {}
+        CheckOutcome::Error { ref error, .. } if error.message.contains("WF") => {
+            panic!(
+                "WF_vars leaked into eval path — extraction did not run for non-*Spec named SPECIFICATION; got {:?}",
+                out.outcome
+            );
+        }
+        other => panic!("expected ok, got {:?}", other),
+    }
+}
+
+#[test]
+fn check_spec_handles_wf_in_spec_named_definition() {
+    let dir = std::env::temp_dir().join("tla_mcp_wf_spec_named");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("WithSpec.tla");
+    let cfg_path = dir.join("WithSpec.cfg");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE WithSpec ----\n\
+         VARIABLE x\n\
+         Init == x = 0\n\
+         Step == x' = x + 1 /\\ x < 3\n\
+         vars == <<x>>\n\
+         Spec == Init /\\ [][Step]_vars /\\ WF_vars(Step)\n\
+         EventuallyDone == <>(x = 3)\n\
+         ====\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &cfg_path,
+        "SPECIFICATION Spec\n\
+         PROPERTY EventuallyDone\n\
+         CHECK_DEADLOCK FALSE\n",
+    )
+    .unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 100,
+        max_depth: 50,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: Some(true),
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match out.outcome {
+        CheckOutcome::Ok { .. } => {}
+        other => panic!(
+            "expected ok for *Spec named SPECIFICATION with WF, got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn check_spec_detects_leads_to_violation_in_sub_scc() {
+    let dir = std::env::temp_dir().join("tla_mcp_leads_to_sub_scc");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("RwStarve.tla");
+    let cfg_path = dir.join("RwStarve.cfg");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE RwStarve ----\n\
+         EXTENDS Naturals\n\
+         CONSTANT MaxReaders\n\
+         VARIABLES readers, writer, writerWaiting\n\
+         vars == << readers, writer, writerWaiting >>\n\
+         Init == readers = 0 /\\ writer = \"none\" /\\ writerWaiting = FALSE\n\
+         ReaderArrive  == writer = \"none\" /\\ readers + 1 <= MaxReaders\n\
+                       /\\ readers' = readers + 1 /\\ UNCHANGED <<writer, writerWaiting>>\n\
+         ReaderLeave   == readers > 0 /\\ readers' = readers - 1\n\
+                       /\\ UNCHANGED <<writer, writerWaiting>>\n\
+         WriterRequest == ~writerWaiting /\\ writer = \"none\"\n\
+                       /\\ writerWaiting' = TRUE /\\ UNCHANGED <<readers, writer>>\n\
+         WriterAcquire == writerWaiting /\\ readers = 0 /\\ writer = \"none\"\n\
+                       /\\ writer' = \"active\" /\\ writerWaiting' = FALSE /\\ UNCHANGED readers\n\
+         WriterRelease == writer = \"active\" /\\ writer' = \"none\"\n\
+                       /\\ UNCHANGED <<readers, writerWaiting>>\n\
+         Next == ReaderArrive \\/ ReaderLeave \\/ WriterRequest \\/ WriterAcquire \\/ WriterRelease\n\
+         Spec == Init /\\ [][Next]_vars /\\ WF_vars(ReaderLeave) /\\ WF_vars(WriterAcquire)\n\
+         Live == writerWaiting ~> writer = \"active\"\n\
+         ====\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &cfg_path,
+        "SPECIFICATION Spec\nCONSTANT MaxReaders = 2\nPROPERTY Live\nCHECK_DEADLOCK FALSE\n",
+    )
+    .unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 100,
+        max_depth: 50,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: Some(true),
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match out.outcome {
+        CheckOutcome::LivenessViolation {
+            property,
+            prefix,
+            cycle,
+            ..
+        } => {
+            assert!(
+                property.contains("LeadsTo") || property.contains("~>"),
+                "expected leads-to property, got {}",
+                property
+            );
+            assert!(!prefix.is_empty() || !cycle.is_empty());
+        }
+        other => panic!(
+            "expected liveness_violation for starvation cycle, got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn check_spec_does_not_report_leads_to_violation_when_subscc_unreachable() {
+    let dir = std::env::temp_dir().join("tla_mcp_leads_to_fixed");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("RwFixed.tla");
+    let cfg_path = dir.join("RwFixed.cfg");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE RwFixed ----\n\
+         EXTENDS Naturals\n\
+         CONSTANT MaxReaders\n\
+         VARIABLES readers, writer, writerWaiting\n\
+         vars == << readers, writer, writerWaiting >>\n\
+         Init == readers = 0 /\\ writer = \"none\" /\\ writerWaiting = FALSE\n\
+         ReaderArrive  == writer = \"none\" /\\ ~writerWaiting /\\ readers + 1 <= MaxReaders\n\
+                       /\\ readers' = readers + 1 /\\ UNCHANGED <<writer, writerWaiting>>\n\
+         ReaderLeave   == readers > 0 /\\ readers' = readers - 1\n\
+                       /\\ UNCHANGED <<writer, writerWaiting>>\n\
+         WriterRequest == ~writerWaiting /\\ writer = \"none\"\n\
+                       /\\ writerWaiting' = TRUE /\\ UNCHANGED <<readers, writer>>\n\
+         WriterAcquire == writerWaiting /\\ readers = 0 /\\ writer = \"none\"\n\
+                       /\\ writer' = \"active\" /\\ writerWaiting' = FALSE /\\ UNCHANGED readers\n\
+         WriterRelease == writer = \"active\" /\\ writer' = \"none\"\n\
+                       /\\ UNCHANGED <<readers, writerWaiting>>\n\
+         Next == ReaderArrive \\/ ReaderLeave \\/ WriterRequest \\/ WriterAcquire \\/ WriterRelease\n\
+         Spec == Init /\\ [][Next]_vars /\\ WF_vars(ReaderLeave) /\\ WF_vars(WriterAcquire)\n\
+         Live == writerWaiting ~> writer = \"active\"\n\
+         ====\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &cfg_path,
+        "SPECIFICATION Spec\nCONSTANT MaxReaders = 2\nPROPERTY Live\nCHECK_DEADLOCK FALSE\n",
+    )
+    .unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 100,
+        max_depth: 50,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: Some(true),
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match out.outcome {
+        CheckOutcome::Ok { .. } => {}
+        other => panic!(
+            "fixed rwlock spec should satisfy leads-to (no !Q sub-cycle reachable from P-state via !Q transitions); got {:?}",
+            other
+        ),
+    }
+}

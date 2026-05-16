@@ -927,22 +927,22 @@ fn check_liveness_properties(
                 continue;
             }
 
-            let property_satisfied = match property {
+            let violating_states = match property {
                 Expr::LeadsTo(p, q) => {
                     liveness::check_leads_to(&graph, scc, p, q, domains, defs, &spec.vars)?
                 }
                 _ => liveness::check_eventually(&graph, scc, property, domains, defs, &spec.vars)?,
             };
 
-            if !property_satisfied {
+            if let Some(cycle_indices) = violating_states {
                 let prop_desc = match property {
                     Expr::LeadsTo(_, _) => format!("{:?}", property),
                     _ => format!("<>{:?}", property),
                 };
+                let cycle_entry = cycle_indices.first().copied().unwrap_or(scc.states[0]);
                 let violation = LivenessViolation {
-                    prefix: graph.reconstruct_trace(scc.states[0]),
-                    cycle: scc
-                        .states
+                    prefix: graph.reconstruct_trace(cycle_entry),
+                    cycle: cycle_indices
                         .iter()
                         .filter_map(|&idx| graph.get_state(idx).cloned())
                         .collect(),

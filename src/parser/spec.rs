@@ -271,11 +271,7 @@ impl Parser {
                 self.liveness_properties
                     .push(Expr::LeadsTo(p.clone(), q.clone()));
             }
-            Expr::And(l, r) => {
-                self.extract_fairness_and_liveness(l);
-                self.extract_fairness_and_liveness(r);
-            }
-            Expr::Or(l, r) => {
+            Expr::And(l, r) | Expr::Or(l, r) => {
                 self.extract_fairness_and_liveness(l);
                 self.extract_fairness_and_liveness(r);
             }

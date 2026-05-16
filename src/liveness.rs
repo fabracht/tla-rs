@@ -159,34 +159,48 @@ pub fn check_eventually(
     constants: &Env,
     defs: &Definitions,
     vars: &[Arc<str>],
-) -> Result<bool> {
+) -> Result<Option<Vec<usize>>> {
     if scc.is_trivial {
-        return Ok(true);
+        return Ok(None);
     }
 
+    let mut not_p_states: HashSet<usize> = HashSet::new();
     for &state_idx in &scc.states {
-        if let Some(state) = graph.get_state(state_idx) {
-            let mut env = crate::eval::state_to_env(state, vars);
-            for (k, v) in constants {
-                env.insert(k.clone(), v.clone());
+        let Some(state) = graph.get_state(state_idx) else {
+            continue;
+        };
+        let mut env = crate::eval::state_to_env(state, vars);
+        for (k, v) in constants {
+            env.insert(k.clone(), v.clone());
+        }
+        match eval(property, &mut env, defs) {
+            Ok(Value::Bool(true)) => continue,
+            Ok(Value::Bool(false)) => {
+                not_p_states.insert(state_idx);
             }
-            match eval(property, &mut env, defs) {
-                Ok(Value::Bool(true)) => return Ok(true),
-                Ok(Value::Bool(false)) => continue,
-                Ok(_) => {
-                    return Err(EvalError::TypeMismatch {
-                        expected: "Bool",
-                        got: Value::Bool(false),
-                        context: Some("liveness property"),
-                        span: None,
-                    });
-                }
-                Err(e) => return Err(e),
+            Ok(_) => {
+                return Err(EvalError::TypeMismatch {
+                    expected: "Bool",
+                    got: Value::Bool(false),
+                    context: Some("liveness property"),
+                    span: None,
+                });
             }
+            Err(e) => return Err(e),
         }
     }
 
-    Ok(false)
+    if not_p_states.is_empty() {
+        return Ok(None);
+    }
+
+    let sub_sccs = crate::scc::compute_sccs_in_subset(graph, &not_p_states);
+    for sub in sub_sccs {
+        if !sub.is_trivial {
+            return Ok(Some(sub.states));
+        }
+    }
+    Ok(None)
 }
 
 pub fn check_leads_to(
@@ -197,56 +211,117 @@ pub fn check_leads_to(
     constants: &Env,
     defs: &Definitions,
     vars: &[Arc<str>],
-) -> Result<bool> {
+) -> Result<Option<Vec<usize>>> {
     if scc.is_trivial {
-        return Ok(true);
+        return Ok(None);
     }
 
-    let mut p_holds_somewhere = false;
-    let mut q_holds_somewhere = false;
+    let mut p_and_not_q_states: Vec<usize> = Vec::new();
+    let mut not_q_states: HashSet<usize> = HashSet::new();
 
     for &state_idx in &scc.states {
-        if let Some(state) = graph.get_state(state_idx) {
-            let mut env = crate::eval::state_to_env(state, vars);
-            for (k, v) in constants {
-                env.insert(k.clone(), v.clone());
-            }
+        let Some(state) = graph.get_state(state_idx) else {
+            continue;
+        };
+        let mut env = crate::eval::state_to_env(state, vars);
+        for (k, v) in constants {
+            env.insert(k.clone(), v.clone());
+        }
 
-            match eval(p, &mut env, defs) {
-                Ok(Value::Bool(true)) => p_holds_somewhere = true,
-                Ok(Value::Bool(false)) => {}
-                Ok(_) => {
-                    return Err(EvalError::TypeMismatch {
-                        expected: "Bool",
-                        got: Value::Bool(false),
-                        context: Some("leads-to antecedent"),
-                        span: None,
-                    });
-                }
-                Err(e) => return Err(e),
+        let p_holds = match eval(p, &mut env, defs) {
+            Ok(Value::Bool(b)) => b,
+            Ok(_) => {
+                return Err(EvalError::TypeMismatch {
+                    expected: "Bool",
+                    got: Value::Bool(false),
+                    context: Some("leads-to antecedent"),
+                    span: None,
+                });
             }
+            Err(e) => return Err(e),
+        };
 
-            match eval(q, &mut env, defs) {
-                Ok(Value::Bool(true)) => q_holds_somewhere = true,
-                Ok(Value::Bool(false)) => {}
-                Ok(_) => {
-                    return Err(EvalError::TypeMismatch {
-                        expected: "Bool",
-                        got: Value::Bool(false),
-                        context: Some("leads-to consequent"),
-                        span: None,
-                    });
-                }
-                Err(e) => return Err(e),
+        let q_holds = match eval(q, &mut env, defs) {
+            Ok(Value::Bool(b)) => b,
+            Ok(_) => {
+                return Err(EvalError::TypeMismatch {
+                    expected: "Bool",
+                    got: Value::Bool(false),
+                    context: Some("leads-to consequent"),
+                    span: None,
+                });
+            }
+            Err(e) => return Err(e),
+        };
+
+        if !q_holds {
+            not_q_states.insert(state_idx);
+            if p_holds {
+                p_and_not_q_states.push(state_idx);
             }
         }
     }
 
-    if p_holds_somewhere && !q_holds_somewhere {
-        return Ok(false);
+    if p_and_not_q_states.is_empty() || not_q_states.is_empty() {
+        return Ok(None);
     }
 
-    Ok(true)
+    let sub_sccs = crate::scc::compute_sccs_in_subset(graph, &not_q_states);
+    let mut nontrivial_targets: HashSet<usize> = HashSet::new();
+    let mut violating_scc: Option<Vec<usize>> = None;
+    for sub in &sub_sccs {
+        if !sub.is_trivial {
+            for &s in &sub.states {
+                nontrivial_targets.insert(s);
+            }
+            if violating_scc.is_none() {
+                violating_scc = Some(sub.states.clone());
+            }
+        }
+    }
+
+    if nontrivial_targets.is_empty() {
+        return Ok(None);
+    }
+
+    for &start in &p_and_not_q_states {
+        if reaches_target_within_subset(graph, start, &nontrivial_targets, &not_q_states) {
+            return Ok(violating_scc);
+        }
+    }
+
+    Ok(None)
+}
+
+fn reaches_target_within_subset(
+    graph: &StateGraph,
+    start: usize,
+    targets: &HashSet<usize>,
+    allowed: &HashSet<usize>,
+) -> bool {
+    if !allowed.contains(&start) {
+        return false;
+    }
+    if targets.contains(&start) {
+        return true;
+    }
+    let mut visited: HashSet<usize> = HashSet::new();
+    let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+    visited.insert(start);
+    queue.push_back(start);
+    while let Some(node) = queue.pop_front() {
+        for edge in graph.successors(node) {
+            let next = edge.target;
+            if !allowed.contains(&next) || !visited.insert(next) {
+                continue;
+            }
+            if targets.contains(&next) {
+                return true;
+            }
+            queue.push_back(next);
+        }
+    }
+    false
 }
 
 pub fn find_violating_scc(

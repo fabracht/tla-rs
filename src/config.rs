@@ -628,7 +628,12 @@ fn find_box_action(expr: &Expr) -> Option<Expr> {
 
 fn collect_init(expr: &Expr) -> Option<Expr> {
     match expr {
-        Expr::BoxAction(_, _) => None,
+        Expr::BoxAction(_, _)
+        | Expr::WeakFairness(_, _)
+        | Expr::StrongFairness(_, _)
+        | Expr::Eventually(_)
+        | Expr::LeadsTo(_, _)
+        | Expr::Always(_) => None,
         Expr::And(l, r) => match (collect_init(l), collect_init(r)) {
             (Some(a), Some(b)) => Some(Expr::And(Box::new(a), Box::new(b))),
             (a, None) => a,
@@ -639,27 +644,34 @@ fn collect_init(expr: &Expr) -> Option<Expr> {
 }
 
 fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<(), String> {
-    match spec.definitions.get(spec_name.as_ref()) {
-        Some((params, expr)) if params.is_empty() => {
-            if let Some(next_expr) = find_box_action(expr) {
-                spec.init = Some(collect_init(expr).unwrap_or(Expr::Lit(Value::Bool(true))));
-                spec.next = Some(next_expr);
-                return Ok(());
-            }
-            Err(format!(
-                "SPECIFICATION '{}': expected Init /\\ [][Next]_vars form",
+    let expr_clone = match spec.definitions.get(spec_name.as_ref()) {
+        Some((params, expr)) if params.is_empty() => expr.clone(),
+        Some(_) => {
+            return Err(format!(
+                "SPECIFICATION definition '{}' must have zero parameters",
                 spec_name
-            ))
+            ));
         }
-        Some(_) => Err(format!(
-            "SPECIFICATION definition '{}' must have zero parameters",
-            spec_name
-        )),
-        None => Err(format!(
-            "SPECIFICATION definition '{}' not found in spec",
-            spec_name
-        )),
+        None => {
+            return Err(format!(
+                "SPECIFICATION definition '{}' not found in spec",
+                spec_name
+            ));
+        }
+    };
+    if let Some(next_expr) = find_box_action(&expr_clone) {
+        spec.init = Some(collect_init(&expr_clone).unwrap_or(Expr::Lit(Value::Bool(true))));
+        spec.next = Some(next_expr);
+        let parser_already_extracted = spec_name.as_ref() == "Spec" || spec_name.ends_with("Spec");
+        if !parser_already_extracted {
+            spec.extract_fairness_and_liveness(&expr_clone);
+        }
+        return Ok(());
     }
+    Err(format!(
+        "SPECIFICATION '{}': expected Init /\\ [][Next]_vars form",
+        spec_name
+    ))
 }
 
 #[cfg(test)]

@@ -294,6 +294,51 @@ pub struct Spec {
     pub liveness_properties: Vec<Expr>,
 }
 
+impl Spec {
+    pub fn extract_fairness_and_liveness(&mut self, expr: &Expr) {
+        match expr {
+            Expr::WeakFairness(var, action) => {
+                self.fairness.push(FairnessConstraint::Weak(
+                    Expr::Var(var.clone()),
+                    (**action).clone(),
+                ));
+            }
+            Expr::StrongFairness(var, action) => {
+                self.fairness.push(FairnessConstraint::Strong(
+                    Expr::Var(var.clone()),
+                    (**action).clone(),
+                ));
+            }
+            Expr::Eventually(inner) => {
+                self.liveness_properties.push((**inner).clone());
+            }
+            Expr::LeadsTo(p, q) => {
+                self.liveness_properties
+                    .push(Expr::LeadsTo(p.clone(), q.clone()));
+            }
+            Expr::And(l, r) => {
+                self.extract_fairness_and_liveness(l);
+                self.extract_fairness_and_liveness(r);
+            }
+            Expr::Or(l, r) => {
+                self.extract_fairness_and_liveness(l);
+                self.extract_fairness_and_liveness(r);
+            }
+            Expr::Always(inner) => {
+                if let Expr::Eventually(p) = inner.as_ref() {
+                    self.liveness_properties.push((**p).clone());
+                } else {
+                    self.extract_fairness_and_liveness(inner);
+                }
+            }
+            Expr::BoxAction(inner, _) => {
+                self.extract_fairness_and_liveness(inner);
+            }
+            _ => {}
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct GuardEval {
     pub expression: String,
