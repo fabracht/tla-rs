@@ -257,13 +257,25 @@ if (result.dot) {
 
 `tla-mcp` exposes the model checker as a Model Context Protocol server over stdio, so agentic clients (Claude Code, Cursor, etc.) can call it as a first-class tool.
 
-Build and register:
+### Install
+
+The fastest path — install the published crate from crates.io (no clone needed):
+
+```bash
+cargo install tla-checker --bin tla-mcp
+```
+
+Or download a pre-built binary from the [latest GitHub release](https://github.com/fabracht/tla-rs/releases/latest) (Linux, macOS Intel/Apple Silicon, Windows).
+
+From a working copy:
 
 ```bash
 cargo install --path . --bin tla-mcp
 ```
 
-Then add to your MCP client config (Claude Code example, `~/.claude/mcp.json` or `claude_desktop_config.json`):
+### Register with your client
+
+Add to your MCP client config (Claude Code example, `~/.claude/mcp.json` or `claude_desktop_config.json`):
 
 ```json
 {
