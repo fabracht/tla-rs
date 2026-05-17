@@ -158,7 +158,7 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    needs: [publish, publish-npm, build-binaries]
+    needs: [publish, build-binaries]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
