@@ -20,7 +20,7 @@ use tla_checker::diagnostic::{ColorConfig, Diagnostic};
 use tla_checker::export::DotMode;
 #[cfg(not(target_arch = "wasm32"))]
 use tla_checker::interactive::{run_interactive, run_interactive_replay};
-use tla_checker::parser::parse;
+use tla_checker::parser::parse_with_warnings;
 use tla_checker::scenario::{execute_scenario, format_scenario_result, parse_scenario};
 
 fn is_likely_subcommand(arg: &str) -> bool {
@@ -44,7 +44,8 @@ fn extract_stats(result: &CheckResult) -> Option<&CheckStats> {
     match result {
         CheckResult::Ok(stats)
         | CheckResult::MaxStatesExceeded(stats)
-        | CheckResult::MaxDepthExceeded(stats) => Some(stats),
+        | CheckResult::MaxDepthExceeded(stats)
+        | CheckResult::MaxTimeExceeded(stats) => Some(stats),
         CheckResult::InvariantViolation(_, stats) | CheckResult::LivenessViolation(_, stats) => {
             Some(stats)
         }
@@ -515,8 +516,16 @@ fn main() -> ExitCode {
     let source = Source::new(spec_path.as_str(), input.as_str());
     let colors = ColorConfig::detect();
 
-    let mut spec = match parse(&input) {
-        Ok(s) => s,
+    let mut spec = match parse_with_warnings(&input) {
+        Ok((s, warnings)) => {
+            for warning in &warnings {
+                eprintln!("  Warning: {}", warning.value);
+                if !warning.span.is_empty() {
+                    eprintln!("    at offset {}..{}", warning.span.start, warning.span.end);
+                }
+            }
+            s
+        }
         Err(e) => {
             let mut diag = Diagnostic::error(&e.message);
             if let Some(span) = e.span {
@@ -1044,6 +1053,14 @@ fn main() -> ExitCode {
             println!("  Time: {:.3}s", stats.elapsed_secs);
             println!();
             println!("Increase with --max-depth N");
+            ExitCode::FAILURE
+        }
+        CheckResult::MaxTimeExceeded(stats) => {
+            println!("Time limit exceeded ({:.3}s)", stats.elapsed_secs);
+            println!();
+            println!("  States explored: {}", stats.states_explored);
+            println!("  Transitions: {}", stats.transitions);
+            println!("  Max depth reached: {}", stats.max_depth_reached);
             ExitCode::FAILURE
         }
         CheckResult::NoInitialStates => {

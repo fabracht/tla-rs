@@ -508,7 +508,8 @@ pub fn apply_config(
     }
 
     if let Some(ref spec_name) = cfg.specification {
-        resolve_specification(spec_name, spec)?;
+        let spec_warnings = resolve_specification(spec_name, spec)?;
+        warnings.extend(spec_warnings);
     }
 
     if !cfg.invariants.is_empty() {
@@ -589,9 +590,20 @@ pub fn apply_config(
         checker_config.allow_deadlock = !check_dl;
     }
 
-    if !cfg.constraints.is_empty() {
-        for c in &cfg.constraints {
-            warnings.push(format!("CONSTRAINT '{}' is not yet supported, ignoring", c));
+    for c in &cfg.constraints {
+        match spec.definitions.get(c.as_ref()) {
+            Some((params, expr)) if params.is_empty() => {
+                checker_config.state_constraints.push(expr.clone());
+            }
+            Some(_) => {
+                return Err(format!(
+                    "CONSTRAINT definition '{}' must have zero parameters",
+                    c
+                ));
+            }
+            None => {
+                return Err(format!("CONSTRAINT definition '{}' not found in spec", c));
+            }
         }
     }
 
@@ -617,7 +629,12 @@ fn find_box_action(expr: &Expr) -> Option<Expr> {
 
 fn collect_init(expr: &Expr) -> Option<Expr> {
     match expr {
-        Expr::BoxAction(_, _) => None,
+        Expr::BoxAction(_, _)
+        | Expr::WeakFairness(_, _)
+        | Expr::StrongFairness(_, _)
+        | Expr::Eventually(_)
+        | Expr::LeadsTo(_, _)
+        | Expr::Always(_) => None,
         Expr::And(l, r) => match (collect_init(l), collect_init(r)) {
             (Some(a), Some(b)) => Some(Expr::And(Box::new(a), Box::new(b))),
             (a, None) => a,
@@ -627,28 +644,37 @@ fn collect_init(expr: &Expr) -> Option<Expr> {
     }
 }
 
-fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<(), String> {
-    match spec.definitions.get(spec_name.as_ref()) {
-        Some((params, expr)) if params.is_empty() => {
-            if let Some(next_expr) = find_box_action(expr) {
-                spec.init = Some(collect_init(expr).unwrap_or(Expr::Lit(Value::Bool(true))));
-                spec.next = Some(next_expr);
-                return Ok(());
-            }
-            Err(format!(
-                "SPECIFICATION '{}': expected Init /\\ [][Next]_vars form",
+fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<Vec<String>, String> {
+    let expr_clone = match spec.definitions.get(spec_name.as_ref()) {
+        Some((params, expr)) if params.is_empty() => expr.clone(),
+        Some(_) => {
+            return Err(format!(
+                "SPECIFICATION definition '{}' must have zero parameters",
                 spec_name
-            ))
+            ));
         }
-        Some(_) => Err(format!(
-            "SPECIFICATION definition '{}' must have zero parameters",
-            spec_name
-        )),
-        None => Err(format!(
-            "SPECIFICATION definition '{}' not found in spec",
-            spec_name
-        )),
+        None => {
+            return Err(format!(
+                "SPECIFICATION definition '{}' not found in spec",
+                spec_name
+            ));
+        }
+    };
+    if let Some(next_expr) = find_box_action(&expr_clone) {
+        spec.init = Some(collect_init(&expr_clone).unwrap_or(Expr::Lit(Value::Bool(true))));
+        spec.next = Some(next_expr);
+        let parser_already_extracted = spec_name.as_ref() == "Spec" || spec_name.ends_with("Spec");
+        let warnings = if parser_already_extracted {
+            Vec::new()
+        } else {
+            spec.extract_fairness_and_liveness(&expr_clone)
+        };
+        return Ok(warnings);
     }
+    Err(format!(
+        "SPECIFICATION '{}': expected Init /\\ [][Next]_vars form",
+        spec_name
+    ))
 }
 
 #[cfg(test)]

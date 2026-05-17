@@ -1513,31 +1513,31 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Always(_) => Err(EvalError::domain_error(
-            "temporal operator [] (always) cannot be evaluated in explicit-state model checking",
+            "temporal operator [] (always) reached eval — it should be part of a spec body resolved via cfg SPECIFICATION, not evaluated as a state expression. Use INVARIANT for state-only safety properties.",
         )),
 
         Expr::Eventually(_) => Err(EvalError::domain_error(
-            "temporal operator <> (eventually) cannot be evaluated in explicit-state model checking",
+            "temporal operator <> (eventually) reached eval — wrap it in a definition and reference it via cfg PROPERTY (with --check-liveness), don't use it as a state predicate.",
         )),
 
         Expr::LeadsTo(_, _) => Err(EvalError::domain_error(
-            "temporal operator ~> (leads-to) cannot be evaluated in explicit-state model checking",
+            "temporal operator ~> (leads-to) reached eval — wrap it in a definition and reference it via cfg PROPERTY (with --check-liveness), don't use it as a state predicate.",
         )),
 
         Expr::WeakFairness(_, _) => Err(EvalError::domain_error(
-            "temporal operator WF (weak fairness) cannot be evaluated in explicit-state model checking",
+            "temporal operator WF_vars (weak fairness) reached eval — it should be inside the spec body (e.g., `Spec == Init /\\ [][Next]_vars /\\ WF_vars(Next)`) referenced by cfg SPECIFICATION, where it is auto-extracted into fairness constraints. WF_vars cannot be used as a state predicate or invariant.",
         )),
 
         Expr::StrongFairness(_, _) => Err(EvalError::domain_error(
-            "temporal operator SF (strong fairness) cannot be evaluated in explicit-state model checking",
+            "temporal operator SF_vars (strong fairness) reached eval — it should be inside the spec body referenced by cfg SPECIFICATION, where it is auto-extracted into fairness constraints. SF_vars cannot be used as a state predicate or invariant.",
         )),
 
         Expr::BoxAction(_, _) => Err(EvalError::domain_error(
-            "temporal operator [A]_v (box action) cannot be evaluated in explicit-state model checking",
+            "temporal operator [A]_v (box action) reached eval — it should be inside the spec body referenced by cfg SPECIFICATION. Cannot be used as a state predicate.",
         )),
 
         Expr::DiamondAction(_, _) => Err(EvalError::domain_error(
-            "temporal operator <<A>>_v (diamond action) cannot be evaluated in explicit-state model checking",
+            "temporal operator <<A>>_v (diamond action) reached eval — it should be inside the spec body referenced by cfg SPECIFICATION. Cannot be used as a state predicate.",
         )),
 
         Expr::EnabledOp(_) => Err(EvalError::domain_error(

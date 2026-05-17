@@ -100,6 +100,72 @@ pub fn get_nontrivial_sccs(graph: &StateGraph) -> Vec<SCC> {
         .collect()
 }
 
+pub fn compute_sccs_in_subset(
+    graph: &StateGraph,
+    allowed: &std::collections::HashSet<usize>,
+) -> Vec<SCC> {
+    let node_count = graph.state_count();
+    if node_count == 0 || allowed.is_empty() {
+        return Vec::new();
+    }
+
+    let mut state = TarjanState::new(node_count);
+
+    for &v in allowed {
+        if v < node_count && state.indices[v].is_none() {
+            strongconnect_filtered(graph, v, &mut state, allowed);
+        }
+    }
+
+    state.sccs
+}
+
+fn strongconnect_filtered(
+    graph: &StateGraph,
+    v: usize,
+    state: &mut TarjanState,
+    allowed: &std::collections::HashSet<usize>,
+) {
+    state.indices[v] = Some(state.index);
+    state.lowlinks[v] = state.index;
+    state.index += 1;
+    state.stack.push(v);
+    state.on_stack[v] = true;
+
+    for edge in graph.successors(v) {
+        let w = edge.target;
+        if !allowed.contains(&w) {
+            continue;
+        }
+        if state.indices[w].is_none() {
+            strongconnect_filtered(graph, w, state, allowed);
+            state.lowlinks[v] = state.lowlinks[v].min(state.lowlinks[w]);
+        } else if state.on_stack[w]
+            && let Some(w_index) = state.indices[w]
+        {
+            state.lowlinks[v] = state.lowlinks[v].min(w_index);
+        }
+    }
+
+    if Some(state.lowlinks[v]) == state.indices[v] {
+        let mut scc_states = Vec::new();
+        while let Some(w) = state.stack.pop() {
+            state.on_stack[w] = false;
+            scc_states.push(w);
+            if w == v {
+                break;
+            }
+        }
+
+        let is_trivial = scc_states.len() == 1
+            && !graph
+                .successors(scc_states[0])
+                .iter()
+                .any(|e| e.target == scc_states[0] && allowed.contains(&e.target));
+        state.sccs.push(SCC::new(scc_states, is_trivial));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

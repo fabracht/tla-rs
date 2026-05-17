@@ -21,6 +21,7 @@ pub struct Parser {
     pub(super) instances: Vec<InstanceDecl>,
     pub(super) fairness: Vec<FairnessConstraint>,
     pub(super) liveness_properties: Vec<Expr>,
+    pub(super) warnings: Vec<Spanned<String>>,
 }
 
 impl Parser {
@@ -41,7 +42,16 @@ impl Parser {
             instances: Vec::new(),
             fairness: Vec::new(),
             liveness_properties: Vec::new(),
+            warnings: Vec::new(),
         })
+    }
+
+    pub fn warnings(&self) -> &[Spanned<String>] {
+        &self.warnings
+    }
+
+    pub fn take_warnings(&mut self) -> Vec<Spanned<String>> {
+        std::mem::take(&mut self.warnings)
     }
 
     pub(super) fn column_of(&self, byte_offset: u32) -> u32 {

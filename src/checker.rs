@@ -30,6 +30,7 @@ use crate::symmetry::SymmetryConfig;
 pub struct CheckerConfig {
     pub max_states: usize,
     pub max_depth: usize,
+    pub max_seconds: Option<u64>,
     pub symmetric_constants: Vec<Arc<str>>,
     #[cfg(not(target_arch = "wasm32"))]
     pub export_dot_path: Option<PathBuf>,
@@ -46,6 +47,7 @@ pub struct CheckerConfig {
     pub spec_path: Option<PathBuf>,
     #[cfg(not(target_arch = "wasm32"))]
     pub trace_json_path: Option<PathBuf>,
+    pub state_constraints: Vec<Expr>,
 }
 
 impl Default for CheckerConfig {
@@ -53,6 +55,7 @@ impl Default for CheckerConfig {
         Self {
             max_states: 1_000_000,
             max_depth: 100,
+            max_seconds: None,
             symmetric_constants: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
             export_dot_path: None,
@@ -69,6 +72,7 @@ impl Default for CheckerConfig {
             spec_path: None,
             #[cfg(not(target_arch = "wasm32"))]
             trace_json_path: None,
+            state_constraints: Vec::new(),
         }
     }
 }
@@ -120,6 +124,7 @@ pub enum CheckResult {
     InvariantError(EvalError, Vec<State>, Option<String>),
     MaxStatesExceeded(CheckStats),
     MaxDepthExceeded(CheckStats),
+    MaxTimeExceeded(CheckStats),
     NoInitialStates,
     PrepareError(PrepareSpecError),
 }
@@ -494,7 +499,41 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         })
         .collect();
 
+    let state_passes_constraints =
+        |state: &State, reusable_env: &mut Env| -> Result<bool, EvalError> {
+            if config.state_constraints.is_empty() {
+                return Ok(true);
+            }
+            for (i, var) in spec.vars.iter().enumerate() {
+                if let Some(val) = state.values.get(i) {
+                    reusable_env.insert(var.clone(), val.clone());
+                }
+            }
+            for constraint in &config.state_constraints {
+                match eval(constraint, reusable_env, &defs) {
+                    Ok(Value::Bool(true)) => continue,
+                    Ok(Value::Bool(false)) => return Ok(false),
+                    Ok(other) => {
+                        return Err(EvalError::type_mismatch_ctx("Bool", other, "CONSTRAINT"));
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(true)
+        };
+
+    let mut constraint_env = if config.state_constraints.is_empty() {
+        Env::new()
+    } else {
+        base_env.clone()
+    };
+
     for state in initial {
+        match state_passes_constraints(&state, &mut constraint_env) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(e) => return CheckResult::InitError(e),
+        }
         let canonical = symmetry.canonicalize(&state).into_owned();
         let (idx, is_new) = states.insert_full(canonical);
         if is_new {
@@ -626,6 +665,14 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             return CheckResult::MaxDepthExceeded(stats);
         }
 
+        if let Some(max_secs) = config.max_seconds
+            && elapsed_secs() as u64 >= max_secs
+        {
+            stats.elapsed_secs = elapsed_secs();
+            stats.dot_graph = do_export(&states, &parent, None, &all_edges);
+            return CheckResult::MaxTimeExceeded(stats);
+        }
+
         let Some(current) = states.get_index(current_idx) else {
             return CheckResult::NextError(
                 EvalError::DomainError {
@@ -749,6 +796,16 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
         for transition in successors {
             stats.transitions += 1;
+            match state_passes_constraints(&transition.state, &mut constraint_env) {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(e) => {
+                    let (trace, _actions) =
+                        reconstruct_trace(current_idx, &states, &parent, &parent_action);
+                    let dot = do_export(&states, &parent, Some(current_idx), &all_edges);
+                    return CheckResult::NextError(e, trace, dot);
+                }
+            }
             let canonical = symmetry.canonicalize(&transition.state).into_owned();
             let (succ_idx, is_new) = states.insert_full(canonical);
             if is_new {
@@ -788,11 +845,22 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         if !config.quiet {
             eprintln!("  Running liveness checking...");
         }
-        match check_liveness_properties(spec, &states, &parent, &domains, &symmetry, config, &defs)
-        {
-            Ok(None) => {}
-            Ok(Some(violation)) => {
+        let ctx = LivenessContext {
+            spec,
+            domains: &domains,
+            defs: &defs,
+            symmetry: &symmetry,
+            config,
+        };
+        match check_liveness_properties(ctx, &states, &parent, &elapsed_secs) {
+            Ok(LivenessCheckOutcome::Ok) => {}
+            Ok(LivenessCheckOutcome::Violation(violation)) => {
                 return CheckResult::LivenessViolation(violation, stats);
+            }
+            Ok(LivenessCheckOutcome::TimeExceeded) => {
+                stats.elapsed_secs = elapsed_secs();
+                stats.dot_graph = do_export(&states, &parent, None, &all_edges);
+                return CheckResult::MaxTimeExceeded(stats);
             }
             Err(e) => {
                 return CheckResult::InvariantError(e, vec![], stats.dot_graph.take());
@@ -803,15 +871,38 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     CheckResult::Ok(stats)
 }
 
+enum LivenessCheckOutcome {
+    Ok,
+    Violation(LivenessViolation),
+    TimeExceeded,
+}
+
+struct LivenessContext<'a> {
+    spec: &'a Spec,
+    domains: &'a Env,
+    defs: &'a Definitions,
+    symmetry: &'a SymmetryConfig,
+    config: &'a CheckerConfig,
+}
+
 fn check_liveness_properties(
-    spec: &Spec,
+    ctx: LivenessContext<'_>,
     states: &IndexSet<State>,
     parent: &[Option<usize>],
-    domains: &Env,
-    symmetry: &SymmetryConfig,
-    config: &CheckerConfig,
-    defs: &Definitions,
-) -> Result<Option<LivenessViolation>, EvalError> {
+    elapsed_secs: &dyn Fn() -> f64,
+) -> Result<LivenessCheckOutcome, EvalError> {
+    let LivenessContext {
+        spec,
+        domains,
+        defs,
+        symmetry,
+        config,
+    } = ctx;
+    let time_exceeded = || match config.max_seconds {
+        Some(max_secs) => elapsed_secs() as u64 >= max_secs,
+        None => false,
+    };
+
     let mut graph = StateGraph::new();
 
     for (idx, state) in states.iter().enumerate() {
@@ -828,6 +919,9 @@ fn check_liveness_properties(
     let primed_vars = make_primed_names(&spec.vars);
     let mut reusable_env = domains.clone();
     for (state_idx, state) in states.iter().enumerate() {
+        if time_exceeded() {
+            return Ok(LivenessCheckOutcome::TimeExceeded);
+        }
         let successors = next_states(
             next_expr,
             state,
@@ -842,6 +936,10 @@ fn check_liveness_properties(
                 graph.add_edge(state_idx, succ_idx, transition.action);
             }
         }
+    }
+
+    if time_exceeded() {
+        return Ok(LivenessCheckOutcome::TimeExceeded);
     }
 
     if !config.quiet {
@@ -869,10 +967,13 @@ fn check_liveness_properties(
             domains,
             defs,
         )?;
-        return Ok(Some(violation));
+        return Ok(LivenessCheckOutcome::Violation(violation));
     }
 
     for property in &spec.liveness_properties {
+        if time_exceeded() {
+            return Ok(LivenessCheckOutcome::TimeExceeded);
+        }
         for scc in &sccs {
             if !liveness::check_fairness_in_scc(
                 &graph,
@@ -885,34 +986,34 @@ fn check_liveness_properties(
                 continue;
             }
 
-            let property_satisfied = match property {
+            let violating_states = match property {
                 Expr::LeadsTo(p, q) => {
                     liveness::check_leads_to(&graph, scc, p, q, domains, defs, &spec.vars)?
                 }
                 _ => liveness::check_eventually(&graph, scc, property, domains, defs, &spec.vars)?,
             };
 
-            if !property_satisfied {
+            if let Some(cycle_indices) = violating_states {
                 let prop_desc = match property {
                     Expr::LeadsTo(_, _) => format!("{:?}", property),
                     _ => format!("<>{:?}", property),
                 };
+                let cycle_entry = cycle_indices.first().copied().unwrap_or(scc.states[0]);
                 let violation = LivenessViolation {
-                    prefix: graph.reconstruct_trace(scc.states[0]),
-                    cycle: scc
-                        .states
+                    prefix: graph.reconstruct_trace(cycle_entry),
+                    cycle: cycle_indices
                         .iter()
                         .filter_map(|&idx| graph.get_state(idx).cloned())
                         .collect(),
                     property: prop_desc,
                     fairness_info: vec![],
                 };
-                return Ok(Some(violation));
+                return Ok(LivenessCheckOutcome::Violation(violation));
             }
         }
     }
 
-    Ok(None)
+    Ok(LivenessCheckOutcome::Ok)
 }
 
 pub fn format_trace(trace: &[State], vars: &[Arc<str>]) -> String {
@@ -1304,6 +1405,15 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
         CheckResult::MaxDepthExceeded(stats) => {
             format!(
                 r#"{{"status": "max_depth_exceeded", "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
+                stats.states_explored,
+                stats.transitions,
+                stats.max_depth_reached,
+                stats.elapsed_secs
+            )
+        }
+        CheckResult::MaxTimeExceeded(stats) => {
+            format!(
+                r#"{{"status": "max_time_exceeded", "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
                 stats.states_explored,
                 stats.transitions,
                 stats.max_depth_reached,

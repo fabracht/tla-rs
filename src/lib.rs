@@ -10,6 +10,8 @@ pub mod interactive;
 pub mod lexer;
 pub mod liveness;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod mcp;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod modules;
 pub mod parser;
 pub mod scc;

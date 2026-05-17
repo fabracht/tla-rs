@@ -172,13 +172,10 @@ impl Parser {
                     let expr = match self.parse_expr() {
                         Ok(e) => e,
                         Err(e) => {
-                            eprintln!(
-                                "  Warning: failed to parse operator '{}': {}",
-                                name, e.message
-                            );
-                            if let Some(span) = e.span {
-                                eprintln!("    at offset {}..{}", span.start, span.end);
-                            }
+                            let message =
+                                format!("failed to parse operator '{}': {}", name, e.message);
+                            let span = e.span.unwrap_or_default();
+                            self.warnings.push(crate::span::Spanned::new(message, span));
                             self.skip_to_next_definition();
                             continue;
                         }
@@ -268,17 +265,20 @@ impl Parser {
                 ));
             }
             Expr::Eventually(inner) => {
-                self.liveness_properties.push((**inner).clone());
+                if matches!(inner.as_ref(), Expr::Always(_)) {
+                    self.warnings.push(crate::span::Spanned::new(
+                        "temporal pattern <>[]P (stable-eventually) is not supported by the liveness checker — dropping its inner expression".to_string(),
+                        crate::span::Span::default(),
+                    ));
+                } else {
+                    self.liveness_properties.push((**inner).clone());
+                }
             }
             Expr::LeadsTo(p, q) => {
                 self.liveness_properties
                     .push(Expr::LeadsTo(p.clone(), q.clone()));
             }
-            Expr::And(l, r) => {
-                self.extract_fairness_and_liveness(l);
-                self.extract_fairness_and_liveness(r);
-            }
-            Expr::Or(l, r) => {
+            Expr::And(l, r) | Expr::Or(l, r) => {
                 self.extract_fairness_and_liveness(l);
                 self.extract_fairness_and_liveness(r);
             }
@@ -291,6 +291,12 @@ impl Parser {
             }
             Expr::BoxAction(inner, _) => {
                 self.extract_fairness_and_liveness(inner);
+            }
+            Expr::DiamondAction(_, _) => {
+                self.warnings.push(crate::span::Spanned::new(
+                    "temporal operator <<A>>_v (diamond action) is not currently extracted into fairness or liveness — dropping".to_string(),
+                    crate::span::Span::default(),
+                ));
             }
             _ => {}
         }

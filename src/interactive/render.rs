@@ -12,7 +12,7 @@ use crate::ast::{Env, Spec, State, Value};
 use crate::checker::format_value;
 use crate::eval::{Definitions, eval, explain_invariant_failure, state_to_env};
 
-use super::state::{ExplorerState, InputMode};
+use super::state::{DisplayedRow, ExplorerState, InputMode};
 
 pub(super) fn ui(
     f: &mut Frame,
@@ -271,106 +271,138 @@ fn render_actions(f: &mut Frame, area: Rect, explorer: &ExplorerState, vars: &[A
         );
     }
 
-    for (i, transition) in explorer.available_actions.iter().enumerate() {
-        let action_name = transition
-            .action
-            .as_ref()
-            .map(|s| s.as_ref())
-            .unwrap_or("(unnamed)");
-
-        let mut all_changes: Vec<(String, String, String)> = Vec::new();
-        for (vi, var) in vars.iter().enumerate() {
-            if let (Some(old_val), Some(new_val)) = (
-                explorer.current.values.get(vi),
-                transition.state.values.get(vi),
-            ) && old_val != new_val
-            {
-                all_changes.extend(format_nested_changes(old_val, new_val, var));
-            }
-        }
-
-        let is_expanded = i == explorer.selected_action || explorer.expanded_actions.contains(&i);
-        let is_grouped = all_changes.len() > 3;
-
-        let change_str = if all_changes.is_empty() {
-            "(no changes)".to_string()
-        } else if !is_grouped {
-            all_changes
-                .iter()
-                .map(|(path, old, new)| {
-                    if old.is_empty() {
-                        format!("{}': {}", path, new)
-                    } else if new.is_empty() {
-                        format!("{}': (removed)", path)
-                    } else {
-                        format!("{}': {} -> {}", path, old, new)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
-        } else if is_expanded {
-            format!("▾ {} changes", all_changes.len())
-        } else {
-            format!("▸ {} changes", all_changes.len())
-        };
-
-        let style = if i == explorer.selected_action {
+    let displayed_rows = explorer.displayed_rows();
+    let mut primary_item_indices: Vec<usize> = Vec::with_capacity(displayed_rows.len());
+    for (row_idx, row) in displayed_rows.iter().enumerate() {
+        primary_item_indices.push(items.len());
+        let is_selected = row_idx == explorer.selected_action;
+        let style = if is_selected {
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
+        let prefix = if is_selected { "▸ " } else { "  " };
 
-        let prefix = if i == explorer.selected_action {
-            "▸ "
-        } else {
-            "  "
-        };
-        items.push(
-            ListItem::new(format!(
-                "{}[{}] {}: {}",
-                prefix,
-                i + 1,
-                action_name,
-                change_str
-            ))
-            .style(style),
-        );
-
-        if is_grouped && is_expanded {
-            for (path, old, new) in &all_changes {
-                let detail = if old.is_empty() {
-                    format!("       {}': {}", path, new)
-                } else if new.is_empty() {
-                    format!("       {}': (removed)", path)
-                } else {
-                    format!("       {}': {} -> {}", path, old, new)
-                };
-                items.push(ListItem::new(detail).style(Style::default().fg(Color::DarkGray)));
-            }
-        }
-
-        if explorer.show_guards
-            && let Some(transition_with_guards) = explorer.available_actions_with_guards.get(i)
-        {
-            if transition_with_guards.guards.is_empty() {
+        match row {
+            DisplayedRow::GroupHeader {
+                group_name,
+                transition_indices,
+                expanded,
+            } => {
+                let marker = if *expanded { "▾" } else { "▸" };
                 items.push(
-                    ListItem::new("       (no preconditions)")
-                        .style(Style::default().fg(Color::DarkGray)),
+                    ListItem::new(format!(
+                        "{}[{}] {} {} {} variants",
+                        prefix,
+                        row_idx + 1,
+                        group_name,
+                        marker,
+                        transition_indices.len()
+                    ))
+                    .style(style),
                 );
-            } else {
-                for guard in &transition_with_guards.guards {
-                    let check = if guard.result { "✓" } else { "✗" };
-                    let guard_style = if guard.result {
-                        Style::default().fg(Color::Green)
+            }
+            DisplayedRow::Action {
+                transition_idx,
+                group_name,
+                is_variant,
+            } => {
+                let transition = &explorer.available_actions[*transition_idx];
+
+                let mut all_changes: Vec<(String, String, String)> = Vec::new();
+                for (vi, var) in vars.iter().enumerate() {
+                    if let (Some(old_val), Some(new_val)) = (
+                        explorer.current.values.get(vi),
+                        transition.state.values.get(vi),
+                    ) && old_val != new_val
+                    {
+                        all_changes.extend(format_nested_changes(old_val, new_val, var));
+                    }
+                }
+
+                let is_expanded = is_selected || explorer.expanded_actions.contains(transition_idx);
+                let is_grouped = all_changes.len() > 3;
+
+                let change_str = if all_changes.is_empty() {
+                    "(no changes)".to_string()
+                } else if !is_grouped {
+                    all_changes
+                        .iter()
+                        .map(|(path, old, new)| {
+                            if old.is_empty() {
+                                format!("{}': {}", path, new)
+                            } else if new.is_empty() {
+                                format!("{}': (removed)", path)
+                            } else {
+                                format!("{}': {} -> {}", path, old, new)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                } else if is_expanded {
+                    format!("▾ {} changes", all_changes.len())
+                } else {
+                    format!("▸ {} changes", all_changes.len())
+                };
+
+                let indent = if *is_variant { "  " } else { "" };
+                items.push(
+                    ListItem::new(format!(
+                        "{}{}[{}] {}: {}",
+                        prefix,
+                        indent,
+                        row_idx + 1,
+                        group_name,
+                        change_str
+                    ))
+                    .style(style),
+                );
+
+                if is_grouped && is_expanded {
+                    let detail_indent = if *is_variant { "         " } else { "       " };
+                    for (path, old, new) in &all_changes {
+                        let detail = if old.is_empty() {
+                            format!("{}{}': {}", detail_indent, path, new)
+                        } else if new.is_empty() {
+                            format!("{}{}': (removed)", detail_indent, path)
+                        } else {
+                            format!("{}{}': {} -> {}", detail_indent, path, old, new)
+                        };
+                        items.push(
+                            ListItem::new(detail).style(Style::default().fg(Color::DarkGray)),
+                        );
+                    }
+                }
+
+                if explorer.show_guards
+                    && let Some(transition_with_guards) =
+                        explorer.available_actions_with_guards.get(*transition_idx)
+                {
+                    let guard_indent = if *is_variant { "         " } else { "       " };
+                    if transition_with_guards.guards.is_empty() {
+                        items.push(
+                            ListItem::new(format!("{}(no preconditions)", guard_indent))
+                                .style(Style::default().fg(Color::DarkGray)),
+                        );
                     } else {
-                        Style::default().fg(Color::Red)
-                    };
-                    items.push(
-                        ListItem::new(format!("       {} {}", check, guard.expression))
-                            .style(guard_style),
-                    );
+                        for guard in &transition_with_guards.guards {
+                            let check = if guard.result { "✓" } else { "✗" };
+                            let guard_style = if guard.result {
+                                Style::default().fg(Color::Green)
+                            } else {
+                                Style::default().fg(Color::Red)
+                            };
+                            items.push(
+                                ListItem::new(format!(
+                                    "{}{} {}",
+                                    guard_indent, check, guard.expression
+                                ))
+                                .style(guard_style),
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -380,7 +412,11 @@ fn render_actions(f: &mut Frame, area: Rect, explorer: &ExplorerState, vars: &[A
         List::new(items).block(Block::default().borders(Borders::ALL).title(title));
 
     let mut list_state = ListState::default();
-    list_state.select(Some(explorer.selected_action));
+    let selected_item_idx = primary_item_indices
+        .get(explorer.selected_action)
+        .copied()
+        .unwrap_or(0);
+    list_state.select(Some(selected_item_idx));
 
     f.render_stateful_widget(actions_widget, area, &mut list_state);
 }
