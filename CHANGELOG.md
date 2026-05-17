@@ -1,14 +1,21 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] - 2026-05-17
 
 ### Added
 
-- `SpecSummary.constants: Vec<{ name, value }>` — `validate_spec` now returns the spec's declared CONSTANTS with their resolved values (from cfg + input). Lets agents catch outlier constant values before launching a check that would have timed out
-- `check_spec` requires a third budget: `max_seconds: u64` (no default). The BFS loop checks elapsed wall-clock time and returns `status: "limit_reached"` with `limit: "max_seconds"` when the budget is hit. Previous behavior: long-running checks could exceed the MCP client's transport timeout, returning nothing structured
+- `tla-mcp` binary — Model Context Protocol server exposing the model checker as MCP tools for agentic clients (Claude Code, Cursor, etc.) over stdio transport. Four tools with versioned JSON schemas (`schema_version: "1"`):
+  - `validate_spec` — parse + summary (vars, constants with resolved values, invariants, init/next presence)
+  - `list_invariants` — detected invariant names (matches `Inv*`, `TypeOK*`, `NotSolved*`, plus cfg `INVARIANT` entries)
+  - `check_spec` — full model checking with required `max_states` / `max_depth` / `max_seconds` budgets
+  - `replay_scenario` — walk a spec step-by-step through a guided scenario (`step: <expression>` lines), returns per-step `StateSnapshot` + `changes`, or a failure with `available_actions` when no transition matches
+- `tla_checker::mcp` module: schema types (`ValidateSpecOutput`, `CheckSpecOutput`, `StateSnapshot`, `TlaValue`, `StructuredError`), conversion helpers, and runner functions for direct library use
+- `SpecSummary.constants: Vec<{ name, value }>` — `validate_spec` returns the spec's declared CONSTANTS with their resolved values (from cfg + input). Lets agents catch outlier constant values before launching a check that would have timed out
+- `check_spec` requires a third budget `max_seconds: u64` (no default). The BFS loop and the liveness phase both check elapsed wall-clock time and return `status: "limit_reached"` with `limit: "max_seconds"` when the budget is hit. Previous behavior: long-running checks could exceed the MCP client's transport timeout, returning nothing structured
 - `LimitKind::MaxSeconds` variant added to the schema; `CheckResult::MaxTimeExceeded(CheckStats)` variant added to the engine
-- `check_spec` and `validate_spec` tool descriptions now point at the validate-first workflow: call `validate_spec`, inspect `constants`, then `check_spec` with deliberate budgets
-
+- `check_spec` and `validate_spec` tool descriptions point at the validate-first workflow: call `validate_spec`, inspect `constants`, then `check_spec` with deliberate budgets
+- `warnings` array on `validate_spec` and `list_invariants` responses — surfaces parser-tolerance warnings (silent operator-body skips that previously only printed to stderr) and unsupported temporal constructs (`<<A>>_v` diamond actions, `<>[]P` stable-eventually) dropped by the fairness extractor
+- `parser::parse_with_warnings(input)` function returning `(Spec, Vec<Spanned<String>>)` for callers that want structured warnings; `parser::parse(input)` unchanged
 - `CONSTRAINT` directive in cfg files is now honored — the checker prunes states where the constraint expression is false (matches TLC's `CONSTRAINT` semantics). Previously parsed but warned "not yet supported"
 - `check_spec` MCP tool accepts `state_constraint: "<TLA+ expression>"` for inline state-space bounding without modifying the spec or cfg
 - `CheckerConfig.state_constraints: Vec<Expr>` — the underlying field; populated either from cfg `CONSTRAINT` or library callers
@@ -21,7 +28,7 @@
 - **`<>P` (eventually) and `P ~> Q` (leads-to) liveness checks now use sub-SCC analysis** instead of treating the parent SCC as a single unit. Previous behavior: `check_leads_to` returned satisfied if `Q` held *anywhere* in the SCC, missing cases where the SCC contained sub-cycles staying in `!Q` forever. Now the check finds non-trivial sub-SCCs within the `!Q` (or `!P` for eventually) subset and reports a violation when one is reachable from a P-and-`!Q` state via `!Q` transitions. This catches classic starvation patterns (e.g., a reader/writer lock where the writer's `~>` is violated by an infinite reader-cycle within a larger SCC that happens to include a writer-active state)
 - Leads-to violation reports now include the actual problematic sub-SCC as the cycle, not the full parent SCC. Previously the reported cycle would contain irrelevant `Q`-holding states
 - **Leads-to violation now reports the sub-SCC the P-state actually reaches**, not just the first non-trivial sub-SCC in Tarjan order. When multiple non-trivial `!Q` sub-SCCs exist, the previous logic could report a cycle that is unreachable from any P-state while a real violation existed elsewhere. The reported cycle is now correct
-- `max_seconds` budget is now enforced during the liveness phase, not just BFS. Previously, specs where BFS finished within budget but the liveness phase (forward-edge reconstruction + Tarjan + sub-SCC analysis) ran long could exceed the MCP client's transport timeout. Now the check fires at the top of the per-state edge-rebuild loop and between liveness property checks
+- `max_seconds` budget is now enforced during the liveness phase, not just BFS. Previously, specs where BFS finished within budget but the liveness phase (forward-edge reconstruction + Tarjan + sub-SCC analysis) ran long could exceed the MCP client's transport timeout. Now the check fires at the top of the per-state edge loop and between liveness property checks
 - `state_constraint` parse errors now include the source span pointing into the user's constraint expression. Previously the span was dropped
 - `extract_fairness_and_liveness` now warns when it encounters `<<A>>_v` (diamond action) or `<>[]P` (stable-eventually) — both are silently dropped today but the warning surfaces the cfg-debug mismatch instead of leaving the user wondering why fairness wasn't applied
 - `state_passes_constraints` no longer clones `base_env` on every state and every transition — the env is hoisted out of both loops and reused, matching the pattern used elsewhere in the BFS loop
@@ -32,6 +39,8 @@
 
 ### Notes
 
+- `check_spec` inputs `allow_deadlock` and `check_liveness` are `Option<bool>`: omit to defer to cfg directives (`CHECK_DEADLOCK`, `PROPERTY`), pass explicitly to override. The `symmetry` field appends to cfg `SYMMETRY` constants rather than replacing them
+- README section on MCP mid-session reload: clients spawn server processes at startup; rebuilding doesn't hot-reload — restart the client (or open a new session) to pick up changes
 - Constraint expressions are evaluated against unprimed variables (state predicates). They run at both initial-state enumeration and successor expansion, before symmetry canonicalization. `ACTION_CONSTRAINT` (transition predicate) remains unsupported and still warns
 - `Spec::extract_fairness_and_liveness(&mut self, &Expr)` is now a public method on `Spec`, callable from both the parser (auto-extraction on `*Spec` definition names) and `apply_config` (when `SPECIFICATION` resolves to a non-`*Spec` name)
 - `scc::compute_sccs_in_subset(graph, allowed: &HashSet<usize>)` — new public function running Tarjan over a filtered node set, used by the liveness checks to find sub-SCCs within `!P` / `!Q` partitions
@@ -39,25 +48,7 @@
 - `check_leads_to` and `check_eventually` now return `Result<Option<Vec<usize>>>` (Some = sub-SCC states forming the violating cycle, None = property satisfied), enabling accurate cycle reporting
 - `Spec::extract_fairness_and_liveness` now returns `Vec<String>` of warnings (empty when nothing unexpected). Callers in the parser and `apply_config` collect and surface these
 - BFS now collects forward edges in `all_edges` whenever liveness checking is enabled, not only when DOT export is requested. This adds memory proportional to total transitions (one `(usize, Option<Arc<str>>)` per edge) during the BFS phase, in exchange for skipping the duplicate `next_states` pass during liveness. Specs that are state-count-bounded but memory-tight may need to budget for the extra edge storage
-
-## [0.4.0] - 2026-05-14
-
-### Added
-
-- `tla-mcp` binary — Model Context Protocol server exposing the model checker as MCP tools for agentic clients (Claude Code, Cursor, etc.) over stdio transport
-- Three MCP tools with versioned JSON schemas: `validate_spec` (parse + summary), `list_invariants` (introspection), `check_spec` (full check with required `max_states` / `max_depth` budgets)
-- `tla_checker::mcp` module: schema types (`ValidateSpecOutput`, `CheckSpecOutput`, `StateSnapshot`, `TlaValue`, `StructuredError`), conversion helpers, and runner functions for direct library use
-
-### Notes
-
-- `check_spec` inputs `allow_deadlock` and `check_liveness` are `Option<bool>`: omit to defer to cfg directives (`CHECK_DEADLOCK`, `PROPERTY`), pass explicitly to override. The `symmetry` field appends to cfg `SYMMETRY` constants rather than replacing them.
-
-### Added (follow-ups)
-
-- `replay_scenario` MCP tool — walks a spec through a guided scenario (`step: <expression>` lines) and returns per-step `StateSnapshot` + `changes`, or a failure with `available_actions` when no transition matches a step
-- `warnings` array on `validate_spec` and `list_invariants` responses — surfaces parser-tolerance warnings (silent operator-body skips) that previously only printed to stderr
-- README section on MCP mid-session reload (clients spawn server processes at startup; rebuilding doesn't hot-reload)
-- New `parser::parse_with_warnings(input)` function returning `(Spec, Vec<Spanned<String>>)` for callers that want structured warnings; `parser::parse(input)` unchanged
+- `tla-mcp` binary is shipped as source in this release (`cargo install --bin tla-mcp`); pre-built binaries for the MCP server are not yet produced by the release pipeline
 
 ## [0.3.11] - 2026-05-02
 
