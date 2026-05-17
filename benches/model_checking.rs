@@ -122,7 +122,7 @@ fn bench_tcommit(c: &mut Criterion) {
     group.finish();
 }
 
-#[cfg(test)]
+#[allow(dead_code)]
 fn validate_benchmarks() {
     let large_counter_text = include_str!("../test_cases/benchmark/large_counter.tla");
     let large_counter = parse(large_counter_text).expect("failed to parse large_counter.tla");
@@ -445,6 +445,31 @@ fn bench_enabled(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_liveness_edge_reuse(c: &mut Criterion) {
+    let spec_text = include_str!("../test_cases/benchmark/liveness_edge_reuse.tla");
+    let spec = parse(spec_text).expect("failed to parse liveness_edge_reuse.tla");
+
+    let mut group = c.benchmark_group("liveness_edge_reuse");
+
+    for max in [50, 100, 200] {
+        let mut env = Env::new();
+        env.insert(Arc::from("Max"), Value::Int(max));
+
+        group.bench_with_input(BenchmarkId::new("max", max), &env, |b, env| {
+            b.iter(|| {
+                let config = CheckerConfig {
+                    allow_deadlock: true,
+                    check_liveness: true,
+                    ..quiet_config()
+                };
+                check(&spec, env, &config)
+            });
+        });
+    }
+
+    group.finish();
+}
+
 fn bench_queens(c: &mut Criterion) {
     let spec_text = include_str!("../test_cases/official/Queens.tla");
     let spec = parse(spec_text).expect("failed to parse Queens.tla");
@@ -583,6 +608,7 @@ criterion_group!(
     bench_tcommit,
     bench_twophase,
     bench_enabled,
+    bench_liveness_edge_reuse,
     bench_queens,
     bench_eval_operations,
     bench_symmetry_canonicalize,

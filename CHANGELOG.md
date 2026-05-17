@@ -26,6 +26,10 @@
 - `extract_fairness_and_liveness` now warns when it encounters `<<A>>_v` (diamond action) or `<>[]P` (stable-eventually) — both are silently dropped today but the warning surfaces the cfg-debug mismatch instead of leaving the user wondering why fairness wasn't applied
 - `state_passes_constraints` no longer clones `base_env` on every state and every transition — the env is hoisted out of both loops and reused, matching the pattern used elsewhere in the BFS loop
 
+### Performance
+
+- Liveness checking now reuses forward edges collected during BFS exploration instead of recomputing successors via a second `next_states` pass over every reachable state. For specs with expensive `Next` evaluation this halves the per-state evaluation cost when `check_liveness` is enabled. Closes #36 (#38)
+
 ### Notes
 
 - Constraint expressions are evaluated against unprimed variables (state predicates). They run at both initial-state enumeration and successor expansion, before symmetry canonicalization. `ACTION_CONSTRAINT` (transition predicate) remains unsupported and still warns
@@ -34,6 +38,7 @@
 - The liveness sub-SCC analysis is sound (any reported violation is real) and complete when the parent SCC is fair, but does not check fairness on the sub-SCC itself — a !Q sub-cycle that happens to be unfair will still be reported. In practice rare for typical specs; flagged here for future tightening
 - `check_leads_to` and `check_eventually` now return `Result<Option<Vec<usize>>>` (Some = sub-SCC states forming the violating cycle, None = property satisfied), enabling accurate cycle reporting
 - `Spec::extract_fairness_and_liveness` now returns `Vec<String>` of warnings (empty when nothing unexpected). Callers in the parser and `apply_config` collect and surface these
+- BFS now collects forward edges in `all_edges` whenever liveness checking is enabled, not only when DOT export is requested. This adds memory proportional to total transitions (one `(usize, Option<Arc<str>>)` per edge) during the BFS phase, in exchange for skipping the duplicate `next_states` pass during liveness. Specs that are state-count-bounded but memory-tight may need to budget for the extra edge storage
 
 ## [0.4.0] - 2026-05-14
 
