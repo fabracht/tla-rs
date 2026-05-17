@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.2] - 2026-05-17
+
+### Fixed
+
+- Release workflow's `create-release` job no longer depends on `publish-npm`. The two are independent — a failed npm publish (e.g., expired or non-automation token) used to block the GitHub release page and binary asset uploads entirely. Now npm publish runs in parallel and its outcome is reported separately
+
 ## [0.4.1] - 2026-05-17
 
 ### Distribution
