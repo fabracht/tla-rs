@@ -443,10 +443,14 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     let mut parent_action: Vec<Option<Arc<str>>> = Vec::new();
     let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
 
+    let needs_liveness_check = config.check_liveness
+        && (!spec.fairness.is_empty() || !spec.liveness_properties.is_empty());
+
     #[cfg(not(target_arch = "wasm32"))]
-    let collect_edges = config.export_dot_path.is_some() || config.export_dot_string;
+    let collect_edges =
+        config.export_dot_path.is_some() || config.export_dot_string || needs_liveness_check;
     #[cfg(target_arch = "wasm32")]
-    let collect_edges = config.export_dot_string;
+    let collect_edges = config.export_dot_string || needs_liveness_check;
     let mut all_edges: Vec<EdgeList> = Vec::new();
     let mut stats = CheckStats {
         states_explored: 0,
@@ -840,8 +844,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
     stats.property_stats = property_counters;
 
-    if config.check_liveness && (!spec.fairness.is_empty() || !spec.liveness_properties.is_empty())
-    {
+    if needs_liveness_check {
         if !config.quiet {
             eprintln!("  Running liveness checking...");
         }
@@ -849,10 +852,9 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             spec,
             domains: &domains,
             defs: &defs,
-            symmetry: &symmetry,
             config,
         };
-        match check_liveness_properties(ctx, &states, &parent, &elapsed_secs) {
+        match check_liveness_properties(ctx, &states, &parent, &all_edges, &elapsed_secs) {
             Ok(LivenessCheckOutcome::Ok) => {}
             Ok(LivenessCheckOutcome::Violation(violation)) => {
                 return CheckResult::LivenessViolation(violation, stats);
@@ -881,7 +883,6 @@ struct LivenessContext<'a> {
     spec: &'a Spec,
     domains: &'a Env,
     defs: &'a Definitions,
-    symmetry: &'a SymmetryConfig,
     config: &'a CheckerConfig,
 }
 
@@ -889,13 +890,13 @@ fn check_liveness_properties(
     ctx: LivenessContext<'_>,
     states: &IndexSet<State>,
     parent: &[Option<usize>],
+    all_edges: &[EdgeList],
     elapsed_secs: &dyn Fn() -> f64,
 ) -> Result<LivenessCheckOutcome, EvalError> {
     let LivenessContext {
         spec,
         domains,
         defs,
-        symmetry,
         config,
     } = ctx;
     let time_exceeded = || match config.max_seconds {
@@ -910,31 +911,19 @@ fn check_liveness_properties(
     }
 
     if !config.quiet {
-        eprintln!("  Building forward edges for {} states...", states.len());
+        eprintln!(
+            "  Reusing {} collected forward edge lists...",
+            all_edges.len()
+        );
     }
-    let next_expr = spec.next.as_ref().ok_or_else(|| EvalError::DomainError {
-        message: "missing Next definition".to_string(),
-        span: None,
-    })?;
-    let primed_vars = make_primed_names(&spec.vars);
-    let mut reusable_env = domains.clone();
-    for (state_idx, state) in states.iter().enumerate() {
+
+    for (state_idx, edges) in all_edges.iter().enumerate() {
         if time_exceeded() {
             return Ok(LivenessCheckOutcome::TimeExceeded);
         }
-        let successors = next_states(
-            next_expr,
-            state,
-            &spec.vars,
-            &primed_vars,
-            &mut reusable_env,
-            defs,
-        )?;
-        for transition in successors {
-            let canonical = symmetry.canonicalize(&transition.state);
-            if let Some(succ_idx) = states.get_index_of(canonical.as_ref()) {
-                graph.add_edge(state_idx, succ_idx, transition.action);
-            }
+
+        for (succ_idx, action) in edges {
+            graph.add_edge(state_idx, *succ_idx, action.clone());
         }
     }
 
