@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1] - 2026-05-17
+
+### Distribution
+
+- Pre-built `tla-mcp` binaries are now produced by the release pipeline alongside `tla` for Linux x86_64, macOS x86_64, macOS arm64, and Windows x86_64. GitHub release assets are renamed to `tla-<platform>` and `tla-mcp-<platform>` to disambiguate
+- README now advertises `cargo install tla-checker --bin tla-mcp` (no clone needed) as the primary install path for the MCP server, with the release-binary download and `--path .` workflows documented as alternatives
+
 ## [0.4.0] - 2026-05-17
 
 ### Added
