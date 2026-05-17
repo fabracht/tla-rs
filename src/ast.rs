@@ -295,7 +295,13 @@ pub struct Spec {
 }
 
 impl Spec {
-    pub fn extract_fairness_and_liveness(&mut self, expr: &Expr) {
+    pub fn extract_fairness_and_liveness(&mut self, expr: &Expr) -> Vec<String> {
+        let mut warnings = Vec::new();
+        self.extract_fairness_and_liveness_inner(expr, &mut warnings);
+        warnings
+    }
+
+    fn extract_fairness_and_liveness_inner(&mut self, expr: &Expr, warnings: &mut Vec<String>) {
         match expr {
             Expr::WeakFairness(var, action) => {
                 self.fairness.push(FairnessConstraint::Weak(
@@ -310,29 +316,36 @@ impl Spec {
                 ));
             }
             Expr::Eventually(inner) => {
-                self.liveness_properties.push((**inner).clone());
+                if matches!(inner.as_ref(), Expr::Always(_)) {
+                    warnings.push(
+                        "temporal pattern <>[]P (stable-eventually) is not supported by the liveness checker — dropping its inner expression".to_string(),
+                    );
+                } else {
+                    self.liveness_properties.push((**inner).clone());
+                }
             }
             Expr::LeadsTo(p, q) => {
                 self.liveness_properties
                     .push(Expr::LeadsTo(p.clone(), q.clone()));
             }
-            Expr::And(l, r) => {
-                self.extract_fairness_and_liveness(l);
-                self.extract_fairness_and_liveness(r);
-            }
-            Expr::Or(l, r) => {
-                self.extract_fairness_and_liveness(l);
-                self.extract_fairness_and_liveness(r);
+            Expr::And(l, r) | Expr::Or(l, r) => {
+                self.extract_fairness_and_liveness_inner(l, warnings);
+                self.extract_fairness_and_liveness_inner(r, warnings);
             }
             Expr::Always(inner) => {
                 if let Expr::Eventually(p) = inner.as_ref() {
                     self.liveness_properties.push((**p).clone());
                 } else {
-                    self.extract_fairness_and_liveness(inner);
+                    self.extract_fairness_and_liveness_inner(inner, warnings);
                 }
             }
             Expr::BoxAction(inner, _) => {
-                self.extract_fairness_and_liveness(inner);
+                self.extract_fairness_and_liveness_inner(inner, warnings);
+            }
+            Expr::DiamondAction(_, _) => {
+                warnings.push(
+                    "temporal operator <<A>>_v (diamond action) is not currently extracted into fairness or liveness — dropping".to_string(),
+                );
             }
             _ => {}
         }

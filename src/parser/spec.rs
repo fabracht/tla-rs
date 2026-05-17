@@ -265,7 +265,14 @@ impl Parser {
                 ));
             }
             Expr::Eventually(inner) => {
-                self.liveness_properties.push((**inner).clone());
+                if matches!(inner.as_ref(), Expr::Always(_)) {
+                    self.warnings.push(crate::span::Spanned::new(
+                        "temporal pattern <>[]P (stable-eventually) is not supported by the liveness checker — dropping its inner expression".to_string(),
+                        crate::span::Span::default(),
+                    ));
+                } else {
+                    self.liveness_properties.push((**inner).clone());
+                }
             }
             Expr::LeadsTo(p, q) => {
                 self.liveness_properties
@@ -284,6 +291,12 @@ impl Parser {
             }
             Expr::BoxAction(inner, _) => {
                 self.extract_fairness_and_liveness(inner);
+            }
+            Expr::DiamondAction(_, _) => {
+                self.warnings.push(crate::span::Spanned::new(
+                    "temporal operator <<A>>_v (diamond action) is not currently extracted into fairness or liveness — dropping".to_string(),
+                    crate::span::Span::default(),
+                ));
             }
             _ => {}
         }

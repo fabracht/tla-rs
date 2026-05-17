@@ -267,43 +267,48 @@ pub fn check_leads_to(
     }
 
     let sub_sccs = crate::scc::compute_sccs_in_subset(graph, &not_q_states);
-    let mut nontrivial_targets: HashSet<usize> = HashSet::new();
-    let mut violating_scc: Option<Vec<usize>> = None;
-    for sub in &sub_sccs {
+    let mut state_to_subscc: std::collections::HashMap<usize, usize> =
+        std::collections::HashMap::new();
+    let mut nontrivial_sccs: Vec<Vec<usize>> = Vec::new();
+    for sub in sub_sccs {
         if !sub.is_trivial {
+            let scc_idx = nontrivial_sccs.len();
             for &s in &sub.states {
-                nontrivial_targets.insert(s);
+                state_to_subscc.insert(s, scc_idx);
             }
-            if violating_scc.is_none() {
-                violating_scc = Some(sub.states.clone());
-            }
+            nontrivial_sccs.push(sub.states);
         }
     }
 
-    if nontrivial_targets.is_empty() {
+    if nontrivial_sccs.is_empty() {
         return Ok(None);
     }
 
+    let all_targets: HashSet<usize> = state_to_subscc.keys().copied().collect();
+
     for &start in &p_and_not_q_states {
-        if reaches_target_within_subset(graph, start, &nontrivial_targets, &not_q_states) {
-            return Ok(violating_scc);
+        if let Some(reached) =
+            reaches_target_state_within_subset(graph, start, &all_targets, &not_q_states)
+        {
+            let scc_idx = state_to_subscc[&reached];
+            return Ok(Some(nontrivial_sccs[scc_idx].clone()));
         }
     }
 
     Ok(None)
 }
 
-fn reaches_target_within_subset(
+fn reaches_target_state_within_subset(
     graph: &StateGraph,
     start: usize,
     targets: &HashSet<usize>,
     allowed: &HashSet<usize>,
-) -> bool {
+) -> Option<usize> {
     if !allowed.contains(&start) {
-        return false;
+        return None;
     }
     if targets.contains(&start) {
-        return true;
+        return Some(start);
     }
     let mut visited: HashSet<usize> = HashSet::new();
     let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
@@ -316,12 +321,12 @@ fn reaches_target_within_subset(
                 continue;
             }
             if targets.contains(&next) {
-                return true;
+                return Some(next);
             }
             queue.push_back(next);
         }
     }
-    false
+    None
 }
 
 pub fn find_violating_scc(

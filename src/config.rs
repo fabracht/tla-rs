@@ -508,7 +508,8 @@ pub fn apply_config(
     }
 
     if let Some(ref spec_name) = cfg.specification {
-        resolve_specification(spec_name, spec)?;
+        let spec_warnings = resolve_specification(spec_name, spec)?;
+        warnings.extend(spec_warnings);
     }
 
     if !cfg.invariants.is_empty() {
@@ -643,7 +644,7 @@ fn collect_init(expr: &Expr) -> Option<Expr> {
     }
 }
 
-fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<(), String> {
+fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<Vec<String>, String> {
     let expr_clone = match spec.definitions.get(spec_name.as_ref()) {
         Some((params, expr)) if params.is_empty() => expr.clone(),
         Some(_) => {
@@ -663,10 +664,12 @@ fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<(), St
         spec.init = Some(collect_init(&expr_clone).unwrap_or(Expr::Lit(Value::Bool(true))));
         spec.next = Some(next_expr);
         let parser_already_extracted = spec_name.as_ref() == "Spec" || spec_name.ends_with("Spec");
-        if !parser_already_extracted {
-            spec.extract_fairness_and_liveness(&expr_clone);
-        }
-        return Ok(());
+        let warnings = if parser_already_extracted {
+            Vec::new()
+        } else {
+            spec.extract_fairness_and_liveness(&expr_clone)
+        };
+        return Ok(warnings);
     }
     Err(format!(
         "SPECIFICATION '{}': expected Init /\\ [][Next]_vars form",

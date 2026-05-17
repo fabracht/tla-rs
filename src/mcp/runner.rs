@@ -230,11 +230,16 @@ pub fn check_spec(input: &CheckSpecInput) -> CheckSpecOutput {
         match parse_expr(constraint_src) {
             Ok(expr) => loaded.checker_config.state_constraints.push(expr),
             Err(err) => {
+                let constraint_source =
+                    Source::new("<state_constraint>".to_string(), constraint_src.clone());
+                let span = err.span.and_then(|s| {
+                    (!s.is_empty()).then(|| SourceSpan::from_span(s, &constraint_source))
+                });
                 return CheckSpecOutput::new(CheckOutcome::Error {
                     phase: ErrorPhase::Config,
                     error: StructuredError::parse(
                         format!("state_constraint parse error: {}", err.message),
-                        None,
+                        span,
                     ),
                     partial_stats: None,
                 });

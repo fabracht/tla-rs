@@ -20,6 +20,11 @@
 - Temporal operator eval error messages now explain WHY the operator can't be evaluated and point at the correct cfg/spec structure
 - **`<>P` (eventually) and `P ~> Q` (leads-to) liveness checks now use sub-SCC analysis** instead of treating the parent SCC as a single unit. Previous behavior: `check_leads_to` returned satisfied if `Q` held *anywhere* in the SCC, missing cases where the SCC contained sub-cycles staying in `!Q` forever. Now the check finds non-trivial sub-SCCs within the `!Q` (or `!P` for eventually) subset and reports a violation when one is reachable from a P-and-`!Q` state via `!Q` transitions. This catches classic starvation patterns (e.g., a reader/writer lock where the writer's `~>` is violated by an infinite reader-cycle within a larger SCC that happens to include a writer-active state)
 - Leads-to violation reports now include the actual problematic sub-SCC as the cycle, not the full parent SCC. Previously the reported cycle would contain irrelevant `Q`-holding states
+- **Leads-to violation now reports the sub-SCC the P-state actually reaches**, not just the first non-trivial sub-SCC in Tarjan order. When multiple non-trivial `!Q` sub-SCCs exist, the previous logic could report a cycle that is unreachable from any P-state while a real violation existed elsewhere. The reported cycle is now correct
+- `max_seconds` budget is now enforced during the liveness phase, not just BFS. Previously, specs where BFS finished within budget but the liveness phase (forward-edge reconstruction + Tarjan + sub-SCC analysis) ran long could exceed the MCP client's transport timeout. Now the check fires at the top of the per-state edge-rebuild loop and between liveness property checks
+- `state_constraint` parse errors now include the source span pointing into the user's constraint expression. Previously the span was dropped
+- `extract_fairness_and_liveness` now warns when it encounters `<<A>>_v` (diamond action) or `<>[]P` (stable-eventually) — both are silently dropped today but the warning surfaces the cfg-debug mismatch instead of leaving the user wondering why fairness wasn't applied
+- `state_passes_constraints` no longer clones `base_env` on every state and every transition — the env is hoisted out of both loops and reused, matching the pattern used elsewhere in the BFS loop
 
 ### Notes
 
@@ -28,6 +33,7 @@
 - `scc::compute_sccs_in_subset(graph, allowed: &HashSet<usize>)` — new public function running Tarjan over a filtered node set, used by the liveness checks to find sub-SCCs within `!P` / `!Q` partitions
 - The liveness sub-SCC analysis is sound (any reported violation is real) and complete when the parent SCC is fair, but does not check fairness on the sub-SCC itself — a !Q sub-cycle that happens to be unfair will still be reported. In practice rare for typical specs; flagged here for future tightening
 - `check_leads_to` and `check_eventually` now return `Result<Option<Vec<usize>>>` (Some = sub-SCC states forming the violating cycle, None = property satisfied), enabling accurate cycle reporting
+- `Spec::extract_fairness_and_liveness` now returns `Vec<String>` of warnings (empty when nothing unexpected). Callers in the parser and `apply_config` collect and surface these
 
 ## [0.4.0] - 2026-05-14
 

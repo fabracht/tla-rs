@@ -823,9 +823,198 @@ fn check_spec_reports_max_seconds_when_time_budget_exhausted() {
                 "stats should include elapsed time"
             );
         }
-        CheckOutcome::Ok { .. } => {
-            // Acceptable: spec finished before the elapsed-time check ran
+        other => panic!(
+            "max_seconds=0 must always fire on the first BFS iteration; got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn check_spec_reports_max_seconds_when_liveness_phase_runs_with_zero_budget() {
+    let dir = std::env::temp_dir().join("tla_mcp_max_seconds_liveness");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("LivenessBudget.tla");
+    let cfg_path = dir.join("LivenessBudget.cfg");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE LivenessBudget ----\n\
+         EXTENDS Naturals\n\
+         VARIABLE x\n\
+         vars == << x >>\n\
+         Init == x = 0\n\
+         Step == x' = (x + 1) % 3\n\
+         Next == Step\n\
+         Spec == Init /\\ [][Next]_vars /\\ WF_vars(Step)\n\
+         EventuallyDone == <>(x = 2)\n\
+         ====\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &cfg_path,
+        "SPECIFICATION Spec\nPROPERTY EventuallyDone\nCHECK_DEADLOCK FALSE\n",
+    )
+    .unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 1_000_000,
+        max_depth: 1_000_000,
+        max_seconds: 0,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: Some(true),
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match out.outcome {
+        CheckOutcome::LimitReached { limit, .. } => {
+            assert!(
+                matches!(limit, LimitKind::MaxSeconds),
+                "expected MaxSeconds, got {:?}",
+                limit
+            );
         }
-        other => panic!("expected limit_reached or ok, got {:?}", other),
+        other => panic!(
+            "max_seconds=0 with check_liveness must return LimitReached regardless of which phase fires the check; got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn check_spec_leads_to_violation_cycle_contains_state_where_p_holds() {
+    let dir = std::env::temp_dir().join("tla_mcp_leads_to_cycle_p");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("RwStarve2.tla");
+    let cfg_path = dir.join("RwStarve2.cfg");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE RwStarve2 ----\n\
+         EXTENDS Naturals\n\
+         CONSTANT MaxReaders\n\
+         VARIABLES readers, writer, writerWaiting\n\
+         vars == << readers, writer, writerWaiting >>\n\
+         Init == readers = 0 /\\ writer = \"none\" /\\ writerWaiting = FALSE\n\
+         ReaderArrive  == writer = \"none\" /\\ readers + 1 <= MaxReaders\n\
+                       /\\ readers' = readers + 1 /\\ UNCHANGED <<writer, writerWaiting>>\n\
+         ReaderLeave   == readers > 0 /\\ readers' = readers - 1\n\
+                       /\\ UNCHANGED <<writer, writerWaiting>>\n\
+         WriterRequest == ~writerWaiting /\\ writer = \"none\"\n\
+                       /\\ writerWaiting' = TRUE /\\ UNCHANGED <<readers, writer>>\n\
+         WriterAcquire == writerWaiting /\\ readers = 0 /\\ writer = \"none\"\n\
+                       /\\ writer' = \"active\" /\\ writerWaiting' = FALSE /\\ UNCHANGED readers\n\
+         WriterRelease == writer = \"active\" /\\ writer' = \"none\"\n\
+                       /\\ UNCHANGED <<readers, writerWaiting>>\n\
+         Next == ReaderArrive \\/ ReaderLeave \\/ WriterRequest \\/ WriterAcquire \\/ WriterRelease\n\
+         Spec == Init /\\ [][Next]_vars /\\ WF_vars(ReaderLeave) /\\ WF_vars(WriterAcquire)\n\
+         Live == writerWaiting ~> writer = \"active\"\n\
+         ====\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &cfg_path,
+        "SPECIFICATION Spec\nCONSTANT MaxReaders = 2\nPROPERTY Live\nCHECK_DEADLOCK FALSE\n",
+    )
+    .unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 100,
+        max_depth: 50,
+        max_seconds: 30,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: Some(true),
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match out.outcome {
+        CheckOutcome::LivenessViolation { cycle, prefix, .. } => {
+            let cycle_has_p = cycle.iter().any(|s| {
+                s.vars
+                    .get("writerWaiting")
+                    .map(|v| v.json == json!(true))
+                    .unwrap_or(false)
+            });
+            assert!(
+                cycle_has_p,
+                "leads-to violation cycle must contain at least one P-state (writerWaiting=TRUE) — reported cycle was {:?}",
+                cycle
+            );
+            assert!(
+                !prefix.is_empty(),
+                "prefix should describe how the cycle is reached"
+            );
+        }
+        other => panic!("expected liveness_violation, got {:?}", other),
+    }
+}
+
+#[test]
+fn check_spec_cli_constants_override_cfg_constants() {
+    let dir = std::env::temp_dir().join("tla_mcp_cli_overrides_cfg");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("BoundedCounter.tla");
+    let cfg_path = dir.join("BoundedCounter.cfg");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE BoundedCounter ----\n\
+         EXTENDS Naturals\n\
+         CONSTANT Cap\n\
+         VARIABLE x\n\
+         Init == x = 0\n\
+         Next == x' = x + 1 /\\ x' < Cap\n\
+         ====\n",
+    )
+    .unwrap();
+    std::fs::write(&cfg_path, "CONSTANT Cap = 5\nCHECK_DEADLOCK FALSE\n").unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 1000,
+        max_depth: 100,
+        max_seconds: 30,
+        constants: [("Cap".to_string(), "10".to_string())]
+            .into_iter()
+            .collect(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match out.outcome {
+        CheckOutcome::Ok { stats } => {
+            assert_eq!(
+                stats.states_explored, 10,
+                "CLI Cap=10 should win over cfg Cap=5; got {} states (cfg-bound would be 5)",
+                stats.states_explored
+            );
+        }
+        other => panic!("expected ok with CLI-overridden bound, got {:?}", other),
     }
 }

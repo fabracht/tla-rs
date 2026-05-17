@@ -522,8 +522,13 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             Ok(true)
         };
 
+    let mut constraint_env = if config.state_constraints.is_empty() {
+        Env::new()
+    } else {
+        base_env.clone()
+    };
+
     for state in initial {
-        let mut constraint_env = base_env.clone();
         match state_passes_constraints(&state, &mut constraint_env) {
             Ok(true) => {}
             Ok(false) => continue,
@@ -791,7 +796,6 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
         for transition in successors {
             stats.transitions += 1;
-            let mut constraint_env = base_env.clone();
             match state_passes_constraints(&transition.state, &mut constraint_env) {
                 Ok(true) => {}
                 Ok(false) => continue,
@@ -841,11 +845,22 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         if !config.quiet {
             eprintln!("  Running liveness checking...");
         }
-        match check_liveness_properties(spec, &states, &parent, &domains, &symmetry, config, &defs)
-        {
-            Ok(None) => {}
-            Ok(Some(violation)) => {
+        let ctx = LivenessContext {
+            spec,
+            domains: &domains,
+            defs: &defs,
+            symmetry: &symmetry,
+            config,
+        };
+        match check_liveness_properties(ctx, &states, &parent, &elapsed_secs) {
+            Ok(LivenessCheckOutcome::Ok) => {}
+            Ok(LivenessCheckOutcome::Violation(violation)) => {
                 return CheckResult::LivenessViolation(violation, stats);
+            }
+            Ok(LivenessCheckOutcome::TimeExceeded) => {
+                stats.elapsed_secs = elapsed_secs();
+                stats.dot_graph = do_export(&states, &parent, None, &all_edges);
+                return CheckResult::MaxTimeExceeded(stats);
             }
             Err(e) => {
                 return CheckResult::InvariantError(e, vec![], stats.dot_graph.take());
@@ -856,15 +871,38 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     CheckResult::Ok(stats)
 }
 
+enum LivenessCheckOutcome {
+    Ok,
+    Violation(LivenessViolation),
+    TimeExceeded,
+}
+
+struct LivenessContext<'a> {
+    spec: &'a Spec,
+    domains: &'a Env,
+    defs: &'a Definitions,
+    symmetry: &'a SymmetryConfig,
+    config: &'a CheckerConfig,
+}
+
 fn check_liveness_properties(
-    spec: &Spec,
+    ctx: LivenessContext<'_>,
     states: &IndexSet<State>,
     parent: &[Option<usize>],
-    domains: &Env,
-    symmetry: &SymmetryConfig,
-    config: &CheckerConfig,
-    defs: &Definitions,
-) -> Result<Option<LivenessViolation>, EvalError> {
+    elapsed_secs: &dyn Fn() -> f64,
+) -> Result<LivenessCheckOutcome, EvalError> {
+    let LivenessContext {
+        spec,
+        domains,
+        defs,
+        symmetry,
+        config,
+    } = ctx;
+    let time_exceeded = || match config.max_seconds {
+        Some(max_secs) => elapsed_secs() as u64 >= max_secs,
+        None => false,
+    };
+
     let mut graph = StateGraph::new();
 
     for (idx, state) in states.iter().enumerate() {
@@ -881,6 +919,9 @@ fn check_liveness_properties(
     let primed_vars = make_primed_names(&spec.vars);
     let mut reusable_env = domains.clone();
     for (state_idx, state) in states.iter().enumerate() {
+        if time_exceeded() {
+            return Ok(LivenessCheckOutcome::TimeExceeded);
+        }
         let successors = next_states(
             next_expr,
             state,
@@ -895,6 +936,10 @@ fn check_liveness_properties(
                 graph.add_edge(state_idx, succ_idx, transition.action);
             }
         }
+    }
+
+    if time_exceeded() {
+        return Ok(LivenessCheckOutcome::TimeExceeded);
     }
 
     if !config.quiet {
@@ -922,10 +967,13 @@ fn check_liveness_properties(
             domains,
             defs,
         )?;
-        return Ok(Some(violation));
+        return Ok(LivenessCheckOutcome::Violation(violation));
     }
 
     for property in &spec.liveness_properties {
+        if time_exceeded() {
+            return Ok(LivenessCheckOutcome::TimeExceeded);
+        }
         for scc in &sccs {
             if !liveness::check_fairness_in_scc(
                 &graph,
@@ -960,12 +1008,12 @@ fn check_liveness_properties(
                     property: prop_desc,
                     fairness_info: vec![],
                 };
-                return Ok(Some(violation));
+                return Ok(LivenessCheckOutcome::Violation(violation));
             }
         }
     }
 
-    Ok(None)
+    Ok(LivenessCheckOutcome::Ok)
 }
 
 pub fn format_trace(trace: &[State], vars: &[Arc<str>]) -> String {
