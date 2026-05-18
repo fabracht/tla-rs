@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.3] - 2026-05-17
+
+### Distribution
+
+- `scripts/install.sh` — POSIX shell installer that detects platform (Linux x86_64, macOS x86_64, macOS arm64), fetches the appropriate prebuilt binaries from a GitHub release, and drops them on the user's PATH. Flags: `--bin <tla|tla-mcp|both>`, `--version <tag>`, `--dir <path>`. Default install location is `$HOME/.local/bin`. Usable via `curl -fsSL https://raw.githubusercontent.com/fabracht/tla-rs/main/scripts/install.sh | bash`
+- `packaging/homebrew/tla-mcp.rb` — Homebrew formula installing both `tla` and `tla-mcp` from release binaries on macOS arm64, macOS x86_64, and Linux x86_64. Intended for a `homebrew-tla` tap repo (setup documented in `packaging/homebrew/README.md`); end users install with `brew install fabracht/tla/tla-mcp`
+- README MCP "Install" section restructured to list all five paths (Homebrew, install script, cargo from crates.io, release binary download, `--path .` from a clone)
+
 ## [0.4.2] - 2026-05-17
 
 ### Fixed
