@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tla-mcp — TLA+ model checker as an MCP server</title>
+    <meta
+      name="description"
+      content="An MCP server that gives Claude Code, Cursor, and other agentic clients first-class access to a TLA+ model checker. Verify your spec, replay scenarios, and catch invariant violations from the same chat where you wrote them."
+    />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='52' font-size='52'%3E%E2%97%87%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>tla-mcp</h1>
+        <p class="tagline">
+          A TLA+ model checker as a Model Context Protocol server.
+        </p>
+        <p class="lede">
+          Plug a working model checker into Claude Code, Cursor, or any
+          MCP-aware client. Validate specs, replay counterexamples, and
+          catch invariant violations without leaving the conversation.
+        </p>
+        <div class="badges">
+          <a href="https://crates.io/crates/tla-checker"
+            ><img alt="crates.io"
+              src="https://img.shields.io/crates/v/tla-checker?style=flat-square&amp;label=crates.io"
+          /></a>
+          <a href="https://www.npmjs.com/package/tla-checker"
+            ><img alt="npm"
+              src="https://img.shields.io/npm/v/tla-checker?style=flat-square&amp;label=npm"
+          /></a>
+          <a href="https://github.com/fabracht/tla-rs/releases/latest"
+            ><img alt="latest release"
+              src="https://img.shields.io/github/v/release/fabracht/tla-rs?style=flat-square&amp;label=release"
+          /></a>
+          <a href="https://github.com/fabracht/tla-rs/blob/main/LICENSE"
+            ><img alt="license"
+              src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square"
+          /></a>
+        </div>
+      </header>
+
+      <section id="what">
+        <h2>What is this?</h2>
+        <p>
+          <strong>TLA+</strong> is a specification language for designing
+          and verifying concurrent and distributed systems. You describe
+          what your protocol should do; a model checker tries every
+          reachable state and tells you when something goes wrong.
+        </p>
+        <p>
+          <strong>The Model Context Protocol</strong> (MCP) is how
+          agentic clients like Claude Code call external tools.
+        </p>
+        <p>
+          <code>tla-mcp</code> bridges the two. It's a stdio MCP server
+          built on top of <a href="https://github.com/fabracht/tla-rs">tla-rs</a>,
+          a fast TLA+ model checker written in Rust. Once registered,
+          your client can parse a spec, list its invariants, run a full
+          check with a budgeted time limit, and replay specific
+          scenarios — all from inside the chat.
+        </p>
+      </section>
+
+      <section id="install">
+        <h2>Install</h2>
+        <p>Pick whichever fits your toolchain. All paths install the same v0.4.3 binary.</p>
+
+        <h3>Homebrew (macOS, Linuxbrew)</h3>
+        <pre><code>brew install fabracht/tla/tla-mcp</code></pre>
+        <p class="aside">Installs both <code>tla</code> (model checker CLI) and <code>tla-mcp</code> (MCP server).</p>
+
+        <h3>Install script (Linux, macOS)</h3>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/fabracht/tla-rs/main/scripts/install.sh | bash</code></pre>
+        <p class="aside">SHA256-verified binary download. Pass <code>--bin tla-mcp</code> to install just the server.</p>
+
+        <h3>Cargo (any platform with a Rust toolchain)</h3>
+        <pre><code>cargo install tla-checker --bin tla-mcp</code></pre>
+
+        <h3>Pre-built release binaries</h3>
+        <p>
+          Linux x86_64, macOS x86_64, macOS arm64, Windows x86_64 are attached to
+          every <a href="https://github.com/fabracht/tla-rs/releases/latest">GitHub release</a>
+          as <code>tla-&lt;platform&gt;</code> and <code>tla-mcp-&lt;platform&gt;</code>,
+          alongside a <code>SHA256SUMS</code> file.
+        </p>
+      </section>
+
+      <section id="register">
+        <h2>Register with your client</h2>
+        <p>Add to your MCP client config (Claude Code example, <code>~/.claude/mcp.json</code>):</p>
+        <pre><code>{
+  "mcpServers": {
+    "tla": {
+      "command": "tla-mcp"
+    }
+  }
+}</code></pre>
+        <p>Restart the client. The four tools become available immediately.</p>
+      </section>
+
+      <section id="tools">
+        <h2>What the agent gets</h2>
+        <p>Four tools, versioned JSON schemas (<code>schema_version: "1"</code>):</p>
+        <table>
+          <thead>
+            <tr><th><code>tool</code></th><th>purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>validate_spec</code></td>
+              <td>
+                Parse a <code>.tla</code> file. Returns vars,
+                <strong>constants with resolved values</strong>, detected invariants,
+                <code>has_init</code> / <code>has_next</code>, plus structured parse errors with source spans.
+              </td>
+            </tr>
+            <tr>
+              <td><code>list_invariants</code></td>
+              <td>
+                Return invariant names matching <code>Inv*</code>, <code>TypeOK*</code>, <code>NotSolved*</code>,
+                plus anything declared via cfg <code>INVARIANT</code> directive.
+              </td>
+            </tr>
+            <tr>
+              <td><code>check_spec</code></td>
+              <td>
+                Full model checking with required <code>max_states</code> / <code>max_depth</code> /
+                <code>max_seconds</code> budgets. Returns <code>ok</code>,
+                <code>invariant_violation</code> (with trace + actions), <code>deadlock</code>,
+                <code>liveness_violation</code> (prefix + cycle), <code>limit_reached</code>, or structured <code>error</code>.
+              </td>
+            </tr>
+            <tr>
+              <td><code>replay_scenario</code></td>
+              <td>
+                Step through a spec along a guided path (<code>step: &lt;TLA+ expr&gt;</code> lines).
+                Returns per-step state snapshots + variable changes, or a failure with
+                <code>available_actions</code> on a mismatch.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="why">
+        <h2>Why TLA+ for an agent?</h2>
+        <p>
+          Most "is this code correct?" questions an agent answers are
+          really questions about <em>reachable behavior</em> — a race
+          condition that fires in one specific interleaving, a queue
+          that grows unboundedly under a corner-case workload, a
+          consensus rule that lets two leaders coexist for one tick.
+          Reasoning about all these by reading code is hard. Asking a
+          model checker is straightforward, when the model checker is
+          one tool call away.
+        </p>
+        <p>
+          <code>tla-mcp</code> is opinionated about how an agent should
+          use it. Tool descriptions explicitly tell the agent: budget
+          all three limits upfront; inspect constants before running;
+          treat <code>limit_reached</code> as inconclusive, not as a
+          pass; bugs are usually in the last transition of the trace.
+          These are not soft hints — they're encoded in the tool
+          metadata so they survive context truncation.
+        </p>
+      </section>
+
+      <section id="links">
+        <h2>More</h2>
+        <ul>
+          <li><a href="https://github.com/fabracht/tla-rs">Source &amp; docs on GitHub</a></li>
+          <li><a href="https://github.com/fabracht/tla-rs/blob/main/CHANGELOG.md">Changelog</a></li>
+          <li><a href="https://github.com/fabracht/tla-rs/releases">Releases</a></li>
+          <li><a href="https://github.com/fabracht/homebrew-tla">Homebrew tap</a></li>
+          <li><a href="https://modelcontextprotocol.io/">Model Context Protocol spec</a></li>
+          <li><a href="https://lamport.azurewebsites.net/tla/tla.html">Learn TLA+ (Leslie Lamport)</a></li>
+        </ul>
+      </section>
+
+      <footer>
+        <p>
+          <code>tla-mcp</code> is MIT / Apache-2.0 licensed.
+          <a href="https://github.com/fabracht/tla-rs">View on GitHub</a>.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>
