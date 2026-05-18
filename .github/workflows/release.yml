@@ -181,7 +181,9 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -type f -exec cp {} release/ \;
-          ls -la release/
+          cd release
+          sha256sum * > SHA256SUMS
+          ls -la
 
       - name: Create Release
         uses: ncipollo/release-action@v1

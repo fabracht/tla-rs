@@ -259,15 +259,33 @@ if (result.dot) {
 
 ### Install
 
-The fastest path — install the published crate from crates.io (no clone needed):
+Several paths are supported — pick whichever fits your toolchain.
+
+**Homebrew (macOS, Linuxbrew)** — installs both `tla` and `tla-mcp`:
+
+```bash
+brew install fabracht/tla/tla-mcp
+```
+
+Requires the `homebrew-tla` tap to exist. The formula source lives at [`packaging/homebrew/tla-mcp.rb`](packaging/homebrew/tla-mcp.rb); [`packaging/homebrew/README.md`](packaging/homebrew/README.md) explains the one-time tap setup.
+
+**Install script (Linux, macOS)** — downloads a prebuilt binary and verifies its SHA256, no Rust toolchain required:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fabracht/tla-rs/main/scripts/install.sh | bash
+```
+
+Pass flags to scope the install: `--bin tla-mcp` for just the MCP server, `--version v0.4.3` to pin a release (releases prior to v0.4.3 do not ship a `SHA256SUMS` asset and are rejected), `--dir /usr/local/bin` for a system-wide install (requires `sudo`).
+
+**Cargo (any platform with a Rust toolchain)**:
 
 ```bash
 cargo install tla-checker --bin tla-mcp
 ```
 
-Or download a pre-built binary from the [latest GitHub release](https://github.com/fabracht/tla-rs/releases/latest) (Linux, macOS Intel/Apple Silicon, Windows).
+**GitHub release downloads** — prebuilt binaries for Linux x86_64, macOS x86_64, macOS arm64, and Windows x86_64 are attached to every [release](https://github.com/fabracht/tla-rs/releases/latest) as `tla-<platform>` and `tla-mcp-<platform>`.
 
-From a working copy:
+**From a working copy**:
 
 ```bash
 cargo install --path . --bin tla-mcp

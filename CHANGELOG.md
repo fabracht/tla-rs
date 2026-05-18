@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.3] - 2026-05-17
+
+### Distribution
+
+- `scripts/install.sh` — POSIX shell installer that detects platform (Linux x86_64, macOS x86_64, macOS arm64), fetches the appropriate prebuilt binaries from a GitHub release, **verifies SHA256 against the release's `SHA256SUMS` asset**, and drops them on the user's PATH. Flags: `--bin <tla|tla-mcp|both>`, `--version <tag>`, `--dir <path>`. Default install location is `$HOME/.local/bin`. Usable via `curl -fsSL https://raw.githubusercontent.com/fabracht/tla-rs/main/scripts/install.sh | bash`. Releases before v0.4.3 lack the `SHA256SUMS` asset and are rejected
+- Release workflow now generates a `SHA256SUMS` asset (output of `sha256sum *` over the staged binary set) and attaches it to every GitHub release alongside the binaries
+- `packaging/homebrew/tla-mcp.rb` — Homebrew formula installing both `tla` and `tla-mcp` from release binaries on macOS arm64, macOS x86_64, and Linux x86_64. Includes a `livecheck` block (`strategy :github_latest`) so `brew livecheck` and `brew bump-formula-pr` can detect new releases. Intended for a `homebrew-tla` tap repo (setup documented in `packaging/homebrew/README.md`); end users install with `brew install fabracht/tla/tla-mcp`
+- README MCP "Install" section restructured to list all five paths (Homebrew, install script, cargo from crates.io, release binary download, `--path .` from a clone)
+
+### Notes
+
+- The formula in `packaging/homebrew/tla-mcp.rb` is a template pinned to the *previous* release (v0.4.2 here). On each new release, run `packaging/homebrew/README.md`'s SHA256-refresh recipe and commit the updated formula to the `homebrew-tla` tap repo. `brew bump-formula-pr` can automate the PR once the tap is established
+
 ## [0.4.2] - 2026-05-17
 
 ### Fixed
