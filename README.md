@@ -267,13 +267,15 @@ Several paths are supported — pick whichever fits your toolchain.
 brew install fabracht/tla/tla-mcp
 ```
 
-**Install script (Linux, macOS)** — downloads a prebuilt binary, no Rust toolchain required:
+Requires the `homebrew-tla` tap to exist. The formula source lives at [`packaging/homebrew/tla-mcp.rb`](packaging/homebrew/tla-mcp.rb); [`packaging/homebrew/README.md`](packaging/homebrew/README.md) explains the one-time tap setup.
+
+**Install script (Linux, macOS)** — downloads a prebuilt binary and verifies its SHA256, no Rust toolchain required:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fabracht/tla-rs/main/scripts/install.sh | bash
 ```
 
-Pass flags to scope the install: `--bin tla-mcp` for just the MCP server, `--version v0.4.2` to pin a release, `--dir /usr/local/bin` for a system-wide install (requires `sudo`).
+Pass flags to scope the install: `--bin tla-mcp` for just the MCP server, `--version v0.4.3` to pin a release (releases prior to v0.4.3 do not ship a `SHA256SUMS` asset and are rejected), `--dir /usr/local/bin` for a system-wide install (requires `sudo`).
 
 **Cargo (any platform with a Rust toolchain)**:
 

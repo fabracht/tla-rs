@@ -4,6 +4,11 @@ class TlaMcp < Formula
   version "0.4.2"
   license "MIT OR Apache-2.0"
 
+  livecheck do
+    url :stable
+    strategy :github_latest
+  end
+
   on_macos do
     on_arm do
       url "https://github.com/fabracht/tla-rs/releases/download/v0.4.2/tla-macos-arm64"
@@ -35,13 +40,19 @@ class TlaMcp < Formula
     end
   end
 
+  def platform_suffix
+    if OS.mac?
+      Hardware::CPU.arm? ? "macos-arm64" : "macos-amd64"
+    else
+      "linux-amd64"
+    end
+  end
+
   def install
-    tla_asset = OS.mac? ? "tla-macos-#{Hardware::CPU.arm? ? "arm64" : "amd64"}" : "tla-linux-amd64"
-    bin.install tla_asset => "tla"
+    bin.install "tla-#{platform_suffix}" => "tla"
 
     resource("tla-mcp-bin").stage do
-      mcp_asset = Dir["tla-mcp-*"].first
-      bin.install mcp_asset => "tla-mcp"
+      bin.install "tla-mcp-#{platform_suffix}" => "tla-mcp"
     end
   end
 
