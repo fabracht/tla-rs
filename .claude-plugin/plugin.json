@@ -1,0 +1,14 @@
+{
+  "name": "tla-rs",
+  "description": "TLA+ model checker as MCP tools — validate specs, list invariants, run checks, and replay counterexamples directly from Claude Code.",
+  "version": "0.4.3",
+  "author": {
+    "name": "Fabrício Bracht",
+    "email": "fabracht@gmail.com",
+    "url": "https://github.com/fabracht"
+  },
+  "homepage": "https://github.com/fabracht/tla-rs",
+  "repository": "https://github.com/fabracht/tla-rs",
+  "license": "MIT OR Apache-2.0",
+  "keywords": ["tla", "tla-plus", "model-checking", "formal-verification", "mcp"]
+}

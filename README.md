@@ -293,7 +293,14 @@ cargo install --path . --bin tla-mcp
 
 ### Register with your client
 
-Add to your MCP client config (Claude Code example, `~/.claude/mcp.json` or `claude_desktop_config.json`):
+**Claude Code (community plugin marketplace)** — once `tla-mcp` is on PATH:
+
+```
+/plugin marketplace add anthropics/claude-plugins-community
+/plugin install tla-rs@claude-community
+```
+
+**Manual registration (any MCP client)** — add to `~/.claude/mcp.json`, `claude_desktop_config.json`, or your client's equivalent:
 
 ```json
 {

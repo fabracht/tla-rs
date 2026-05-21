@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tla": {
+      "type": "stdio",
+      "command": "tla-mcp"
+    }
+  }
+}
