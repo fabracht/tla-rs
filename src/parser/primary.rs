@@ -26,13 +26,40 @@ pub(super) fn extract_binder(expr: &Expr) -> Option<Binder> {
     }
 }
 
-pub(super) fn wrap_binder(parser: &mut Parser, binder: Binder, body: Expr) -> (Arc<str>, Expr) {
+pub(super) fn wrap_binder(
+    parser: &mut Parser,
+    binder: Binder,
+    body: Expr,
+) -> Result<(Arc<str>, Expr)> {
+    let mut seen: Vec<Arc<str>> = Vec::new();
+    check_binder_unique(&binder, &mut seen)?;
     match binder {
-        Binder::Name(name) => (name, body),
+        Binder::Name(name) => Ok((name, body)),
         Binder::Tuple(parts) => {
             let tup_name = parser.fresh_tuple_name();
             let wrapped = wrap_tuple_lets(parser, &tup_name, parts, body);
-            (tup_name, wrapped)
+            Ok((tup_name, wrapped))
+        }
+    }
+}
+
+fn check_binder_unique(binder: &Binder, seen: &mut Vec<Arc<str>>) -> Result<()> {
+    match binder {
+        Binder::Name(name) => {
+            if seen.iter().any(|n| n == name) {
+                return Err(ParseError::new(format!(
+                    "duplicate name '{}' in tuple binder",
+                    name
+                )));
+            }
+            seen.push(name.clone());
+            Ok(())
+        }
+        Binder::Tuple(parts) => {
+            for part in parts {
+                check_binder_unique(part, seen)?;
+            }
+            Ok(())
         }
     }
 }
@@ -257,13 +284,13 @@ impl Parser {
                     && let Some(binder) = extract_binder(var_expr)
                 {
                     let domain = domain.as_ref().clone();
-                    let (var, wrapped) = wrap_binder(self, binder, after_colon);
+                    let (var, wrapped) = wrap_binder(self, binder, after_colon)?;
                     return Ok(Expr::SetFilter(var, Box::new(domain), Box::new(wrapped)));
                 }
                 if let Expr::In(var_expr, domain) = after_colon
                     && let Some(binder) = extract_binder(&var_expr)
                 {
-                    let (var, wrapped) = wrap_binder(self, binder, first);
+                    let (var, wrapped) = wrap_binder(self, binder, first)?;
                     return Ok(Expr::SetMap(var, domain, Box::new(wrapped)));
                 }
                 Err(ParseError::new(
@@ -313,7 +340,7 @@ impl Parser {
                 self.advance();
                 let body = self.parse_expr()?;
                 self.expect(Token::RBracket)?;
-                let (var, wrapped) = wrap_binder(self, binder, body);
+                let (var, wrapped) = wrap_binder(self, binder, body)?;
                 return Ok(Expr::FnDef(var, Box::new(domain), Box::new(wrapped)));
             }
             self.pos = start_pos;
@@ -443,12 +470,12 @@ impl Parser {
             let domain = self.parse_range()?;
             self.expect(Token::Colon)?;
             let body = self.parse_expr()?;
-            let (var, wrapped) = wrap_binder(self, binder, body);
+            let (var, wrapped) = wrap_binder(self, binder, body)?;
             Ok(Expr::Choose(var, Box::new(domain), Box::new(wrapped)))
         } else if *self.peek() == Token::Colon {
             self.advance();
             let body = self.parse_expr()?;
-            let (var, wrapped) = wrap_binder(self, binder, body);
+            let (var, wrapped) = wrap_binder(self, binder, body)?;
             Ok(Expr::ChooseUnbounded(var, Box::new(wrapped)))
         } else {
             Err(
@@ -501,7 +528,7 @@ impl Parser {
 
         let mut result = body;
         for (binder, domain) in bindings.into_iter().rev() {
-            let (var, wrapped) = wrap_binder(self, binder, result);
+            let (var, wrapped) = wrap_binder(self, binder, result)?;
             if exists {
                 result = Expr::Exists(var, Box::new(domain), Box::new(wrapped));
             } else {

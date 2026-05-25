@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tla_checker::ast::{Env, Value};
 use tla_checker::checker::{CheckResult, CheckerConfig, PrepareSpecError, check};
 use tla_checker::config::{apply_config, parse_cfg};
-use tla_checker::parser::parse;
+use tla_checker::parser::{parse, parse_with_warnings};
 
 fn check_spec_file(path: &Path) -> CheckResult {
     check_spec_file_with_config(path, CheckerConfig::default())
@@ -471,6 +471,22 @@ fn test_should_pass_tuple_binding_comprehension() {
         matches!(result, CheckResult::Ok(_)),
         "tuple_binding_comprehension.tla should pass, got: {:?}",
         result
+    );
+}
+
+#[test]
+fn test_should_error_duplicate_tuple_binder() {
+    let input = r#"---- MODULE dup ----
+VARIABLE x
+Pairs == {<<1, 2>>}
+Init == x = 0
+Next == \E <<a, a>> \in Pairs : x' = a
+===="#;
+    let (_, warnings) = parse_with_warnings(input).expect("spec should parse with warning");
+    assert!(
+        warnings.iter().any(|w| w.value.contains("duplicate name")),
+        "expected duplicate-name warning, got: {:?}",
+        warnings.iter().map(|w| &w.value).collect::<Vec<_>>()
     );
 }
 
