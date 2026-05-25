@@ -258,9 +258,17 @@ pub struct CheckStatsSummary {
     pub max_depth_reached: u64,
     pub elapsed_secs: f64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<ActionSummary>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub property_stats: Vec<PropertySummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub violation_count: Option<u64>,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct ActionSummary {
+    pub name: Option<String>,
+    pub transitions: u64,
 }
 
 #[derive(Serialize, JsonSchema, Debug)]
