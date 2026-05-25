@@ -74,7 +74,7 @@ jobs:
       - name: Build and publish WASM package
         if: steps.npm-check.outputs.skip == 'false'
         run: |
-          cargo build --lib --release --target wasm32-unknown-unknown --features wasm
+          cargo rustc --lib --release --target wasm32-unknown-unknown --features wasm --crate-type cdylib
           rm -rf pkg
           wasm-bindgen --target web --out-dir pkg target/wasm32-unknown-unknown/release/tla_checker.wasm
           VERSION=${{ steps.npm-check.outputs.local }}

@@ -443,12 +443,14 @@ mod tests {
         State { values }
     }
 
-    fn make_states_and_edges() -> (
+    type StatesAndEdges = (
         IndexSet<State>,
         Vec<Option<usize>>,
         Vec<Arc<str>>,
         Vec<EdgeList>,
-    ) {
+    );
+
+    fn make_states_and_edges() -> StatesAndEdges {
         let mut states = IndexSet::new();
         states.insert(make_state(vec![Value::Int(0)]));
         states.insert(make_state(vec![Value::Int(1)]));

@@ -12,7 +12,7 @@ script = ["rm -rf pkg"]
 
 [tasks.wasm-build]
 command = "cargo"
-args = ["build", "--lib", "--release", "--target", "wasm32-unknown-unknown", "--features", "wasm"]
+args = ["rustc", "--lib", "--release", "--target", "wasm32-unknown-unknown", "--features", "wasm", "--crate-type", "cdylib"]
 
 [tasks.wasm-bindgen]
 command = "wasm-bindgen"

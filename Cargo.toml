@@ -14,7 +14,8 @@ wasm-opt = false
 [lib]
 name = "tla_checker"
 path = "src/lib.rs"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
+doctest = false
 
 [[bin]]
 name = "tla"
@@ -23,6 +24,9 @@ path = "src/main.rs"
 [[bin]]
 name = "tla-mcp"
 path = "src/bin/tla_mcp.rs"
+test = false
+bench = false
+doctest = false
 
 [features]
 default = []
