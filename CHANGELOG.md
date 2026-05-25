@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.5] - 2026-05-25
+
+### Added
+
+- `tla-mcp`: per-action transition counts in `CheckStatsSummary.actions`. Sorted descending by count so the worst offender is first — lets callers see at a glance which disjunct is driving state-space cost.
+- `tla-mcp`: `CheckSpecOutput.advisories` array surfaces budget concerns before re-running. Currently warns when `max_depth > 100` or `max_states > 1_000_000`.
+- `docs/MCP_OBSERVABILITY.md`: tracker doc for the broader observability roadmap (branching-factor estimator, progress streaming, symmetry static-check) — what's landed and what's deferred.
+
+### Changed
+
+- `tla-mcp` tool descriptions for `validate_spec` and `check_spec` now flag bounded vs. unbounded `Nat` / `Seq(T)` in `TypeOK`, document `max_seconds` as a soft bound checked between states (so it must be set well under the MCP client's timeout), and point at the rate × fanout projection workflow for stepping constants up safely.
+
 ## [0.4.4] - 2026-05-24
 
 ### Added
