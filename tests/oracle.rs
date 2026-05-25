@@ -453,6 +453,39 @@ fn test_should_pass_bags_operators() {
 }
 
 #[test]
+fn test_should_pass_tuple_binding_quantifier() {
+    let path = Path::new("test_cases/should_pass/tuple_binding_quantifier.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "tuple_binding_quantifier.tla should pass, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_pass_tuple_binding_comprehension() {
+    let path = Path::new("test_cases/should_pass/tuple_binding_comprehension.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "tuple_binding_comprehension.tla should pass, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_pass_unbounded_choose() {
+    let path = Path::new("test_cases/should_pass/unbounded_choose.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "unbounded_choose.tla should pass, got: {:?}",
+        result
+    );
+}
+
+#[test]
 fn test_official_twophase() {
     let path = Path::new("test_cases/official/TwoPhase.tla");
     let input = fs::read_to_string(path).expect("failed to read spec file");
@@ -745,8 +778,10 @@ fn test_should_pass_specification_directive() {
     let tlc_cfg = parse_cfg(&cfg_input).expect("failed to parse cfg");
 
     let mut domains = Env::new();
-    let mut config = CheckerConfig::default();
-    config.spec_path = Some(path.to_path_buf());
+    let mut config = CheckerConfig {
+        spec_path: Some(path.to_path_buf()),
+        ..Default::default()
+    };
 
     apply_config(
         &tlc_cfg,
@@ -776,8 +811,10 @@ fn test_should_pass_specification_directive_multi_var() {
     let tlc_cfg = parse_cfg(&cfg_input).expect("failed to parse cfg");
 
     let mut domains = Env::new();
-    let mut config = CheckerConfig::default();
-    config.spec_path = Some(path.to_path_buf());
+    let mut config = CheckerConfig {
+        spec_path: Some(path.to_path_buf()),
+        ..Default::default()
+    };
 
     apply_config(
         &tlc_cfg,
@@ -1024,10 +1061,7 @@ fn test_parameterized_inv_prefix_not_misclassified() {
         1,
         "only zero-arg InvCounter should be auto-detected, not InvokeAction/InitNode/NextStep"
     );
-    assert_eq!(
-        spec.invariant_names[0].as_deref().map(|n| n.as_ref()),
-        Some("InvCounter")
-    );
+    assert_eq!(spec.invariant_names[0].as_deref(), Some("InvCounter"));
 }
 
 fn run_with_large_stack<F: FnOnce() + Send + 'static>(f: F) {
