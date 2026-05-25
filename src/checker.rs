@@ -94,6 +94,7 @@ pub struct Counterexample {
 pub struct CheckStats {
     pub states_explored: usize,
     pub transitions: usize,
+    pub transitions_by_action: BTreeMap<Option<Arc<str>>, usize>,
     pub max_depth_reached: usize,
     pub elapsed_secs: f64,
     pub violation_count: usize,
@@ -455,6 +456,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     let mut stats = CheckStats {
         states_explored: 0,
         transitions: 0,
+        transitions_by_action: BTreeMap::new(),
         max_depth_reached: 0,
         elapsed_secs: 0.0,
         violation_count: 0,
@@ -800,6 +802,10 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
         for transition in successors {
             stats.transitions += 1;
+            *stats
+                .transitions_by_action
+                .entry(transition.action.clone())
+                .or_insert(0) += 1;
             match state_passes_constraints(&transition.state, &mut constraint_env) {
                 Ok(true) => {}
                 Ok(false) => continue,

@@ -14,11 +14,11 @@ use crate::parser::{parse_expr, parse_with_warnings};
 use crate::scenario::{ScenarioResult, execute_scenario, parse_scenario};
 
 use super::schema::{
-    CheckOutcome, CheckSpecInput, CheckSpecOutput, CheckStatsSummary, ConstantBinding, ErrorPhase,
-    InvariantSummary, LimitKind, ListInvariantsInput, ListInvariantsOutput, ParseWarning,
-    PropertySummary, ReplayScenarioInput, ReplayScenarioOutput, ScenarioFailureInfo,
-    ScenarioTraceState, SourceSpan, SpecSummary, StateSnapshot, StructuredError, TlaValue,
-    ValidateSpecInput, ValidateSpecOutput,
+    ActionSummary, CheckOutcome, CheckSpecInput, CheckSpecOutput, CheckStatsSummary,
+    ConstantBinding, ErrorPhase, InvariantSummary, LimitKind, ListInvariantsInput,
+    ListInvariantsOutput, ParseWarning, PropertySummary, ReplayScenarioInput, ReplayScenarioOutput,
+    ScenarioFailureInfo, ScenarioTraceState, SourceSpan, SpecSummary, StateSnapshot,
+    StructuredError, TlaValue, ValidateSpecInput, ValidateSpecOutput,
 };
 
 pub struct LoadedSpec {
@@ -247,8 +247,30 @@ pub fn check_spec(input: &CheckSpecInput) -> CheckSpecOutput {
         }
     }
 
+    let advisories = collect_advisories(input);
+
     let result = check(&loaded.spec, &loaded.domains, &loaded.checker_config);
     CheckSpecOutput::new(map_check_result(result, &loaded.spec, &loaded.source))
+        .with_advisories(advisories)
+}
+
+fn collect_advisories(input: &CheckSpecInput) -> Vec<String> {
+    let mut advisories = Vec::new();
+    if input.max_depth > 100 {
+        advisories.push(format!(
+            "max_depth={} is high; most algorithmic bugs surface at depth < 50. \
+             Consider shrinking unless you have evidence a deeper trace is needed.",
+            input.max_depth
+        ));
+    }
+    if input.max_states > 1_000_000 {
+        advisories.push(format!(
+            "max_states={} is large. Start with smaller constants and grow the budget on evidence \
+             (states/sec from a small run × target wall-clock).",
+            input.max_states
+        ));
+    }
+    advisories
 }
 
 fn error_phase_for(kind: &super::schema::ErrorKind) -> ErrorPhase {
@@ -407,11 +429,22 @@ fn counterexample_to_snapshots(
 }
 
 fn summarize_stats(stats: &CheckStats) -> CheckStatsSummary {
+    let mut actions: Vec<ActionSummary> = stats
+        .transitions_by_action
+        .iter()
+        .map(|(name, count)| ActionSummary {
+            name: name.as_ref().map(|n| n.to_string()),
+            transitions: *count as u64,
+        })
+        .collect();
+    actions.sort_by_key(|a| std::cmp::Reverse(a.transitions));
+
     CheckStatsSummary {
         states_explored: stats.states_explored as u64,
         transitions: stats.transitions as u64,
         max_depth_reached: stats.max_depth_reached as u64,
         elapsed_secs: stats.elapsed_secs,
+        actions,
         property_stats: stats
             .property_stats
             .iter()

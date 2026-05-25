@@ -182,6 +182,8 @@ pub struct CheckSpecInput {
 pub struct CheckSpecOutput {
     #[serde(default = "schema_version_default")]
     pub schema_version: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub advisories: Vec<String>,
     #[serde(flatten)]
     pub outcome: CheckOutcome,
 }
@@ -190,8 +192,14 @@ impl CheckSpecOutput {
     pub fn new(outcome: CheckOutcome) -> Self {
         Self {
             schema_version: schema_version_default(),
+            advisories: Vec::new(),
             outcome,
         }
+    }
+
+    pub fn with_advisories(mut self, advisories: Vec<String>) -> Self {
+        self.advisories = advisories;
+        self
     }
 }
 
@@ -258,9 +266,17 @@ pub struct CheckStatsSummary {
     pub max_depth_reached: u64,
     pub elapsed_secs: f64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<ActionSummary>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub property_stats: Vec<PropertySummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub violation_count: Option<u64>,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct ActionSummary {
+    pub name: Option<String>,
+    pub transitions: u64,
 }
 
 #[derive(Serialize, JsonSchema, Debug)]
