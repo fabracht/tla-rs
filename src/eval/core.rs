@@ -581,10 +581,6 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Choose(var, domain, body) => {
-            let is_unbounded = matches!(domain.as_ref(), Expr::SetEnum(e) if e.is_empty());
-            if is_unbounded && let Some(v) = try_eval_unbounded_choose(var, body, env, defs)? {
-                return Ok(v);
-            }
             let dom = eval_set(domain, env, defs)?;
             let prev = env.remove(var);
             let mut chosen = None;
@@ -607,6 +603,16 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 return Ok(v);
             }
             Err(EvalError::empty_choose())
+        }
+
+        Expr::ChooseUnbounded(var, body) => {
+            match try_eval_unbounded_choose(var, body, env, defs)? {
+                Some(v) => Ok(v),
+                None => Err(EvalError::domain_error(format!(
+                    "unbounded CHOOSE {} : P only supports `{} \\notin S` and `{} = e` patterns",
+                    var, var, var
+                ))),
+            }
         }
 
         Expr::FnApp(f, arg) => {
@@ -1795,6 +1801,7 @@ fn expr_references(expr: &Expr, name: &Arc<str>) -> bool {
         | Expr::CustomOp(v, d, b) => {
             expr_references(d, name) || (v != name && expr_references(b, name))
         }
+        Expr::ChooseUnbounded(v, b) => v != name && expr_references(b, name),
         Expr::SetEnum(elems) | Expr::TupleLit(elems) => {
             elems.iter().any(|e| expr_references(e, name))
         }

@@ -63,6 +63,7 @@ pub enum Expr {
     Exists(Arc<str>, Box<Expr>, Box<Expr>),
     Forall(Arc<str>, Box<Expr>, Box<Expr>),
     Choose(Arc<str>, Box<Expr>, Box<Expr>),
+    ChooseUnbounded(Arc<str>, Box<Expr>),
 
     FnApp(Box<Expr>, Box<Expr>),
     FnDef(Arc<str>, Box<Expr>, Box<Expr>),

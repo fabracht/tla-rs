@@ -223,6 +223,7 @@ fn contains_prime_ref_impl(
         | Expr::CustomOp(_, d, b) => {
             contains_prime_ref_impl(d, defs, visited) || contains_prime_ref_impl(b, defs, visited)
         }
+        Expr::ChooseUnbounded(_, b) => contains_prime_ref_impl(b, defs, visited),
         Expr::SetEnum(elems) | Expr::TupleLit(elems) => elems
             .iter()
             .any(|e| contains_prime_ref_impl(e, defs, visited)),

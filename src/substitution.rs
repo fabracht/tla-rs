@@ -74,6 +74,7 @@ fn prime_expr(expr: &Expr) -> Expr {
         Expr::Exists(var, domain, body) => Expr::Exists(var.clone(), p(domain), p(body)),
         Expr::Forall(var, domain, body) => Expr::Forall(var.clone(), p(domain), p(body)),
         Expr::Choose(var, domain, body) => Expr::Choose(var.clone(), p(domain), p(body)),
+        Expr::ChooseUnbounded(var, body) => Expr::ChooseUnbounded(var.clone(), p(body)),
 
         Expr::FnDef(var, domain, body) => Expr::FnDef(var.clone(), p(domain), p(body)),
         Expr::FnCall(name, args) => {
@@ -345,6 +346,10 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
                 Box::new(substitute_expr(domain, subs)),
                 Box::new(substitute_expr(body, &filtered_subs)),
             )
+        }
+        Expr::ChooseUnbounded(var, body) => {
+            let filtered_subs: Vec<_> = subs.iter().filter(|(p, _)| p != var).cloned().collect();
+            Expr::ChooseUnbounded(var.clone(), Box::new(substitute_expr(body, &filtered_subs)))
         }
 
         Expr::FnApp(f, arg) => Expr::FnApp(

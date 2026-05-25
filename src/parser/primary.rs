@@ -449,8 +449,7 @@ impl Parser {
             self.advance();
             let body = self.parse_expr()?;
             let (var, wrapped) = wrap_binder(self, binder, body);
-            let empty_domain = Expr::SetEnum(vec![]);
-            Ok(Expr::Choose(var, Box::new(empty_domain), Box::new(wrapped)))
+            Ok(Expr::ChooseUnbounded(var, Box::new(wrapped)))
         } else {
             Err(
                 ParseError::new(format!("unexpected {} after CHOOSE variable", self.peek()))
