@@ -1878,7 +1878,7 @@ mod tests {
             extends: vec![],
             definitions: BTreeMap::from([(
                 Arc::from("Action"),
-                ((vec![], eq(prime_expr("x"), var_expr("x")))),
+                (vec![], eq(prime_expr("x"), var_expr("x"))),
             )]),
             assumes: vec![],
             instances: vec![],
@@ -1915,13 +1915,13 @@ mod tests {
             extends: vec![],
             definitions: BTreeMap::from([(
                 Arc::from("Action"),
-                ((
+                (
                     vec![],
                     and(
                         eq(var_expr("x"), lit_int(0)),
                         eq(prime_expr("x"), lit_int(1)),
                     ),
-                )),
+                ),
             )]),
             assumes: vec![],
             instances: vec![],

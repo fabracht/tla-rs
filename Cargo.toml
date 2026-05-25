@@ -1,6 +1,6 @@
 [package]
 name = "tla-checker"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2024"
 description = "A TLA+ model checker written in Rust"
 license = "MIT OR Apache-2.0"
@@ -14,7 +14,8 @@ wasm-opt = false
 [lib]
 name = "tla_checker"
 path = "src/lib.rs"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
+doctest = false
 
 [[bin]]
 name = "tla"
@@ -23,6 +24,11 @@ path = "src/main.rs"
 [[bin]]
 name = "tla-mcp"
 path = "src/bin/tla_mcp.rs"
+# Disabled to avoid duplicate-output warnings when the lib is built as both rlib and cdylib;
+# cargo test --release also failed to link tla-mcp under lto = "fat" with cdylib in the default crate-type.
+test = false
+bench = false
+doctest = false
 
 [features]
 default = []

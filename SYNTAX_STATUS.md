@@ -64,6 +64,8 @@ Cross-checked against:
 | `UNION` | | Distributed union |
 | `{x \in S : P}` | | Set filter |
 | `{e : x \in S}` | | Set map |
+| `{<<x, y>> \in S : P}` | | Set filter with tuple binder |
+| `{e : <<x, y>> \in S}` | | Set map with tuple binder |
 | `Cardinality(S)` | | Set cardinality (FiniteSets) |
 | `IsFiniteSet(S)` | | Finiteness test (FiniteSets) |
 
@@ -72,12 +74,18 @@ Cross-checked against:
 |-------|---------|-------------|
 | `\A x \in S : P` | ∀ | Universal |
 | `\E x \in S : P` | ∃ | Existential |
-| `CHOOSE x \in S : P` | | Hilbert choice |
+| `\A x, y \in S : P` | | Multiple variables sharing a domain |
+| `\E x \in S, y \in T : P` | | Multiple independent bindings |
+| `\E <<x, y>> \in S : P` | | Tuple-binding destructuring (also `\A`, set comprehensions, `CHOOSE`, fn def) |
+| `CHOOSE x \in S : P` | | Bounded Hilbert choice |
+| `CHOOSE x : x \notin S` | | Unbounded — picks a fresh `MODEL_VALUE_i` not in S |
+| `CHOOSE x : x = e` | | Unbounded — returns `e` (when `e` is independent of `x`) |
 
 ### Function Operators
 | ASCII | Unicode | Description |
 |-------|---------|-------------|
 | `[x \in S \|-> e]` | | Function definition |
+| `[<<x, y>> \in S \|-> e]` | | Function definition with tuple binder |
 | `f[x]` | | Function application |
 | `DOMAIN f` | | Function domain |
 | `[f EXCEPT ![a] = b]` | | Function update |
@@ -203,7 +211,7 @@ Stdlib modules (Naturals, Sequences, TLC, etc.) can be used with `LOCAL INSTANCE
 | `FiniteSets` | ✓ Cardinality, IsFiniteSet |
 | `TLC` | ✓ All 13 operators |
 | `Bags` | ✓ All 13 operators |
-| `Bits` | ✓ All 6 operators |
+| `Bits` | ✓ All 6 operators: BitAnd, BitOr, BitXor, BitNot, ShiftLeft, ShiftRight (built-ins, not module exports) |
 
 ---
 
@@ -236,7 +244,7 @@ These operators are parsed into the AST but error at evaluation time. They can a
 ### Other Missing
 | Feature | Description |
 |---------|-------------|
-| Unbounded quantifiers | `\E x : P` without domain |
+| Unbounded `\E` / `\A` | `\E x : P` / `\A x : P` without domain (the universe cannot be enumerated). Unbounded `CHOOSE` is supported for the `x \notin S` and `x = e` patterns. |
 
 ---
 
@@ -306,7 +314,7 @@ These operators are parsed into the AST but error at evaluation time. They can a
 
 ### Low Priority (Remaining)
 1. **Proof constructs** (currently safely skipped)
-2. **Unbounded quantifiers** (`\E x : P` without domain)
+2. **Unbounded `\E` / `\A`** (`\E x : P` without domain — fundamentally unsupportable for explicit-state checking)
 
 ---
 

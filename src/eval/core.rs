@@ -602,18 +602,17 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Some(v) = chosen {
                 return Ok(v);
             }
-            if dom.is_empty()
-                && let Expr::NotIn(_, set_expr) = body.as_ref()
-            {
-                let excluded = eval_set(set_expr, env, defs)?;
-                for i in 0..1000 {
-                    let candidate = Value::Str(format!("MODEL_VALUE_{}", i).into());
-                    if !excluded.contains(&candidate) {
-                        return Ok(candidate);
-                    }
-                }
-            }
             Err(EvalError::empty_choose())
+        }
+
+        Expr::ChooseUnbounded(var, body) => {
+            match try_eval_unbounded_choose(var, body, env, defs)? {
+                Some(v) => Ok(v),
+                None => Err(EvalError::domain_error(format!(
+                    "unbounded CHOOSE {} : P only supports `{} \\notin S` and `{} = e` patterns",
+                    var, var, var
+                ))),
+            }
         }
 
         Expr::FnApp(f, arg) => {
@@ -1672,5 +1671,33 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         },
 
         Expr::LabeledAction(_label, action) => eval(action, env, defs),
+    }
+}
+
+fn try_eval_unbounded_choose(
+    var: &Arc<str>,
+    body: &Expr,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<Option<Value>> {
+    use super::ast_utils::{expr_is_var, expr_references};
+    match body {
+        Expr::NotIn(lhs, set_expr) if expr_is_var(lhs, var) => {
+            let excluded = eval_set(set_expr, env, defs)?;
+            for i in 0..10_000 {
+                let candidate = Value::Str(format!("MODEL_VALUE_{}", i).into());
+                if !excluded.contains(&candidate) {
+                    return Ok(Some(candidate));
+                }
+            }
+            Ok(None)
+        }
+        Expr::Eq(lhs, rhs) if expr_is_var(lhs, var) && !expr_references(rhs, var) => {
+            Ok(Some(eval(rhs, env, defs)?))
+        }
+        Expr::Eq(lhs, rhs) if expr_is_var(rhs, var) && !expr_references(lhs, var) => {
+            Ok(Some(eval(lhs, env, defs)?))
+        }
+        _ => Ok(None),
     }
 }

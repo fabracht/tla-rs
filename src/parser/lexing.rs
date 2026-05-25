@@ -22,6 +22,7 @@ pub struct Parser {
     pub(super) fairness: Vec<FairnessConstraint>,
     pub(super) liveness_properties: Vec<Expr>,
     pub(super) warnings: Vec<Spanned<String>>,
+    pub(super) fresh_counter: u64,
 }
 
 impl Parser {
@@ -43,7 +44,14 @@ impl Parser {
             fairness: Vec::new(),
             liveness_properties: Vec::new(),
             warnings: Vec::new(),
+            fresh_counter: 0,
         })
+    }
+
+    pub(super) fn fresh_tuple_name(&mut self) -> Arc<str> {
+        let n = self.fresh_counter;
+        self.fresh_counter += 1;
+        format!("__tup_{}", n).into()
     }
 
     pub fn warnings(&self) -> &[Spanned<String>] {
