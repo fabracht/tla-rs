@@ -182,6 +182,8 @@ pub struct CheckSpecInput {
 pub struct CheckSpecOutput {
     #[serde(default = "schema_version_default")]
     pub schema_version: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub advisories: Vec<String>,
     #[serde(flatten)]
     pub outcome: CheckOutcome,
 }
@@ -190,8 +192,14 @@ impl CheckSpecOutput {
     pub fn new(outcome: CheckOutcome) -> Self {
         Self {
             schema_version: schema_version_default(),
+            advisories: Vec::new(),
             outcome,
         }
+    }
+
+    pub fn with_advisories(mut self, advisories: Vec<String>) -> Self {
+        self.advisories = advisories;
+        self
     }
 }
 

@@ -247,8 +247,30 @@ pub fn check_spec(input: &CheckSpecInput) -> CheckSpecOutput {
         }
     }
 
+    let advisories = collect_advisories(input);
+
     let result = check(&loaded.spec, &loaded.domains, &loaded.checker_config);
     CheckSpecOutput::new(map_check_result(result, &loaded.spec, &loaded.source))
+        .with_advisories(advisories)
+}
+
+fn collect_advisories(input: &CheckSpecInput) -> Vec<String> {
+    let mut advisories = Vec::new();
+    if input.max_depth > 100 {
+        advisories.push(format!(
+            "max_depth={} is high; most algorithmic bugs surface at depth < 50. \
+             Consider shrinking unless you have evidence a deeper trace is needed.",
+            input.max_depth
+        ));
+    }
+    if input.max_states > 1_000_000 {
+        advisories.push(format!(
+            "max_states={} is large. Start with smaller constants and grow the budget on evidence \
+             (states/sec from a small run × target wall-clock).",
+            input.max_states
+        ));
+    }
+    advisories
 }
 
 fn error_phase_for(kind: &super::schema::ErrorKind) -> ErrorPhase {
