@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.4] - 2026-05-24
+
+### Added
+
+- Tuple-binding destructuring is now supported wherever a single-variable binder used to work. Each tuple binder is desugared at parse time to a synthetic name plus `LET` projections, so there are no AST or evaluator changes. Arbitrary nesting (`<<a, <<b, c>>>>`) works.
+  - Quantifiers: `\E <<x, y>> \in S : P`, `\A <<x, y>> \in S : P`
+  - Set comprehensions: `{<<x, y>> \in S : P}` and `{e : <<x, y>> \in S}`
+  - `CHOOSE <<x, y>> \in S : P`
+  - Function definitions: `[<<x, y>> \in S |-> e]`
+- Unbounded `CHOOSE x : P` now handles the `x = e` pattern (returns `eval(e)` when `e` is independent of `x`) in addition to the existing `x \notin S` fresh-model-value pattern. General unbounded `P` still errors clearly. Unbounded `\E` / `\A` remain rejected — fundamentally not enumerable for explicit-state checking.
+
+### Fixed
+
+- `cargo test --release` and `cargo build --release --tests` no longer fail to link `tla-mcp`. The lib's `crate-type` was `["cdylib", "rlib"]`, which interacted with `lto = "fat"` to drop `JsonSchema` derive impls that the `#[tool_router]` macro in `tla-mcp` references. The lib now declares `crate-type = ["rlib"]` and wasm builds add `cdylib` on the command line via `cargo rustc --crate-type cdylib`. `Makefile.toml`, `.github/workflows/ci.yml`, and `.github/workflows/release.yml` were updated to match.
+- `doctest = false` on the `[lib]` to avoid the related "same output filename" cargo warning when crate-types and tests are combined.
+- Cleaned up three pre-existing clippy warnings in `src/checker.rs`, `src/export.rs`, and `tests/oracle.rs`.
+
 ## [0.4.3] - 2026-05-17
 
 ### Distribution
