@@ -24,6 +24,8 @@ path = "src/main.rs"
 [[bin]]
 name = "tla-mcp"
 path = "src/bin/tla_mcp.rs"
+# Disabled to avoid duplicate-output warnings when the lib is built as both rlib and cdylib;
+# cargo test --release also failed to link tla-mcp under lto = "fat" with cdylib in the default crate-type.
 test = false
 bench = false
 doctest = false
