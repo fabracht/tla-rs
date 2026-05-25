@@ -294,3 +294,134 @@ pub(crate) fn collect_conjuncts(expr: &Expr) -> Vec<&Expr> {
         _ => vec![expr],
     }
 }
+
+pub(crate) fn expr_is_var(expr: &Expr, name: &Arc<str>) -> bool {
+    matches!(expr, Expr::Var(n) if n == name)
+}
+
+pub(crate) fn expr_references(expr: &Expr, name: &Arc<str>) -> bool {
+    match expr {
+        Expr::Var(n) => n == name,
+        Expr::Lit(_)
+        | Expr::Prime(_)
+        | Expr::OldValue
+        | Expr::Any
+        | Expr::EmptyBag
+        | Expr::JavaTime
+        | Expr::SystemTime
+        | Expr::Unchanged(_) => false,
+        Expr::Not(e)
+        | Expr::Neg(e)
+        | Expr::Cardinality(e)
+        | Expr::IsFiniteSet(e)
+        | Expr::Powerset(e)
+        | Expr::BigUnion(e)
+        | Expr::Domain(e)
+        | Expr::Len(e)
+        | Expr::Head(e)
+        | Expr::Tail(e)
+        | Expr::TransitiveClosure(e)
+        | Expr::ReflexiveTransitiveClosure(e)
+        | Expr::SeqSet(e)
+        | Expr::PrintT(e)
+        | Expr::Permutations(e)
+        | Expr::TLCToString(e)
+        | Expr::RandomElement(e)
+        | Expr::TLCGet(e)
+        | Expr::TLCEval(e)
+        | Expr::IsABag(e)
+        | Expr::BagToSet(e)
+        | Expr::SetToBag(e)
+        | Expr::BagUnion(e)
+        | Expr::SubBag(e)
+        | Expr::BagCardinality(e)
+        | Expr::Always(e)
+        | Expr::Eventually(e)
+        | Expr::EnabledOp(e) => expr_references(e, name),
+        Expr::And(l, r)
+        | Expr::Or(l, r)
+        | Expr::Implies(l, r)
+        | Expr::Equiv(l, r)
+        | Expr::Eq(l, r)
+        | Expr::Neq(l, r)
+        | Expr::Lt(l, r)
+        | Expr::Le(l, r)
+        | Expr::Gt(l, r)
+        | Expr::Ge(l, r)
+        | Expr::Add(l, r)
+        | Expr::Sub(l, r)
+        | Expr::Mul(l, r)
+        | Expr::Div(l, r)
+        | Expr::Mod(l, r)
+        | Expr::Exp(l, r)
+        | Expr::BitwiseAnd(l, r)
+        | Expr::ActionCompose(l, r)
+        | Expr::In(l, r)
+        | Expr::NotIn(l, r)
+        | Expr::Union(l, r)
+        | Expr::Intersect(l, r)
+        | Expr::SetMinus(l, r)
+        | Expr::Cartesian(l, r)
+        | Expr::Subset(l, r)
+        | Expr::ProperSubset(l, r)
+        | Expr::Concat(l, r)
+        | Expr::Append(l, r)
+        | Expr::SetRange(l, r)
+        | Expr::FnApp(l, r)
+        | Expr::FnMerge(l, r)
+        | Expr::SingleFn(l, r)
+        | Expr::FunctionSet(l, r)
+        | Expr::Print(l, r)
+        | Expr::Assert(l, r)
+        | Expr::TLCSet(l, r)
+        | Expr::SortSeq(l, r)
+        | Expr::SelectSeq(l, r)
+        | Expr::BagIn(l, r)
+        | Expr::BagAdd(l, r)
+        | Expr::BagSub(l, r)
+        | Expr::BagOfAll(l, r)
+        | Expr::CopiesIn(l, r)
+        | Expr::SqSubseteq(l, r)
+        | Expr::LeadsTo(l, r) => expr_references(l, name) || expr_references(r, name),
+        Expr::If(c, t, e) | Expr::SubSeq(c, t, e) => {
+            expr_references(c, name) || expr_references(t, name) || expr_references(e, name)
+        }
+        Expr::Forall(v, d, b)
+        | Expr::Exists(v, d, b)
+        | Expr::Choose(v, d, b)
+        | Expr::FnDef(v, d, b)
+        | Expr::SetFilter(v, d, b)
+        | Expr::SetMap(v, d, b)
+        | Expr::CustomOp(v, d, b) => {
+            expr_references(d, name) || (v != name && expr_references(b, name))
+        }
+        Expr::ChooseUnbounded(v, b) => v != name && expr_references(b, name),
+        Expr::SetEnum(elems) | Expr::TupleLit(elems) => {
+            elems.iter().any(|e| expr_references(e, name))
+        }
+        Expr::RecordLit(fields) | Expr::RecordSet(fields) => {
+            fields.iter().any(|(_, e)| expr_references(e, name))
+        }
+        Expr::RecordAccess(r, _) | Expr::TupleAccess(r, _) => expr_references(r, name),
+        Expr::Except(b, u) => {
+            expr_references(b, name)
+                || u.iter().any(|(path, val)| {
+                    path.iter().any(|p| expr_references(p, name)) || expr_references(val, name)
+                })
+        }
+        Expr::FnCall(_, args) => args.iter().any(|a| expr_references(a, name)),
+        Expr::QualifiedCall(_, _, args) => args.iter().any(|a| expr_references(a, name)),
+        Expr::Lambda(params, body) => !params.contains(name) && expr_references(body, name),
+        Expr::Let(v, binding, body) => {
+            expr_references(binding, name) || (v != name && expr_references(body, name))
+        }
+        Expr::Case(branches) => branches
+            .iter()
+            .any(|(c, r)| expr_references(c, name) || expr_references(r, name)),
+        Expr::LabeledAction(_, a) => expr_references(a, name),
+        Expr::WeakFairness(_, e)
+        | Expr::StrongFairness(_, e)
+        | Expr::BoxAction(e, _)
+        | Expr::DiamondAction(e, _) => expr_references(e, name),
+    }
+}
