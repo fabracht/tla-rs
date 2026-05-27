@@ -109,9 +109,48 @@ impl ServerHandler for TlaMcpServer {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn request_parent_death_signal() {
+    unsafe {
+        libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn request_parent_death_signal() {}
+
+#[cfg(unix)]
+async fn wait_for_shutdown_signal() -> bool {
+    use tokio::signal::unix::{SignalKind, signal};
+    let (mut term, mut interrupt) = match (
+        signal(SignalKind::terminate()),
+        signal(SignalKind::interrupt()),
+    ) {
+        (Ok(term), Ok(interrupt)) => (term, interrupt),
+        _ => return false,
+    };
+    tokio::select! {
+        _ = term.recv() => true,
+        _ = interrupt.recv() => true,
+    }
+}
+
+#[cfg(not(unix))]
+async fn wait_for_shutdown_signal() -> bool {
+    tokio::signal::ctrl_c().await.is_ok()
+}
+
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    request_parent_death_signal();
+
+    tokio::spawn(async {
+        if wait_for_shutdown_signal().await {
+            std::process::exit(0);
+        }
+    });
+
     let running = TlaMcpServer.serve(stdio()).await?;
     running.waiting().await?;
-    Ok(())
+    std::process::exit(0);
 }
