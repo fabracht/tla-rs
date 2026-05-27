@@ -176,7 +176,7 @@ fn step_label(idx: usize, step: &ScenarioStep) -> String {
     }
 }
 
-fn parse_variant_constants(variant: &Variant) -> Result<Vec<(Arc<str>, Value)>, String> {
+pub(crate) fn parse_variant_constants(variant: &Variant) -> Result<Vec<(Arc<str>, Value)>, String> {
     variant
         .constants
         .iter()

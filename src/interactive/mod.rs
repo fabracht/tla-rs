@@ -1,8 +1,11 @@
 mod input;
+mod present;
 mod render;
 mod repl;
 mod serialize;
 mod state;
+
+pub use present::run_presentation;
 
 use std::fs;
 use std::io;

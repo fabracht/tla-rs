@@ -17,11 +17,11 @@ use tla_checker::checker::{
 };
 use tla_checker::config::{apply_config, parse_cfg, parse_constant_value, split_top_level};
 #[cfg(not(target_arch = "wasm32"))]
-use tla_checker::demo::{Manifest, run_beat};
+use tla_checker::demo::{Manifest, render_doc, run_beat};
 use tla_checker::diagnostic::{ColorConfig, Diagnostic};
 use tla_checker::export::DotMode;
 #[cfg(not(target_arch = "wasm32"))]
-use tla_checker::interactive::{run_interactive, run_interactive_replay};
+use tla_checker::interactive::{run_interactive, run_interactive_replay, run_presentation};
 use tla_checker::parser::parse_with_warnings;
 use tla_checker::scenario::{execute_scenario, format_scenario_result, parse_scenario};
 
@@ -81,6 +81,30 @@ fn run_present_validate(manifest_path: &Path) -> ExitCode {
     } else {
         println!("some beats failed");
         ExitCode::FAILURE
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_present_export(manifest_path: &Path, out_path: &Path) -> ExitCode {
+    let manifest = match Manifest::load(manifest_path) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+    let dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let (markdown, all_passed) = render_doc(dir, &manifest);
+    if let Err(e) = fs::write(out_path, markdown) {
+        eprintln!("failed to write {}: {}", out_path.display(), e);
+        return ExitCode::FAILURE;
+    }
+    println!("wrote {}", out_path.display());
+    if all_passed {
+        ExitCode::SUCCESS
+    } else {
+        eprintln!("note: some beats did not pass their expectations");
+        ExitCode::SUCCESS
     }
 }
 
@@ -257,6 +281,8 @@ fn main() -> ExitCode {
     let mut replay_path: Option<PathBuf> = None;
     #[cfg(not(target_arch = "wasm32"))]
     let mut present_path: Option<PathBuf> = None;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut export_md_path: Option<PathBuf> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -430,6 +456,15 @@ fn main() -> ExitCode {
                 present_path = Some(PathBuf::from(&args[i]));
             }
             #[cfg(not(target_arch = "wasm32"))]
+            "--export-md" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--export-md requires an output file");
+                    return ExitCode::FAILURE;
+                }
+                export_md_path = Some(PathBuf::from(&args[i]));
+            }
+            #[cfg(not(target_arch = "wasm32"))]
             "--interactive" | "-i" => {
                 interactive_mode = true;
             }
@@ -526,7 +561,10 @@ fn main() -> ExitCode {
                 println!("  --config PATH              Load TLC-style cfg file (auto: Spec.cfg)");
                 println!("  --scenario TEXT            Explore a specific scenario (or @file)");
                 println!(
-                    "  --present FILE             Validate a demo manifest (variants + beats)"
+                    "  --present FILE             Run a demo manifest (TUI; --validate for a report)"
+                );
+                println!(
+                    "  --export-md FILE           With --present: write a Markdown walkthrough"
                 );
                 println!("  --interactive, -i          Interactive TUI exploration mode");
                 println!("  --help, -h                 Show this help");
@@ -570,7 +608,19 @@ fn main() -> ExitCode {
 
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(manifest_path) = present_path {
-        return run_present_validate(&manifest_path);
+        if let Some(out) = export_md_path {
+            return run_present_export(&manifest_path, &out);
+        }
+        if validate_only {
+            return run_present_validate(&manifest_path);
+        }
+        return match run_presentation(&manifest_path) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("presentation error: {}", e);
+                ExitCode::FAILURE
+            }
+        };
     }
 
     let spec_path = match spec_path {
