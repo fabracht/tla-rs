@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use serde_json::json;
 use tla_checker::mcp::runner;
 use tla_checker::mcp::schema::{
-    CheckOutcome, CheckSpecInput, ErrorPhase, LimitKind, ListInvariantsInput, ReplayScenarioInput,
-    ScenarioStatus, ValidateSpecInput, ValidationStatus,
+    AppendBeatInput, CheckOutcome, CheckSpecInput, DemoStatus, ErrorPhase, ExportDemoDocInput,
+    LimitKind, ListInvariantsInput, ReplayScenarioInput, ScenarioStatus, ValidateDemoInput,
+    ValidateSpecInput, ValidationStatus,
 };
 
 fn pass_spec(name: &str) -> String {
@@ -1017,4 +1019,141 @@ fn check_spec_cli_constants_override_cfg_constants() {
         }
         other => panic!("expected ok with CLI-overridden bound, got {:?}", other),
     }
+}
+
+const DEMO_MANIFEST: &str = "test_cases/demo/Counter.demo.json";
+
+fn unique_temp_dir(tag: &str) -> PathBuf {
+    let mut p = std::env::temp_dir();
+    p.push(format!("tla_demo_{}_{}", tag, std::process::id()));
+    let _ = std::fs::remove_dir_all(&p);
+    std::fs::create_dir_all(&p).expect("create temp dir");
+    p
+}
+
+#[test]
+fn validate_demo_passes_and_includes_traces() {
+    let out = runner::validate_demo(&ValidateDemoInput {
+        manifest_path: DEMO_MANIFEST.to_string(),
+    });
+    assert!(
+        matches!(out.status, DemoStatus::Passed),
+        "expected Passed, got {:?} ({:?})",
+        out.status,
+        out.error
+    );
+    assert_eq!(out.beats.len(), 2);
+    assert_eq!(out.title.as_deref(), Some("Counter overflow demo"));
+
+    let compare_beat = out
+        .beats
+        .iter()
+        .find(|b| b.runs.len() == 2)
+        .expect("a compare beat with two variant runs");
+    assert!(compare_beat.passed);
+    assert!(out.beats[0].runs[0].trace.len() >= 2);
+    assert!(out.beats[0].runs[0].assertions.iter().all(|a| a.passed));
+}
+
+#[test]
+fn validate_demo_reports_error_for_missing_manifest() {
+    let out = runner::validate_demo(&ValidateDemoInput {
+        manifest_path: "does_not_exist.demo.json".to_string(),
+    });
+    assert!(matches!(out.status, DemoStatus::Error));
+    assert!(out.error.is_some());
+}
+
+#[test]
+fn append_beat_validate_only_does_not_write() {
+    let out = runner::append_beat(&AppendBeatInput {
+        manifest_path: DEMO_MANIFEST.to_string(),
+        title: "preview only".to_string(),
+        variant: Some("low".to_string()),
+        compare: Vec::new(),
+        scenario: vec!["action: Inc".to_string()],
+        note: None,
+        expect: vec!["final: x = 1".to_string()],
+        expect_per_variant: BTreeMap::new(),
+        validate_only: true,
+    });
+    assert!(!out.written);
+    assert!(matches!(out.status, DemoStatus::Passed));
+}
+
+#[test]
+fn append_beat_writes_and_reloads() {
+    let dir = unique_temp_dir("append");
+    std::fs::copy("test_cases/demo/Counter.tla", dir.join("Counter.tla")).unwrap();
+    std::fs::copy(DEMO_MANIFEST, dir.join("Counter.demo.json")).unwrap();
+    let manifest_path = dir.join("Counter.demo.json").to_string_lossy().to_string();
+
+    let out = runner::append_beat(&AppendBeatInput {
+        manifest_path: manifest_path.clone(),
+        title: "Reset returns to zero".to_string(),
+        variant: Some("low".to_string()),
+        compare: Vec::new(),
+        scenario: vec!["action: Inc".to_string(), "action: Reset".to_string()],
+        note: Some("reset clears the counter".to_string()),
+        expect: vec!["final: x = 0".to_string()],
+        expect_per_variant: BTreeMap::new(),
+        validate_only: false,
+    });
+    assert!(matches!(out.status, DemoStatus::Passed), "{:?}", out.error);
+    assert!(out.written);
+
+    let reloaded = runner::validate_demo(&ValidateDemoInput {
+        manifest_path: manifest_path.clone(),
+    });
+    assert_eq!(reloaded.beats.len(), 3);
+    assert!(matches!(reloaded.status, DemoStatus::Passed));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn append_beat_rejects_unknown_variant() {
+    let dir = unique_temp_dir("badvariant");
+    std::fs::copy("test_cases/demo/Counter.tla", dir.join("Counter.tla")).unwrap();
+    std::fs::copy(DEMO_MANIFEST, dir.join("Counter.demo.json")).unwrap();
+    let manifest_path = dir.join("Counter.demo.json").to_string_lossy().to_string();
+
+    let out = runner::append_beat(&AppendBeatInput {
+        manifest_path: manifest_path.clone(),
+        title: "bad".to_string(),
+        variant: Some("nope".to_string()),
+        compare: Vec::new(),
+        scenario: vec!["action: Inc".to_string()],
+        note: None,
+        expect: Vec::new(),
+        expect_per_variant: BTreeMap::new(),
+        validate_only: false,
+    });
+    assert!(matches!(out.status, DemoStatus::Error));
+    assert!(!out.written);
+
+    let reloaded = runner::validate_demo(&ValidateDemoInput { manifest_path });
+    assert_eq!(reloaded.beats.len(), 2, "broken beat must not be persisted");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn export_demo_doc_writes_markdown() {
+    let dir = unique_temp_dir("doc");
+    let out_path = dir.join("walkthrough.md").to_string_lossy().to_string();
+
+    let out = runner::export_demo_doc(&ExportDemoDocInput {
+        manifest_path: DEMO_MANIFEST.to_string(),
+        out_path: out_path.clone(),
+    });
+    assert!(matches!(out.status, DemoStatus::Passed), "{:?}", out.error);
+    assert_eq!(out.written_path.as_deref(), Some(out_path.as_str()));
+
+    let contents = std::fs::read_to_string(&out_path).unwrap();
+    assert!(contents.contains("Counter overflow demo"));
+    assert!(contents.contains("action: Inc"));
+    assert!(contents.contains('✓'));
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

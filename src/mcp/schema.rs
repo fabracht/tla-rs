@@ -565,3 +565,115 @@ impl SourceSpan {
         }
     }
 }
+
+#[derive(Serialize, JsonSchema, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum DemoStatus {
+    Passed,
+    Failed,
+    Error,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct AssertionSummary {
+    pub expectation: String,
+    pub passed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct DemoTraceState {
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changes: Vec<String>,
+    pub state: StateSnapshot,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct VariantRunSummary {
+    pub variant: String,
+    pub passed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assertions: Vec<AssertionSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trace: Vec<DemoTraceState>,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct BeatSummary {
+    pub index: usize,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub passed: bool,
+    pub runs: Vec<VariantRunSummary>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+pub struct ValidateDemoInput {
+    pub manifest_path: String,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct ValidateDemoOutput {
+    #[serde(default = "schema_version_default")]
+    pub schema_version: String,
+    pub status: DemoStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beats: Vec<BeatSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<StructuredError>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+pub struct AppendBeatInput {
+    pub manifest_path: String,
+    pub title: String,
+    #[serde(default)]
+    pub variant: Option<String>,
+    #[serde(default)]
+    pub compare: Vec<String>,
+    pub scenario: Vec<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub expect: Vec<String>,
+    #[serde(default)]
+    pub expect_per_variant: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub validate_only: bool,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct AppendBeatOutput {
+    #[serde(default = "schema_version_default")]
+    pub schema_version: String,
+    pub status: DemoStatus,
+    pub written: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub beat: Option<BeatSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<StructuredError>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+pub struct ExportDemoDocInput {
+    pub manifest_path: String,
+    pub out_path: String,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct ExportDemoDocOutput {
+    #[serde(default = "schema_version_default")]
+    pub schema_version: String,
+    pub status: DemoStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub written_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<StructuredError>,
+}

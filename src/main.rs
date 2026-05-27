@@ -16,6 +16,8 @@ use tla_checker::checker::{
     format_trace_with_diffs, write_trace_json,
 };
 use tla_checker::config::{apply_config, parse_cfg, parse_constant_value, split_top_level};
+#[cfg(not(target_arch = "wasm32"))]
+use tla_checker::demo::{Manifest, run_beat};
 use tla_checker::diagnostic::{ColorConfig, Diagnostic};
 use tla_checker::export::DotMode;
 #[cfg(not(target_arch = "wasm32"))]
@@ -25,6 +27,61 @@ use tla_checker::scenario::{execute_scenario, format_scenario_result, parse_scen
 
 fn is_likely_subcommand(arg: &str) -> bool {
     ["check", "run", "verify", "parse", "lint", "test"].contains(&arg.to_lowercase().as_str())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_present_validate(manifest_path: &Path) -> ExitCode {
+    let manifest = match Manifest::load(manifest_path) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+    let dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+
+    if let Some(title) = &manifest.title {
+        println!("Demo: {}", title);
+    }
+    println!(
+        "{} variant(s), {} beat(s)\n",
+        manifest.variants.len(),
+        manifest.beats.len()
+    );
+
+    let mut all_passed = true;
+    for (idx, beat) in manifest.beats.iter().enumerate() {
+        let report = run_beat(dir, &manifest, beat);
+        let passed = report.passed();
+        all_passed &= passed;
+        let mark = if passed { "PASS" } else { "FAIL" };
+        println!("[{}] beat {}: {}", mark, idx + 1, report.title);
+        if let Some(note) = &report.note {
+            println!("     {}", note);
+        }
+        for run in &report.runs {
+            if let Some(failure) = &run.failure {
+                println!("     {}: error — {}", run.variant, failure);
+            }
+            for assertion in &run.assertions {
+                if assertion.passed {
+                    println!("     {}  ok   {}", run.variant, assertion.raw);
+                } else {
+                    let detail = assertion.detail.as_deref().unwrap_or("failed");
+                    println!("     {}  FAIL {} ({})", run.variant, assertion.raw, detail);
+                }
+            }
+        }
+        println!();
+    }
+
+    if all_passed {
+        println!("all beats passed");
+        ExitCode::SUCCESS
+    } else {
+        println!("some beats failed");
+        ExitCode::FAILURE
+    }
 }
 
 fn format_value_short(val: &Value) -> String {
@@ -198,6 +255,8 @@ fn main() -> ExitCode {
     let mut save_counterexample_path: Option<PathBuf> = None;
     #[cfg(not(target_arch = "wasm32"))]
     let mut replay_path: Option<PathBuf> = None;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut present_path: Option<PathBuf> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -362,6 +421,15 @@ fn main() -> ExitCode {
                 }
             }
             #[cfg(not(target_arch = "wasm32"))]
+            "--present" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--present requires a manifest file");
+                    return ExitCode::FAILURE;
+                }
+                present_path = Some(PathBuf::from(&args[i]));
+            }
+            #[cfg(not(target_arch = "wasm32"))]
             "--interactive" | "-i" => {
                 interactive_mode = true;
             }
@@ -457,6 +525,9 @@ fn main() -> ExitCode {
                 println!("  --list-invariants          Show detected invariants and exit");
                 println!("  --config PATH              Load TLC-style cfg file (auto: Spec.cfg)");
                 println!("  --scenario TEXT            Explore a specific scenario (or @file)");
+                println!(
+                    "  --present FILE             Validate a demo manifest (variants + beats)"
+                );
                 println!("  --interactive, -i          Interactive TUI exploration mode");
                 println!("  --help, -h                 Show this help");
                 println!();
@@ -495,6 +566,11 @@ fn main() -> ExitCode {
             }
         }
         i += 1;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(manifest_path) = present_path {
+        return run_present_validate(&manifest_path);
     }
 
     let spec_path = match spec_path {

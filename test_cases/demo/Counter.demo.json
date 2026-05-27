@@ -1,0 +1,27 @@
+{
+  "schema_version": "1",
+  "title": "Counter overflow demo",
+  "variants": {
+    "low": { "spec": "Counter.tla", "constants": { "Max": "2" } },
+    "high": { "spec": "Counter.tla", "constants": { "Max": "100" } }
+  },
+  "beats": [
+    {
+      "title": "Single increment stays in range",
+      "variant": "low",
+      "scenario": ["action: Inc"],
+      "note": "one step, no overflow",
+      "expect": ["all: x <= Max", "final: x = 1", "final: overflow = FALSE"]
+    },
+    {
+      "title": "Three increments: low overflows, high does not",
+      "compare": ["low", "high"],
+      "scenario": ["action: Inc", "action: Inc", "action: Inc"],
+      "note": "same actions, different Max",
+      "expect_per_variant": {
+        "low": ["final: overflow = TRUE", "step 3: x = 3"],
+        "high": ["final: overflow = FALSE", "never: overflow = TRUE"]
+      }
+    }
+  ]
+}

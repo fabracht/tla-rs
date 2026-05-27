@@ -9,16 +9,20 @@ use crate::checker::{
     CheckResult, CheckStats, CheckerConfig, Counterexample, PrepareSpecError, PropertyStats, check,
 };
 use crate::config::{apply_config, parse_cfg, parse_constant_value};
+use crate::demo::{self, Beat, BeatReport, Manifest, run_beat};
 use crate::liveness::LivenessViolation;
 use crate::parser::{parse_expr, parse_with_warnings};
 use crate::scenario::{ScenarioResult, execute_scenario, parse_scenario};
 
+use super::SCHEMA_VERSION;
 use super::schema::{
-    ActionSummary, CheckOutcome, CheckSpecInput, CheckSpecOutput, CheckStatsSummary,
-    ConstantBinding, ErrorPhase, InvariantSummary, LimitKind, ListInvariantsInput,
-    ListInvariantsOutput, ParseWarning, PropertySummary, ReplayScenarioInput, ReplayScenarioOutput,
-    ScenarioFailureInfo, ScenarioTraceState, SourceSpan, SpecSummary, StateSnapshot,
-    StructuredError, TlaValue, ValidateSpecInput, ValidateSpecOutput,
+    ActionSummary, AppendBeatInput, AppendBeatOutput, AssertionSummary, BeatSummary, CheckOutcome,
+    CheckSpecInput, CheckSpecOutput, CheckStatsSummary, ConstantBinding, DemoStatus,
+    DemoTraceState, ErrorPhase, ExportDemoDocInput, ExportDemoDocOutput, InvariantSummary,
+    LimitKind, ListInvariantsInput, ListInvariantsOutput, ParseWarning, PropertySummary,
+    ReplayScenarioInput, ReplayScenarioOutput, ScenarioFailureInfo, ScenarioTraceState, SourceSpan,
+    SpecSummary, StateSnapshot, StructuredError, TlaValue, ValidateDemoInput, ValidateDemoOutput,
+    ValidateSpecInput, ValidateSpecOutput, VariantRunSummary,
 };
 
 pub struct LoadedSpec {
@@ -493,4 +497,207 @@ fn invariant_summaries(spec: &Spec) -> Vec<InvariantSummary> {
             name: name.as_ref().map(|n| n.to_string()),
         })
         .collect()
+}
+
+fn manifest_dir(manifest_path: &str) -> PathBuf {
+    Path::new(manifest_path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn variant_run_to_summary(run: &demo::VariantRun) -> VariantRunSummary {
+    VariantRunSummary {
+        variant: run.variant.clone(),
+        passed: run.passed(),
+        failure: run.failure.clone(),
+        assertions: run
+            .assertions
+            .iter()
+            .map(|a| AssertionSummary {
+                expectation: a.raw.clone(),
+                passed: a.passed,
+                detail: a.detail.clone(),
+            })
+            .collect(),
+        trace: run
+            .trace
+            .iter()
+            .map(|t| DemoTraceState {
+                label: t.label.clone(),
+                changes: t.changes.clone(),
+                state: StateSnapshot::from_state(&t.state, &run.vars),
+            })
+            .collect(),
+    }
+}
+
+fn beat_report_to_summary(index: usize, report: &BeatReport) -> BeatSummary {
+    BeatSummary {
+        index,
+        title: report.title.clone(),
+        note: report.note.clone(),
+        passed: report.passed(),
+        runs: report.runs.iter().map(variant_run_to_summary).collect(),
+    }
+}
+
+pub fn validate_demo(input: &ValidateDemoInput) -> ValidateDemoOutput {
+    let manifest = match Manifest::load(Path::new(&input.manifest_path)) {
+        Ok(m) => m,
+        Err(e) => {
+            return ValidateDemoOutput {
+                schema_version: SCHEMA_VERSION.to_string(),
+                status: DemoStatus::Error,
+                title: None,
+                beats: Vec::new(),
+                error: Some(StructuredError::config(e)),
+            };
+        }
+    };
+
+    let dir = manifest_dir(&input.manifest_path);
+    let mut beats = Vec::new();
+    let mut all_passed = true;
+    let mut any_error = false;
+    for (idx, beat) in manifest.beats.iter().enumerate() {
+        let report = run_beat(&dir, &manifest, beat);
+        all_passed &= report.passed();
+        if report.runs.iter().any(|r| r.failure.is_some()) {
+            any_error = true;
+        }
+        beats.push(beat_report_to_summary(idx, &report));
+    }
+
+    let status = if any_error {
+        DemoStatus::Error
+    } else if all_passed {
+        DemoStatus::Passed
+    } else {
+        DemoStatus::Failed
+    };
+
+    ValidateDemoOutput {
+        schema_version: SCHEMA_VERSION.to_string(),
+        status,
+        title: manifest.title.clone(),
+        beats,
+        error: None,
+    }
+}
+
+pub fn append_beat(input: &AppendBeatInput) -> AppendBeatOutput {
+    let manifest_path = Path::new(&input.manifest_path);
+    let mut manifest = match Manifest::load(manifest_path) {
+        Ok(m) => m,
+        Err(e) => {
+            return AppendBeatOutput {
+                schema_version: SCHEMA_VERSION.to_string(),
+                status: DemoStatus::Error,
+                written: false,
+                beat: None,
+                error: Some(StructuredError::config(e)),
+            };
+        }
+    };
+
+    let beat = Beat {
+        title: input.title.clone(),
+        variant: input.variant.clone(),
+        compare: input.compare.clone(),
+        scenario: input.scenario.clone(),
+        replay: None,
+        note: input.note.clone(),
+        expect: input.expect.clone(),
+        expect_per_variant: input.expect_per_variant.clone(),
+    };
+
+    manifest.beats.push(beat.clone());
+    if let Err(e) = manifest.validate() {
+        return AppendBeatOutput {
+            schema_version: SCHEMA_VERSION.to_string(),
+            status: DemoStatus::Error,
+            written: false,
+            beat: None,
+            error: Some(StructuredError::config(e)),
+        };
+    }
+
+    let dir = manifest_dir(&input.manifest_path);
+    let report = run_beat(&dir, &manifest, &beat);
+    let runnable = report.runs.iter().all(|r| r.failure.is_none());
+    let summary = beat_report_to_summary(manifest.beats.len() - 1, &report);
+
+    let mut written = false;
+    if !input.validate_only && runnable {
+        if let Err(e) = fs::write(manifest_path, manifest.to_json()) {
+            return AppendBeatOutput {
+                schema_version: SCHEMA_VERSION.to_string(),
+                status: DemoStatus::Error,
+                written: false,
+                beat: Some(summary),
+                error: Some(StructuredError::io(format!(
+                    "failed to write manifest {}: {}",
+                    input.manifest_path, e
+                ))),
+            };
+        }
+        written = true;
+    }
+
+    let status = if !runnable {
+        DemoStatus::Error
+    } else if report.passed() {
+        DemoStatus::Passed
+    } else {
+        DemoStatus::Failed
+    };
+
+    AppendBeatOutput {
+        schema_version: SCHEMA_VERSION.to_string(),
+        status,
+        written,
+        beat: Some(summary),
+        error: None,
+    }
+}
+
+pub fn export_demo_doc(input: &ExportDemoDocInput) -> ExportDemoDocOutput {
+    let manifest = match Manifest::load(Path::new(&input.manifest_path)) {
+        Ok(m) => m,
+        Err(e) => {
+            return ExportDemoDocOutput {
+                schema_version: SCHEMA_VERSION.to_string(),
+                status: DemoStatus::Error,
+                written_path: None,
+                error: Some(StructuredError::config(e)),
+            };
+        }
+    };
+
+    let dir = manifest_dir(&input.manifest_path);
+    let (markdown, all_passed) = demo::render_doc(&dir, &manifest);
+
+    match fs::write(&input.out_path, markdown) {
+        Ok(()) => ExportDemoDocOutput {
+            schema_version: SCHEMA_VERSION.to_string(),
+            status: if all_passed {
+                DemoStatus::Passed
+            } else {
+                DemoStatus::Failed
+            },
+            written_path: Some(input.out_path.clone()),
+            error: None,
+        },
+        Err(e) => ExportDemoDocOutput {
+            schema_version: SCHEMA_VERSION.to_string(),
+            status: DemoStatus::Error,
+            written_path: None,
+            error: Some(StructuredError::io(format!(
+                "failed to write doc {}: {}",
+                input.out_path, e
+            ))),
+        },
+    }
 }
