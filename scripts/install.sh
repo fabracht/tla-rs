@@ -135,7 +135,7 @@ echo "dir:      ${INSTALL_DIR}"
 mkdir -p "$INSTALL_DIR"
 
 CHECKSUMS_FILE="$(mktemp -t tla-checksums.XXXXXX)"
-trap 'rm -f "$CHECKSUMS_FILE"' EXIT
+trap 'rm -f "$CHECKSUMS_FILE" "${INSTALL_DIR}"/.*.tmp.$$' EXIT
 CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${RESOLVED_VERSION}/SHA256SUMS"
 if ! curl --fail --silent --show-error --location --output "$CHECKSUMS_FILE" "$CHECKSUMS_URL"; then
     echo "error: SHA256SUMS asset missing from ${RESOLVED_VERSION} release." >&2
@@ -159,16 +159,18 @@ verify_and_install() {
     fi
 
     echo "  downloading ${asset}..."
-    curl --fail --silent --show-error --location --output "$target" "$url"
-    actual="$($HASHER "$target" | awk '{print $1}')"
+    local tmp_target="${INSTALL_DIR}/.${binary}.tmp.$$"
+    curl --fail --silent --show-error --location --output "$tmp_target" "$url"
+    actual="$($HASHER "$tmp_target" | awk '{print $1}')"
     if [[ "$expected" != "$actual" ]]; then
         echo "error: checksum mismatch for ${asset}" >&2
         echo "  expected: ${expected}" >&2
         echo "  actual:   ${actual}" >&2
-        rm -f "$target"
+        rm -f "$tmp_target"
         exit 1
     fi
-    chmod +x "$target"
+    chmod +x "$tmp_target"
+    mv -f "$tmp_target" "$target"
     echo "  installed: ${target} (sha256 verified)"
 }
 
