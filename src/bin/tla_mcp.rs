@@ -9,9 +9,9 @@ use tla_checker::mcp::{
     runner,
     schema::{
         AppendBeatInput, AppendBeatOutput, CheckSpecInput, CheckSpecOutput, ExportDemoDocInput,
-        ExportDemoDocOutput, ListInvariantsInput, ListInvariantsOutput, ReplayScenarioInput,
-        ReplayScenarioOutput, ValidateDemoInput, ValidateDemoOutput, ValidateSpecInput,
-        ValidateSpecOutput,
+        ExportDemoDocOutput, ExportDemoHtmlInput, ExportDemoHtmlOutput, ListInvariantsInput,
+        ListInvariantsOutput, ReplayScenarioInput, ReplayScenarioOutput, ValidateDemoInput,
+        ValidateDemoOutput, ValidateSpecInput, ValidateSpecOutput,
     },
 };
 
@@ -117,6 +117,21 @@ impl TlaMcpServer {
             .await
             .map_err(|e| {
                 McpError::internal_error(format!("export_demo_doc task join error: {}", e), None)
+            })?;
+        Ok(Json(output))
+    }
+
+    #[tool(
+        description = "Render a demo manifest to a self-contained HTML walkthrough at `out_path`. Same content as export_demo_doc but as a single offline file (no external resources, nothing leaves the file) with an interactive viewer: step through each beat, compare variants side by side, see per-step state diffs and the verified ✓/✗ assertions. Use this to share a runnable demo for a talk or review without requiring the recipient to install tla. status reflects whether all beats passed; the file is written either way."
+    )]
+    async fn export_demo_html(
+        &self,
+        Parameters(input): Parameters<ExportDemoHtmlInput>,
+    ) -> Result<Json<ExportDemoHtmlOutput>, McpError> {
+        let output = tokio::task::spawn_blocking(move || runner::export_demo_html(&input))
+            .await
+            .map_err(|e| {
+                McpError::internal_error(format!("export_demo_html task join error: {}", e), None)
             })?;
         Ok(Json(output))
     }

@@ -5,8 +5,8 @@ use serde_json::json;
 use tla_checker::mcp::runner;
 use tla_checker::mcp::schema::{
     AppendBeatInput, CheckOutcome, CheckSpecInput, DemoStatus, ErrorPhase, ExportDemoDocInput,
-    LimitKind, ListInvariantsInput, ReplayScenarioInput, ScenarioStatus, ValidateDemoInput,
-    ValidateSpecInput, ValidationStatus,
+    ExportDemoHtmlInput, LimitKind, ListInvariantsInput, ReplayScenarioInput, ScenarioStatus,
+    ValidateDemoInput, ValidateSpecInput, ValidationStatus,
 };
 
 fn pass_spec(name: &str) -> String {
@@ -1238,6 +1238,26 @@ expect = ["final: x = 1"]
     let reloaded = runner::validate_demo(&ValidateDemoInput { manifest_path: mp });
     assert_eq!(reloaded.beats.len(), 2);
     assert!(matches!(reloaded.status, DemoStatus::Passed));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn export_demo_html_writes_self_contained_file() {
+    let dir = unique_temp_dir("html_export");
+    let out_path = dir.join("walk.html").to_string_lossy().to_string();
+
+    let out = runner::export_demo_html(&ExportDemoHtmlInput {
+        manifest_path: "test_cases/demo/Counter.demo.json".to_string(),
+        out_path: out_path.clone(),
+    });
+    assert!(matches!(out.status, DemoStatus::Passed), "{:?}", out.error);
+    assert_eq!(out.written_path.as_deref(), Some(out_path.as_str()));
+
+    let contents = std::fs::read_to_string(&out_path).unwrap();
+    assert!(contents.contains("Counter overflow demo"));
+    assert!(contents.contains("const DATA ="));
+    assert!(!contents.contains("https://"), "must stay self-contained");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

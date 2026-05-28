@@ -677,3 +677,20 @@ pub struct ExportDemoDocOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<StructuredError>,
 }
+
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+pub struct ExportDemoHtmlInput {
+    pub manifest_path: String,
+    pub out_path: String,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct ExportDemoHtmlOutput {
+    #[serde(default = "schema_version_default")]
+    pub schema_version: String,
+    pub status: DemoStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub written_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<StructuredError>,
+}

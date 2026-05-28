@@ -18,11 +18,12 @@ use super::SCHEMA_VERSION;
 use super::schema::{
     ActionSummary, AppendBeatInput, AppendBeatOutput, AssertionSummary, BeatSummary, CheckOutcome,
     CheckSpecInput, CheckSpecOutput, CheckStatsSummary, ConstantBinding, DemoStatus,
-    DemoTraceState, ErrorPhase, ExportDemoDocInput, ExportDemoDocOutput, InvariantSummary,
-    LimitKind, ListInvariantsInput, ListInvariantsOutput, ParseWarning, PropertySummary,
-    ReplayScenarioInput, ReplayScenarioOutput, ScenarioFailureInfo, ScenarioTraceState, SourceSpan,
-    SpecSummary, StateSnapshot, StructuredError, TlaValue, ValidateDemoInput, ValidateDemoOutput,
-    ValidateSpecInput, ValidateSpecOutput, VariantRunSummary,
+    DemoTraceState, ErrorPhase, ExportDemoDocInput, ExportDemoDocOutput, ExportDemoHtmlInput,
+    ExportDemoHtmlOutput, InvariantSummary, LimitKind, ListInvariantsInput, ListInvariantsOutput,
+    ParseWarning, PropertySummary, ReplayScenarioInput, ReplayScenarioOutput, ScenarioFailureInfo,
+    ScenarioTraceState, SourceSpan, SpecSummary, StateSnapshot, StructuredError, TlaValue,
+    ValidateDemoInput, ValidateDemoOutput, ValidateSpecInput, ValidateSpecOutput,
+    VariantRunSummary,
 };
 
 pub struct LoadedSpec {
@@ -708,6 +709,45 @@ pub fn export_demo_doc(input: &ExportDemoDocInput) -> ExportDemoDocOutput {
             written_path: None,
             error: Some(StructuredError::io(format!(
                 "failed to write doc {}: {}",
+                input.out_path, e
+            ))),
+        },
+    }
+}
+
+pub fn export_demo_html(input: &ExportDemoHtmlInput) -> ExportDemoHtmlOutput {
+    let manifest = match Manifest::load(Path::new(&input.manifest_path)) {
+        Ok(m) => m,
+        Err(e) => {
+            return ExportDemoHtmlOutput {
+                schema_version: SCHEMA_VERSION.to_string(),
+                status: DemoStatus::Error,
+                written_path: None,
+                error: Some(StructuredError::config(e)),
+            };
+        }
+    };
+
+    let dir = manifest_dir(&input.manifest_path);
+    let (html, all_passed) = demo::render_html(&dir, &manifest);
+
+    match fs::write(&input.out_path, html) {
+        Ok(()) => ExportDemoHtmlOutput {
+            schema_version: SCHEMA_VERSION.to_string(),
+            status: if all_passed {
+                DemoStatus::Passed
+            } else {
+                DemoStatus::Failed
+            },
+            written_path: Some(input.out_path.clone()),
+            error: None,
+        },
+        Err(e) => ExportDemoHtmlOutput {
+            schema_version: SCHEMA_VERSION.to_string(),
+            status: DemoStatus::Error,
+            written_path: None,
+            error: Some(StructuredError::io(format!(
+                "failed to write html {}: {}",
                 input.out_path, e
             ))),
         },
