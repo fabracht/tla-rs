@@ -602,4 +602,28 @@ Next == Inc \/ Dec
         let result = execute_scenario(&spec, &scenario, &domains).unwrap();
         assert!(result.failure.is_some());
     }
+
+    #[test]
+    fn action_pins_top_level_existential() {
+        let src = r#"---- MODULE T ----
+EXTENDS Integers
+VARIABLES y, z
+Init == y = 0 /\ z = 0
+ConjAction == y' = 1 /\ z' = 0
+TopExists == \E q \in 1..3 : y' = q /\ z' = 1
+Next == ConjAction \/ TopExists
+===="#;
+        let spec = crate::parser::parse(src).expect("spec parses");
+        let domains = Env::new();
+        let scenario = parse_scenario("action: TopExists; y' = 2").unwrap();
+        let result = execute_scenario(&spec, &scenario, &domains).unwrap();
+        assert!(
+            result.failure.is_none(),
+            "an action whose body is a top-level existential must be pinnable by name"
+        );
+        assert_eq!(
+            result.states.last().unwrap().1.values,
+            vec![Value::Int(2), Value::Int(1)]
+        );
+    }
 }
