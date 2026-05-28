@@ -22,6 +22,13 @@
 - `tla-mcp` exits on client disconnect, on SIGTERM/SIGINT, and on parent death (Linux `PR_SET_PDEATHSIG`) — prevents orphaned servers lingering for days.
 - `scripts/install.sh` downloads to a temp file and atomically renames over the target, avoiding `ETXTBSY` and clobbering a running binary.
 
+### Previously unreleased
+
+v0.5.1 is the first published release since v0.4.3. The 0.4.4 and 0.4.5 changelog entries below were never tagged, so their changes ship here for the first time too (full detail in their sections):
+
+- **0.4.5** — `tla-mcp` per-action transition counts (`CheckStatsSummary.actions`, sorted worst-first), `CheckSpecOutput.advisories` budget warnings (`max_depth > 100` / `max_states > 1_000_000`), and `docs/MCP_OBSERVABILITY.md`; `validate_spec`/`check_spec` tool descriptions now flag bounded vs. unbounded `Nat` / `Seq(T)` in `TypeOK` and document `max_seconds` as a soft bound checked between states.
+- **0.4.4** — tuple-binding destructuring wherever a single-variable binder worked (quantifiers, set comprehensions, `CHOOSE`, function definitions; arbitrary nesting) and unbounded `CHOOSE x : x = e`; release and test builds no longer fail to link `tla-mcp` under `lto = "fat"` (lib `crate-type` narrowed to `rlib`, wasm adds `cdylib` on the command line).
+
 ## [0.4.5] - 2026-05-25
 
 ### Added
