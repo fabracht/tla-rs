@@ -1,0 +1,92 @@
+# Human-authored equivalent of TimeIntegrity.demo.json.
+# `tla --present` accepts .toml or .json; the MCP tools emit JSON, humans can
+# write TOML. Run: tla --present TimeIntegrity.demo.toml [--validate]
+
+schema_version = "1"
+title = "Time-integrity alert state machine"
+
+# Three variants over one spec + cfg. The cfg sets MaxTime=12, Tol=2,
+# MinPlausible=3; each variant below flips a single constant.
+[variants.guard]
+spec = "TimeIntegrity.tla"
+config = "TimeIntegrity.cfg"
+
+[variants.noguard]
+spec = "TimeIntegrity.tla"
+config = "TimeIntegrity.cfg"
+constants = { MinPlausible = "0" } # disable the pre-init guard
+
+[variants.tol_loose]
+spec = "TimeIntegrity.tla"
+config = "TimeIntegrity.cfg"
+constants = { Tol = "5" } # widen the jump tolerance
+
+# Beat 1 — the same events on both variants; only the guard differs.
+[[beats]]
+title = "Pre-init guard prevents a first-boot false positive"
+compare = ["guard", "noguard"]
+scenario = [
+  "action: BootCheck",
+  "action: Tick",
+  "action: Tick",
+  "action: Tick",
+  "action: NTPSync",
+  "action: Tick",
+  "action: NTPSync",
+]
+note = "Dead-RTC boot (wallClock starts at 0). With the guard, BootCheck defers below MinPlausible and the first plausible NTP seeds cleanly. Without it, BootCheck seeds prevSample=0, so the first NTP looks like a huge forward jump and raises a false alert that self-clears on the next sync."
+[beats.expect_per_variant]
+guard = ["all: tampered = FALSE"]
+noguard = ["step 5: tampered = TRUE", "final: tampered = FALSE"]
+
+# Beat 2 — a real forward jump: detected, blocks one NTP, then clears.
+[[beats]]
+title = "Honest forward jump: detected, blocks one NTP, then clears"
+variant = "guard"
+scenario = [
+  "action: Tick",
+  "action: Tick",
+  "action: Tick",
+  "action: BootCheck",
+  "action: TamperWallClock; wallClock' = 9",
+  "action: BootCheck",
+  "action: NTPSync",
+  "action: Tick",
+  "action: NTPSync",
+]
+note = "After a clean seed (floor=3), wallClock jumps to 9. Stale-floor check raises at step 6; the first NTP still sees a jump and stays raised (step 7); the next stable NTP clears it (step 9)."
+expect = ["step 6: tampered = TRUE", "step 7: tampered = TRUE", "final: tampered = FALSE"]
+
+# Beat 3 — a forward-poisoned floor that survives a reboot.
+[[beats]]
+title = "Forward-poisoned floor stays raised across a reboot"
+variant = "guard"
+scenario = [
+  "action: Tick",
+  "action: Tick",
+  "action: Tick",
+  "action: BootCheck",
+  "action: TamperWallClock; wallClock' = 11",
+  "action: Cadence",
+  "action: Reboot; wallClock' = 11",
+  "action: NTPSync",
+]
+note = "A Cadence write under a spoofed-high wallClock pushes the persisted floor to 11 and raises the alert. The poisoned floor survives the reboot, and because it is still ahead of real time, the post-reboot NTP cannot clear it."
+expect = ["step 6: tampered = TRUE", "step 6: floor = 11", "final: tampered = TRUE"]
+
+# Beat 4 — tolerance decides whether a moderate jump is an attack.
+[[beats]]
+title = "Tolerance decides whether a moderate jump is an attack"
+compare = ["guard", "tol_loose"]
+scenario = [
+  "action: Tick",
+  "action: Tick",
+  "action: Tick",
+  "action: BootCheck",
+  "action: TamperWallClock; wallClock' = 7",
+  "action: BootCheck",
+]
+note = "Same |7-3|=4 forward jump against floor=3. Tol=2 exceeds tolerance and raises; Tol=5 stays quiet. Same spec, one constant flipped."
+[beats.expect_per_variant]
+guard = ["final: tampered = TRUE"]
+tol_loose = ["final: tampered = FALSE"]

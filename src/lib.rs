@@ -1,6 +1,8 @@
 pub mod ast;
 pub mod checker;
 pub mod config;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo;
 pub mod diagnostic;
 pub mod eval;
 pub mod export;
@@ -9,6 +11,8 @@ pub mod graph;
 pub mod interactive;
 pub mod lexer;
 pub mod liveness;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod load;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod mcp;
 #[cfg(not(target_arch = "wasm32"))]
@@ -21,6 +25,8 @@ pub mod span;
 pub mod stdlib;
 pub mod substitution;
 pub mod symmetry;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod trace_io;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 

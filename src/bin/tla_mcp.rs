@@ -8,8 +8,10 @@ use rmcp::{
 use tla_checker::mcp::{
     runner,
     schema::{
-        CheckSpecInput, CheckSpecOutput, ListInvariantsInput, ListInvariantsOutput,
-        ReplayScenarioInput, ReplayScenarioOutput, ValidateSpecInput, ValidateSpecOutput,
+        AppendBeatInput, AppendBeatOutput, CheckSpecInput, CheckSpecOutput, ExportDemoDocInput,
+        ExportDemoDocOutput, ExportDemoHtmlInput, ExportDemoHtmlOutput, ListInvariantsInput,
+        ListInvariantsOutput, ReplayScenarioInput, ReplayScenarioOutput, ValidateDemoInput,
+        ValidateDemoOutput, ValidateSpecInput, ValidateSpecOutput,
     },
 };
 
@@ -60,7 +62,7 @@ impl TlaMcpServer {
     }
 
     #[tool(
-        description = "Replay a guided scenario through a spec, step by step. Each scenario line is `step: <TLA+ expression>` — the checker picks the unique next-state transition that satisfies the expression (unprimed vars refer to the current state, primed vars `x'` to the candidate next state). Returns the same StateSnapshot shape as check_spec, plus per-step `changes` strings showing which variables flipped. Use this for teaching specific failure paths, reproducing user-reported traces, or verifying a fix exercises the exact transition you expect. status='failed' means no transition satisfied a step — the response includes `available_actions` at that point so you can diagnose the mismatch."
+        description = "Replay a guided scenario through a spec, step by step. Each scenario line is either `step: <TLA+ expression>` (the checker picks the next-state transition satisfying the expression — unprimed vars refer to the current state, primed vars `x'` to the candidate next state, and cfg/`constants` resolve inside the expression) or `action: <Name>` (pin the transition to the named action; optionally `action: <Name>; <expression>` to constrain it further). Prefer `action:` over adding a synthetic tag variable to the spec. Returns the same StateSnapshot shape as check_spec, plus per-step `changes` strings showing which variables flipped. Use this for teaching specific failure paths, reproducing user-reported traces, or verifying a fix exercises the exact transition you expect. status='failed' means no transition satisfied a step — the response includes `available_actions` at that point so you can diagnose the mismatch."
     )]
     async fn replay_scenario(
         &self,
@@ -70,6 +72,66 @@ impl TlaMcpServer {
             .await
             .map_err(|e| {
                 McpError::internal_error(format!("scenario task join error: {}", e), None)
+            })?;
+        Ok(Json(output))
+    }
+
+    #[tool(
+        description = "Validate a demo manifest (a JSON or TOML file next to the spec bundling named `variants` and ordered `beats`; humans tend to author TOML, the MCP emits JSON). Runs every beat — each beat is a `scenario` (step:/action: lines) or a `replay`, run against one `variant` or several via `compare` — and checks its `expect`/`expect_per_variant` assertions (`final:` / `all:` / `never:` / `step N:` predicates) against the resulting trace. Returns per-beat, per-variant pass/fail with the full trace, so you can confirm a demo behaves as described WITHOUT re-running replay_scenario by hand and eyeballing each trace. status='passed' (all assertions hold), 'failed' (some assertion false), or 'error' (a beat could not run — bad spec/scenario/variant reference)."
+    )]
+    async fn validate_demo(
+        &self,
+        Parameters(input): Parameters<ValidateDemoInput>,
+    ) -> Result<Json<ValidateDemoOutput>, McpError> {
+        let output = tokio::task::spawn_blocking(move || runner::validate_demo(&input))
+            .await
+            .map_err(|e| {
+                McpError::internal_error(format!("validate_demo task join error: {}", e), None)
+            })?;
+        Ok(Json(output))
+    }
+
+    #[tool(
+        description = "Append a beat to a demo manifest and validate it in one step. Provide `title`, a `scenario` (step:/action: lines), `variant` OR `compare` (variant names that must already exist in the manifest), an optional `note`, and `expect`/`expect_per_variant` assertions. The beat is run before writing and is only persisted when every assertion passes: if it cannot run (bad scenario/variant) status='error' and nothing is written, and if it runs but an assertion is false status='failed' and nothing is written (the response carries the failing assertions so you can fix `expect` and call again). Set `validate_only: true` to preview the beat's result WITHOUT persisting — use this to iterate on expectations, then call again without it to write the now-passing beat. When persisted, `written` is true; the manifest is rewritten in its own format (a `.toml` file stays TOML, otherwise JSON), so appending to a human's TOML does not clobber it. This is the authoring loop: craft a scenario, append_beat to check + record it, instead of running replay_scenario and hand-maintaining a separate doc."
+    )]
+    async fn append_beat(
+        &self,
+        Parameters(input): Parameters<AppendBeatInput>,
+    ) -> Result<Json<AppendBeatOutput>, McpError> {
+        let output = tokio::task::spawn_blocking(move || runner::append_beat(&input))
+            .await
+            .map_err(|e| {
+                McpError::internal_error(format!("append_beat task join error: {}", e), None)
+            })?;
+        Ok(Json(output))
+    }
+
+    #[tool(
+        description = "Render a demo manifest to a Markdown walkthrough at `out_path`. Runs every beat and writes a document with each beat's title, note, scenario steps, and the VERIFIED expectation results (✓/✗ per assertion) per variant. The doc is generated and tested — it reflects actual trace outcomes, not hand-written prose — so it stays in sync with the spec. status reflects whether all beats passed; the file is written either way."
+    )]
+    async fn export_demo_doc(
+        &self,
+        Parameters(input): Parameters<ExportDemoDocInput>,
+    ) -> Result<Json<ExportDemoDocOutput>, McpError> {
+        let output = tokio::task::spawn_blocking(move || runner::export_demo_doc(&input))
+            .await
+            .map_err(|e| {
+                McpError::internal_error(format!("export_demo_doc task join error: {}", e), None)
+            })?;
+        Ok(Json(output))
+    }
+
+    #[tool(
+        description = "Render a demo manifest to a self-contained HTML walkthrough at `out_path`. Same content as export_demo_doc but as a single offline file (no external resources, nothing leaves the file) with an interactive viewer: step through each beat, compare variants side by side, see per-step state diffs and the verified ✓/✗ assertions. Use this to share a runnable demo for a talk or review without requiring the recipient to install tla. status reflects whether all beats passed; the file is written either way."
+    )]
+    async fn export_demo_html(
+        &self,
+        Parameters(input): Parameters<ExportDemoHtmlInput>,
+    ) -> Result<Json<ExportDemoHtmlOutput>, McpError> {
+        let output = tokio::task::spawn_blocking(move || runner::export_demo_html(&input))
+            .await
+            .map_err(|e| {
+                McpError::internal_error(format!("export_demo_html task join error: {}", e), None)
             })?;
         Ok(Json(output))
     }
@@ -109,9 +171,48 @@ impl ServerHandler for TlaMcpServer {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn request_parent_death_signal() {
+    unsafe {
+        libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn request_parent_death_signal() {}
+
+#[cfg(unix)]
+async fn wait_for_shutdown_signal() -> bool {
+    use tokio::signal::unix::{SignalKind, signal};
+    let (mut term, mut interrupt) = match (
+        signal(SignalKind::terminate()),
+        signal(SignalKind::interrupt()),
+    ) {
+        (Ok(term), Ok(interrupt)) => (term, interrupt),
+        _ => return false,
+    };
+    tokio::select! {
+        _ = term.recv() => true,
+        _ = interrupt.recv() => true,
+    }
+}
+
+#[cfg(not(unix))]
+async fn wait_for_shutdown_signal() -> bool {
+    tokio::signal::ctrl_c().await.is_ok()
+}
+
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    request_parent_death_signal();
+
+    tokio::spawn(async {
+        if wait_for_shutdown_signal().await {
+            std::process::exit(0);
+        }
+    });
+
     let running = TlaMcpServer.serve(stdio()).await?;
     running.waiting().await?;
-    Ok(())
+    std::process::exit(0);
 }

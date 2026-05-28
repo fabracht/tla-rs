@@ -265,9 +265,9 @@ pub struct CheckStatsSummary {
     pub transitions: u64,
     pub max_depth_reached: u64,
     pub elapsed_secs: f64,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ActionSummary>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub property_stats: Vec<PropertySummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub violation_count: Option<u64>,
@@ -563,5 +563,211 @@ impl SourceSpan {
             end_line: end_line as u32,
             end_column: end_column as u32,
         }
+    }
+}
+
+#[derive(Serialize, JsonSchema, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum DemoStatus {
+    Passed,
+    Failed,
+    Error,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct AssertionSummary {
+    pub expectation: String,
+    pub passed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct DemoTraceState {
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changes: Vec<String>,
+    pub state: StateSnapshot,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct VariantRunSummary {
+    pub variant: String,
+    pub passed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assertions: Vec<AssertionSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trace: Vec<DemoTraceState>,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct BeatSummary {
+    pub index: usize,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub passed: bool,
+    pub runs: Vec<VariantRunSummary>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+pub struct ValidateDemoInput {
+    pub manifest_path: String,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct ValidateDemoOutput {
+    #[serde(default = "schema_version_default")]
+    pub schema_version: String,
+    pub status: DemoStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beats: Vec<BeatSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<StructuredError>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+pub struct AppendBeatInput {
+    pub manifest_path: String,
+    pub title: String,
+    #[serde(default)]
+    pub variant: Option<String>,
+    #[serde(default)]
+    pub compare: Vec<String>,
+    pub scenario: Vec<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub expect: Vec<String>,
+    #[serde(default)]
+    pub expect_per_variant: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub validate_only: bool,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct AppendBeatOutput {
+    #[serde(default = "schema_version_default")]
+    pub schema_version: String,
+    pub status: DemoStatus,
+    pub written: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub beat: Option<BeatSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<StructuredError>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+pub struct ExportDemoDocInput {
+    pub manifest_path: String,
+    pub out_path: String,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct ExportDemoDocOutput {
+    #[serde(default = "schema_version_default")]
+    pub schema_version: String,
+    pub status: DemoStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub written_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<StructuredError>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+pub struct ExportDemoHtmlInput {
+    pub manifest_path: String,
+    pub out_path: String,
+}
+
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct ExportDemoHtmlOutput {
+    #[serde(default = "schema_version_default")]
+    pub schema_version: String,
+    pub status: DemoStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub written_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<StructuredError>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use schemars::schema_for;
+    use serde::Serialize;
+    use serde_json::Value;
+
+    fn required(schema: &Value) -> Vec<String> {
+        schema
+            .get("required")
+            .and_then(|r| r.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn keys(value: &Value) -> Vec<String> {
+        match value {
+            Value::Object(m) => m.keys().cloned().collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn assert_required_present<T: JsonSchema>(label: &str, sample: &impl Serialize) {
+        let schema = serde_json::to_value(schema_for!(T)).unwrap();
+        let serialized = serde_json::to_value(sample).unwrap();
+        let present = keys(&serialized);
+        let req = required(&schema);
+        let missing: Vec<&String> = req.iter().filter(|r| !present.contains(r)).collect();
+        assert!(
+            missing.is_empty(),
+            "{label}: schema marks {missing:?} required but a minimal response omits them \
+             (a strict MCP client rejects this with -32602)"
+        );
+    }
+
+    #[test]
+    fn empty_stats_satisfies_its_schema() {
+        assert_required_present::<CheckStatsSummary>(
+            "CheckStatsSummary",
+            &CheckStatsSummary::default(),
+        );
+    }
+
+    #[test]
+    fn passing_outcome_matches_its_oneof_branch() {
+        let outcome = CheckOutcome::Ok {
+            stats: CheckStatsSummary::default(),
+        };
+        let serialized = serde_json::to_value(&outcome).unwrap();
+        let schema = serde_json::to_value(schema_for!(CheckOutcome)).unwrap();
+        let branch = schema
+            .get("oneOf")
+            .and_then(|o| o.as_array())
+            .and_then(|branches| {
+                branches.iter().find(|b| {
+                    b.get("properties")
+                        .and_then(|p| p.get("status"))
+                        .and_then(|s| s.get("const"))
+                        .and_then(|c| c.as_str())
+                        == Some("ok")
+                })
+            })
+            .expect("ok branch present in CheckOutcome oneOf");
+        let present = keys(&serialized);
+        let req = required(branch);
+        let missing: Vec<&String> = req.iter().filter(|r| !present.contains(r)).collect();
+        assert!(
+            missing.is_empty(),
+            "ok outcome omits schema-required fields {missing:?}"
+        );
     }
 }

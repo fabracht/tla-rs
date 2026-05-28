@@ -5,11 +5,55 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::ast::{Env, Spec, State, Transition, TransitionWithGuards};
-use crate::eval::Definitions;
+use crate::eval::{Definitions, make_primed_names, next_states, next_states_with_guards};
 
 use super::render::{ui, ui_replay};
 use super::repl::{eval_repl, test_hypothesis};
 use super::state::{ExplorerState, InputMode};
+
+pub(super) fn enter_free_exploration(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    start: State,
+    spec: &Spec,
+    env: &mut Env,
+    defs: &Definitions,
+) -> io::Result<()> {
+    let primed = make_primed_names(&spec.vars);
+    let (initial_actions, guards) = match &spec.next {
+        Some(next_expr) => {
+            let actions =
+                next_states(next_expr, &start, &spec.vars, &primed, env, defs).unwrap_or_default();
+            let guards = next_states_with_guards(next_expr, &start, &spec.vars, &primed, env, defs)
+                .unwrap_or_else(|_| {
+                    actions
+                        .iter()
+                        .map(|t| TransitionWithGuards {
+                            transition: t.clone(),
+                            guards: Vec::new(),
+                            parameter_bindings: Vec::new(),
+                        })
+                        .collect()
+                });
+            (actions, guards)
+        }
+        None => (Vec::new(), Vec::new()),
+    };
+
+    let mut free = ExplorerState::new(start.clone(), initial_actions.clone(), guards.clone());
+    free.status_message = Some((
+        "Free exploration — [Enter] take action, [b]acktrack, [e] repl, [q] back to demo".into(),
+        false,
+    ));
+    let mut ctx = AppContext {
+        spec,
+        env,
+        defs,
+        initial: &start,
+        initial_actions: &initial_actions,
+        initial_actions_with_guards: &guards,
+    };
+    run_app(terminal, &mut free, &mut ctx)
+}
 
 pub(super) struct AppContext<'a> {
     pub spec: &'a Spec,
@@ -321,6 +365,9 @@ pub(super) fn run_replay_app(
                 KeyCode::Char('e') => {
                     explorer.input_mode = InputMode::Repl;
                     explorer.repl_output = None;
+                }
+                KeyCode::Char('f') => {
+                    enter_free_exploration(terminal, explorer.current.clone(), spec, env, defs)?;
                 }
                 _ => {}
             }

@@ -819,3 +819,100 @@ fn render_status(f: &mut Frame, area: Rect, explorer: &ExplorerState) {
     let status_widget = Paragraph::new(status);
     f.render_widget(status_widget, area);
 }
+
+pub(super) fn ui_present(
+    f: &mut Frame,
+    explorer: &ExplorerState,
+    header: &super::present::PresentHeader,
+    spec: &Spec,
+    env: &Env,
+    defs: &Definitions,
+) {
+    let objective_height = if spec.invariants.is_empty() {
+        0
+    } else {
+        3 + spec.invariants.len().min(4) as u16
+    };
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Length(objective_height),
+            Constraint::Min(6),
+            Constraint::Length(4),
+            Constraint::Length(1),
+        ])
+        .split(f.area());
+
+    render_present_header(f, chunks[0], header);
+    render_objectives(f, chunks[1], &explorer.current, spec, env, defs);
+    render_state(f, chunks[2], &explorer.current, &spec.vars);
+    render_replay_trace(f, chunks[3], explorer);
+    render_present_hints(f, chunks[4], header);
+}
+
+fn render_present_header(f: &mut Frame, area: Rect, header: &super::present::PresentHeader) {
+    let mut lines: Vec<Line> = vec![Line::from(vec![
+        Span::styled(
+            format!("Beat {}/{}: ", header.beat_index + 1, header.beat_total),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            header.title.clone(),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])];
+
+    let mut meta = vec![Span::styled(
+        format!("variant {}", header.variant),
+        Style::default().fg(Color::Yellow),
+    )];
+    if header.variant_total > 1 {
+        meta.push(Span::styled(
+            format!(" [{}/{}]", header.variant_index + 1, header.variant_total),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    meta.push(Span::styled(
+        format!("   step {}/{}", header.step, header.step_total),
+        Style::default().fg(Color::DarkGray),
+    ));
+    lines.push(Line::from(meta));
+
+    if let Some(note) = &header.note {
+        lines.push(Line::from(Span::styled(
+            note.clone(),
+            Style::default().fg(Color::Gray),
+        )));
+    }
+
+    let widget = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Presentation "),
+        )
+        .wrap(Wrap { trim: true });
+    f.render_widget(widget, area);
+}
+
+fn render_present_hints(f: &mut Frame, area: Rect, header: &super::present::PresentHeader) {
+    let mut spans = vec![
+        Span::styled("n/p", Style::default().fg(Color::Cyan)),
+        Span::raw(" step  "),
+        Span::styled("←/→", Style::default().fg(Color::Cyan)),
+        Span::raw(" beat  "),
+    ];
+    if header.variant_total > 1 {
+        spans.push(Span::styled("v", Style::default().fg(Color::Cyan)));
+        spans.push(Span::raw(" variant  "));
+    }
+    spans.push(Span::styled("f", Style::default().fg(Color::Cyan)));
+    spans.push(Span::raw(" explore  "));
+    spans.push(Span::styled("q", Style::default().fg(Color::Cyan)));
+    spans.push(Span::raw(" quit"));
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}

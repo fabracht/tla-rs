@@ -8,6 +8,10 @@ use crate::parser::parse_expr;
 #[derive(Debug, Clone)]
 pub enum ScenarioStep {
     Condition(Expr),
+    Action {
+        name: Arc<str>,
+        condition: Option<Expr>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -38,7 +42,37 @@ pub fn parse_scenario(input: &str) -> Result<Scenario, String> {
             continue;
         }
 
-        if let Some(expr_text) = line.strip_prefix("step:") {
+        if let Some(rest) = line.strip_prefix("action:") {
+            let rest = rest.trim();
+            let (name_part, cond_part) = match rest.split_once(';') {
+                Some((name, cond)) => (name.trim(), Some(cond.trim())),
+                None => (rest, None),
+            };
+            if name_part.is_empty() {
+                return Err(format!(
+                    "line {}: 'action:' requires an action name",
+                    line_num + 1
+                ));
+            }
+            let condition = match cond_part {
+                Some(cond) if !cond.is_empty() => match parse_expr(cond) {
+                    Ok(expr) => Some(expr),
+                    Err(e) => {
+                        return Err(format!(
+                            "line {}: failed to parse condition '{}': {}",
+                            line_num + 1,
+                            cond,
+                            e.message
+                        ));
+                    }
+                },
+                _ => None,
+            };
+            steps.push(ScenarioStep::Action {
+                name: name_part.into(),
+                condition,
+            });
+        } else if let Some(expr_text) = line.strip_prefix("step:") {
             let expr_text = expr_text.trim();
             match parse_expr(expr_text) {
                 Ok(expr) => steps.push(ScenarioStep::Condition(expr)),
@@ -53,7 +87,7 @@ pub fn parse_scenario(input: &str) -> Result<Scenario, String> {
             }
         } else {
             return Err(format!(
-                "line {}: expected 'step: <expression>', found '{}'",
+                "line {}: expected 'step: <expression>' or 'action: <Name>', found '{}'",
                 line_num + 1,
                 line
             ));
@@ -69,6 +103,15 @@ pub fn execute_scenario(
     constants: &Env,
 ) -> Result<ScenarioResult, EvalError> {
     let defs = build_definitions(spec);
+    execute_scenario_with(spec, scenario, constants, &defs)
+}
+
+pub fn execute_scenario_with(
+    spec: &Spec,
+    scenario: &Scenario,
+    constants: &Env,
+    defs: &Definitions,
+) -> Result<ScenarioResult, EvalError> {
     let mut env = constants.clone();
 
     let init_expr = spec
@@ -79,7 +122,7 @@ pub fn execute_scenario(
         .next
         .as_ref()
         .ok_or_else(|| EvalError::domain_error("scenario mode requires Next definition"))?;
-    let init_states = crate::eval::init_states(init_expr, &spec.vars, &env, &defs)?;
+    let init_states = crate::eval::init_states(init_expr, &spec.vars, &env, defs)?;
     let Some(mut current_state) = init_states.into_iter().next() else {
         return Err(EvalError::domain_error("no initial states"));
     };
@@ -105,11 +148,17 @@ pub fn execute_scenario(
             &spec.vars,
             &primed_vars,
             &mut env,
-            &defs,
+            defs,
         )?;
 
-        let matching =
-            find_matching_transition(&successors, step, &current_state, &defs, &spec.vars)?;
+        let matching = find_matching_transition(
+            &successors,
+            step,
+            &current_state,
+            constants,
+            defs,
+            &spec.vars,
+        )?;
 
         match matching {
             Some((transition, changes)) => {
@@ -163,11 +212,12 @@ fn find_matching_transition(
     successors: &[Transition],
     step: &ScenarioStep,
     current: &State,
+    constants: &Env,
     defs: &Definitions,
     vars: &[Arc<str>],
 ) -> Result<Option<(Transition, Vec<String>)>, EvalError> {
     for transition in successors {
-        if matches_step(current, &transition.state, step, defs, vars)? {
+        if matches_step(current, transition, step, constants, defs, vars)? {
             let changes = compute_changes(current, &transition.state, vars);
             return Ok(Some((transition.clone(), changes)));
         }
@@ -177,29 +227,52 @@ fn find_matching_transition(
 
 fn matches_step(
     current: &State,
-    next: &State,
+    transition: &Transition,
     step: &ScenarioStep,
+    constants: &Env,
     defs: &Definitions,
     vars: &[Arc<str>],
 ) -> Result<bool, EvalError> {
     match step {
         ScenarioStep::Condition(expr) => {
-            let mut env = build_scenario_env(current, next, &Env::new(), vars);
-            match crate::eval::eval(expr, &mut env, defs) {
-                Ok(Value::Bool(b)) => Ok(b),
-                Ok(other) => Err(EvalError::TypeMismatch {
-                    expected: "Bool",
-                    got: other,
-                    context: Some("scenario condition"),
-                    span: None,
-                }),
-                Err(e) => Err(e),
+            eval_condition(current, &transition.state, expr, constants, defs, vars)
+        }
+        ScenarioStep::Action { name, condition } => {
+            if transition.action.as_deref() != Some(name.as_ref()) {
+                return Ok(false);
+            }
+            match condition {
+                Some(expr) => {
+                    eval_condition(current, &transition.state, expr, constants, defs, vars)
+                }
+                None => Ok(true),
             }
         }
     }
 }
 
-fn compute_changes(current: &State, next: &State, vars: &[Arc<str>]) -> Vec<String> {
+fn eval_condition(
+    current: &State,
+    next: &State,
+    expr: &Expr,
+    constants: &Env,
+    defs: &Definitions,
+    vars: &[Arc<str>],
+) -> Result<bool, EvalError> {
+    let mut env = build_scenario_env(current, next, constants, vars);
+    match crate::eval::eval(expr, &mut env, defs) {
+        Ok(Value::Bool(b)) => Ok(b),
+        Ok(other) => Err(EvalError::TypeMismatch {
+            expected: "Bool",
+            got: other,
+            context: Some("scenario condition"),
+            span: None,
+        }),
+        Err(e) => Err(e),
+    }
+}
+
+pub(crate) fn compute_changes(current: &State, next: &State, vars: &[Arc<str>]) -> Vec<String> {
     let mut changes = Vec::new();
 
     for (i, var) in vars.iter().enumerate() {
@@ -347,6 +420,12 @@ pub fn format_scenario_result(
                     output.push_str(&format!("Condition: {}\n", format_expr(expr)));
                 }
             }
+            ScenarioStep::Action { name, condition } => match condition {
+                Some(expr) => {
+                    output.push_str(&format!("Action: {} where {}\n", name, format_expr(expr)));
+                }
+                None => output.push_str(&format!("Action: {}\n", name)),
+            },
         }
 
         if !changes.is_empty() && idx > 0 {
@@ -377,6 +456,12 @@ pub fn format_scenario_result(
             ScenarioStep::Condition(expr) => {
                 output.push_str(&format!("  Condition: {}\n", format_expr(expr)));
             }
+            ScenarioStep::Action { name, condition } => match condition {
+                Some(expr) => {
+                    output.push_str(&format!("  Action: {} where {}\n", name, format_expr(expr)));
+                }
+                None => output.push_str(&format!("  Action: {}\n", name)),
+            },
         }
         output.push_str(&format!("  Reason: {}\n", failure.message));
 
@@ -441,5 +526,80 @@ mod tests {
         let input = "s1: activate";
         let result = parse_scenario(input);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_action_step() {
+        let scenario = parse_scenario("action: NTPSync").unwrap();
+        assert_eq!(scenario.steps.len(), 1);
+        match &scenario.steps[0] {
+            ScenarioStep::Action { name, condition } => {
+                assert_eq!(name.as_ref(), "NTPSync");
+                assert!(condition.is_none());
+            }
+            _ => panic!("expected action step"),
+        }
+    }
+
+    #[test]
+    fn parse_action_step_with_condition() {
+        let scenario = parse_scenario("action: Inc; x' > x").unwrap();
+        match &scenario.steps[0] {
+            ScenarioStep::Action { name, condition } => {
+                assert_eq!(name.as_ref(), "Inc");
+                assert!(condition.is_some());
+            }
+            _ => panic!("expected action step"),
+        }
+    }
+
+    #[test]
+    fn reject_empty_action() {
+        assert!(parse_scenario("action:").is_err());
+    }
+
+    fn inc_dec_spec() -> (Spec, Env) {
+        let src = r#"---- MODULE T ----
+EXTENDS Integers
+CONSTANT N
+VARIABLES x
+Init == x = 0
+Inc == x' = x + 1
+Dec == x' = x - 1
+Next == Inc \/ Dec
+===="#;
+        let spec = crate::parser::parse(src).expect("spec parses");
+        let mut domains = Env::new();
+        domains.insert("N".into(), Value::Int(3));
+        (spec, domains)
+    }
+
+    #[test]
+    fn constant_resolves_in_step_predicate() {
+        let (spec, domains) = inc_dec_spec();
+        let scenario = parse_scenario("step: x' = x + 1 /\\ N = 3").unwrap();
+        let result = execute_scenario(&spec, &scenario, &domains).expect("constant should resolve");
+        assert!(result.failure.is_none());
+        assert_eq!(result.states.len(), 2);
+    }
+
+    #[test]
+    fn action_pins_named_transition() {
+        let (spec, domains) = inc_dec_spec();
+        let scenario = parse_scenario("action: Dec").unwrap();
+        let result = execute_scenario(&spec, &scenario, &domains).unwrap();
+        assert!(result.failure.is_none());
+        assert_eq!(
+            result.states.last().unwrap().1.values.first(),
+            Some(&Value::Int(-1))
+        );
+    }
+
+    #[test]
+    fn unknown_action_fails_without_match() {
+        let (spec, domains) = inc_dec_spec();
+        let scenario = parse_scenario("action: Nope").unwrap();
+        let result = execute_scenario(&spec, &scenario, &domains).unwrap();
+        assert!(result.failure.is_some());
     }
 }
