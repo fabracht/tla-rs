@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.4] - 2026-05-28
+
+### Fixed
+
+- Release workflow: the `Build WASM engine` job pinned `wasm-bindgen-cli` to a hardcoded version that mismatched the `wasm-bindgen` dependency CI resolved (the repo has no committed `Cargo.lock`), which failed the binary build and skipped the GitHub release for 0.5.3. The CLI version is now derived from the resolved dependency. The 0.5.3 crate was published to crates.io and npm; this release ships the prebuilt `tla`/`tla-mcp` binaries (with the embedded explorable-HTML engine) and the GitHub release that 0.5.3 missed.
+
 ## [0.5.3] - 2026-05-28
 
 ### Added
