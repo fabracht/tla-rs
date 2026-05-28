@@ -4,14 +4,17 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-use crate::ast::{Env, Spec, Value};
+use crate::ast::{Env, Spec, State, Value};
 use crate::checker::{
     CheckResult, CheckStats, CheckerConfig, PrepareSpecError, check, format_eval_error,
-    format_trace,
+    format_trace, format_value,
 };
 use crate::config::{apply_config, parse_cfg};
+use crate::eval::{Definitions, eval, init_states, make_primed_names, next_states};
 use crate::export::DotMode;
-use crate::parser::parse;
+use crate::parser::{parse, parse_expr};
+use crate::scenario::compute_changes;
+use crate::trace_io::{json_to_state, state_to_json, value_to_json};
 
 #[derive(Serialize, Deserialize, Default)]
 struct WasmCheckOptions {
@@ -429,6 +432,204 @@ fn result_to_wasm(
     }
 }
 
+fn err_json(msg: &str) -> String {
+    serde_json::json!({ "ok": false, "error": msg }).to_string()
+}
+
+fn prepare_explorer(
+    spec_source: &str,
+    cfg_source: &str,
+    constants_json: &str,
+) -> Result<(Spec, Env, Definitions), String> {
+    let mut spec = parse(spec_source).map_err(|e| format!("{e:?}"))?;
+
+    let mut domains = Env::new();
+    let mut config = CheckerConfig::default();
+    if !cfg_source.trim().is_empty() {
+        let cfg = parse_cfg(cfg_source)?;
+        apply_config(&cfg, &mut spec, &mut domains, &mut config, &[], &[], false)?;
+    }
+    apply_constants_json(&mut domains, constants_json);
+
+    #[cfg(target_arch = "wasm32")]
+    let prepared = crate::checker::prepare_spec(&spec, &domains);
+    #[cfg(not(target_arch = "wasm32"))]
+    let prepared = crate::checker::prepare_spec(&spec, &domains, None, true);
+
+    let (env, defs) = prepared.map_err(|e| format!("{e:?}"))?;
+    Ok((spec, env, defs))
+}
+
+fn state_payload(state: &State, vars: &[Arc<str>]) -> serde_json::Value {
+    let mut display = serde_json::Map::new();
+    for (i, var) in vars.iter().enumerate() {
+        if let Some(val) = state.values.get(i) {
+            display.insert(
+                var.to_string(),
+                serde_json::Value::String(format_value(val)),
+            );
+        }
+    }
+    serde_json::json!({
+        "json": state_to_json(state, vars),
+        "display": display,
+    })
+}
+
+fn state_with_env(env: &Env, state: &State, vars: &[Arc<str>]) -> Env {
+    let mut out = env.clone();
+    for (i, var) in vars.iter().enumerate() {
+        if let Some(val) = state.values.get(i) {
+            out.insert(var.clone(), val.clone());
+        }
+    }
+    out
+}
+
+#[wasm_bindgen]
+pub fn explore_init(spec_source: &str, cfg_source: &str, constants_json: &str) -> String {
+    let (spec, env, defs) = match prepare_explorer(spec_source, cfg_source, constants_json) {
+        Ok(t) => t,
+        Err(e) => return err_json(&e),
+    };
+    let Some(init) = &spec.init else {
+        return err_json("spec has no Init");
+    };
+    let states = match init_states(init, &spec.vars, &env, &defs) {
+        Ok(s) => s,
+        Err(e) => return err_json(&format_eval_error(&e)),
+    };
+    let payloads: Vec<_> = states
+        .iter()
+        .map(|s| state_payload(s, &spec.vars))
+        .collect();
+    serde_json::json!({
+        "ok": true,
+        "vars": spec.vars.iter().map(|v| v.to_string()).collect::<Vec<_>>(),
+        "states": payloads,
+    })
+    .to_string()
+}
+
+#[wasm_bindgen]
+pub fn explore_next(
+    spec_source: &str,
+    cfg_source: &str,
+    constants_json: &str,
+    state_json: &str,
+) -> String {
+    let (spec, mut env, defs) = match prepare_explorer(spec_source, cfg_source, constants_json) {
+        Ok(t) => t,
+        Err(e) => return err_json(&e),
+    };
+    let Some(next) = &spec.next else {
+        return err_json("spec has no Next");
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(state_json) {
+        Ok(v) => v,
+        Err(e) => return err_json(&format!("invalid state JSON: {e}")),
+    };
+    let Some(current) = json_to_state(&parsed, &spec.vars) else {
+        return err_json("could not parse state");
+    };
+
+    let primed = make_primed_names(&spec.vars);
+    let transitions = match next_states(next, &current, &spec.vars, &primed, &mut env, &defs) {
+        Ok(t) => t,
+        Err(e) => return err_json(&format_eval_error(&e)),
+    };
+
+    let out: Vec<_> = transitions
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "action": t.action.as_ref().map(|a| a.to_string()),
+                "state": state_payload(&t.state, &spec.vars),
+                "changes": compute_changes(&current, &t.state, &spec.vars),
+            })
+        })
+        .collect();
+    serde_json::json!({ "ok": true, "transitions": out }).to_string()
+}
+
+#[wasm_bindgen]
+pub fn explore_eval(
+    spec_source: &str,
+    cfg_source: &str,
+    constants_json: &str,
+    state_json: &str,
+    expr_source: &str,
+) -> String {
+    let (spec, env, defs) = match prepare_explorer(spec_source, cfg_source, constants_json) {
+        Ok(t) => t,
+        Err(e) => return err_json(&e),
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(state_json) {
+        Ok(v) => v,
+        Err(e) => return err_json(&format!("invalid state JSON: {e}")),
+    };
+    let Some(current) = json_to_state(&parsed, &spec.vars) else {
+        return err_json("could not parse state");
+    };
+    let expr = match parse_expr(expr_source) {
+        Ok(e) => e,
+        Err(e) => return err_json(&format!("parse error: {}", e.message)),
+    };
+    let mut eval_env = state_with_env(&env, &current, &spec.vars);
+    match eval(&expr, &mut eval_env, &defs) {
+        Ok(value) => serde_json::json!({
+            "ok": true,
+            "value": format_value(&value),
+            "json": value_to_json(&value),
+        })
+        .to_string(),
+        Err(e) => err_json(&format_eval_error(&e)),
+    }
+}
+
+#[wasm_bindgen]
+pub fn explore_invariants(
+    spec_source: &str,
+    cfg_source: &str,
+    constants_json: &str,
+    state_json: &str,
+) -> String {
+    let (spec, env, defs) = match prepare_explorer(spec_source, cfg_source, constants_json) {
+        Ok(t) => t,
+        Err(e) => return err_json(&e),
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(state_json) {
+        Ok(v) => v,
+        Err(e) => return err_json(&format!("invalid state JSON: {e}")),
+    };
+    let Some(current) = json_to_state(&parsed, &spec.vars) else {
+        return err_json("could not parse state");
+    };
+
+    let results: Vec<_> = spec
+        .invariants
+        .iter()
+        .enumerate()
+        .map(|(i, inv)| {
+            let name = spec
+                .invariant_names
+                .get(i)
+                .and_then(|n| n.as_ref())
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| format!("Inv{i}"));
+            let mut eval_env = state_with_env(&env, &current, &spec.vars);
+            match eval(inv, &mut eval_env, &defs) {
+                Ok(Value::Bool(b)) => serde_json::json!({ "name": name, "holds": b }),
+                Ok(_) => {
+                    serde_json::json!({ "name": name, "error": "invariant is not a boolean" })
+                }
+                Err(e) => serde_json::json!({ "name": name, "error": format_eval_error(&e) }),
+            }
+        })
+        .collect();
+    serde_json::json!({ "ok": true, "invariants": results }).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -722,5 +923,92 @@ Next == x' = x
         let result = run(spec, serde_json::json!({}));
         assert!(!result.success);
         assert_eq!(result.error_type.as_deref(), Some("AssumeError"));
+    }
+
+    fn json(s: &str) -> serde_json::Value {
+        serde_json::from_str(s).expect("valid json")
+    }
+
+    #[test]
+    fn explore_init_returns_initial_state() {
+        let out = json(&explore_init(COUNTER_SPEC, "", "{}"));
+        assert_eq!(out["ok"], true, "{out}");
+        assert_eq!(out["vars"], serde_json::json!(["count"]));
+        assert_eq!(out["states"].as_array().unwrap().len(), 1);
+        assert_eq!(out["states"][0]["json"]["count"], 0);
+        assert_eq!(out["states"][0]["display"]["count"], "0");
+    }
+
+    #[test]
+    fn explore_next_lists_named_successors() {
+        let out = json(&explore_next(COUNTER_SPEC, "", "{}", r#"{"count": 0}"#));
+        assert_eq!(out["ok"], true, "{out}");
+        let ts = out["transitions"].as_array().unwrap();
+        assert!(ts.iter().any(|t| t["state"]["json"]["count"] == 1));
+        assert!(ts.iter().any(|t| {
+            t["changes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c.as_str().unwrap().contains("count"))
+        }));
+    }
+
+    #[test]
+    fn explore_eval_evaluates_against_state() {
+        let out = json(&explore_eval(
+            COUNTER_SPEC,
+            "",
+            "{}",
+            r#"{"count": 2}"#,
+            "count + 1",
+        ));
+        assert_eq!(out["ok"], true, "{out}");
+        assert_eq!(out["value"], "3");
+    }
+
+    #[test]
+    fn explore_eval_reports_parse_error() {
+        let out = json(&explore_eval(
+            COUNTER_SPEC,
+            "",
+            "{}",
+            r#"{"count": 0}"#,
+            "count +",
+        ));
+        assert_eq!(out["ok"], false);
+        assert!(out["error"].as_str().unwrap().contains("parse error"));
+    }
+
+    #[test]
+    fn explore_invariants_evaluates_at_state() {
+        let holds = json(&explore_invariants(
+            COUNTER_SPEC,
+            "",
+            "{}",
+            r#"{"count": 2}"#,
+        ));
+        assert_eq!(holds["ok"], true, "{holds}");
+        assert_eq!(holds["invariants"][0]["name"], "Inv");
+        assert_eq!(holds["invariants"][0]["holds"], true);
+
+        let fails = json(&explore_invariants(
+            COUNTER_SPEC,
+            "",
+            "{}",
+            r#"{"count": 9}"#,
+        ));
+        assert_eq!(fails["invariants"][0]["holds"], false);
+    }
+
+    #[test]
+    fn explore_with_constants_cfg() {
+        let out = json(&explore_init(
+            COUNTER_WITH_MAX_SPEC,
+            "CONSTANT MAX = 5\n",
+            "{}",
+        ));
+        assert_eq!(out["ok"], true, "{out}");
+        assert_eq!(out["states"][0]["json"]["count"], 0);
     }
 }

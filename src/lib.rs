@@ -25,7 +25,6 @@ pub mod span;
 pub mod stdlib;
 pub mod substitution;
 pub mod symmetry;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod trace_io;
 #[cfg(feature = "wasm")]
 pub mod wasm;

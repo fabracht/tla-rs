@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TLA+ demo walkthrough</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #2a2f3a; --fg: #e6e9ef;
+    --dim: #8b93a3; --accent: #6ea8fe; --ok: #4ec98a; --bad: #ff6b6b;
+    --chg: #3a2f12; --chgline: #d8a534;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  header { padding: 16px 22px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 19px; font-weight: 650; }
+  .tabs { display: flex; gap: 8px; }
+  .tab { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 7px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
+  .tab:hover { border-color: var(--accent); }
+  .tab.active { border-color: var(--accent); background: #1d2330; }
+  nav#beat-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 22px; border-bottom: 1px solid var(--line); }
+  .beat-tab {
+    background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 7px; padding: 7px 12px; cursor: pointer; font-size: 13px;
+  }
+  .beat-tab:hover { border-color: var(--accent); }
+  .beat-tab.active { border-color: var(--accent); background: #1d2330; }
+  .beat-tab.fail { border-left: 3px solid var(--bad); }
+  .beat-tab.pass { border-left: 3px solid var(--ok); }
+  main { padding: 20px 22px 60px; max-width: 1100px; }
+  main h2 { margin: 4px 0 6px; font-size: 18px; }
+  .note { color: var(--dim); margin: 0 0 16px; max-width: 760px; }
+  .scenario { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 14px; }
+  .sline { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--dim); padding: 2px 6px; border-radius: 4px; }
+  .sline.cur { color: var(--fg); background: #1d2330; }
+  .steps { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .steps button, .btn { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .steps button:hover, .btn:hover { border-color: var(--accent); }
+  .steps .pos { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .cols { display: flex; gap: 16px; flex-wrap: wrap; }
+  .col { flex: 1 1 280px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 260px; }
+  .vhead { font-weight: 650; margin-bottom: 4px; }
+  .label { color: var(--accent); font-family: ui-monospace, monospace; font-size: 13px; margin-bottom: 8px; }
+  table.state { width: 100%; border-collapse: collapse; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  table.state td { padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.state .vn { color: var(--dim); white-space: nowrap; }
+  table.state .vv { text-align: right; word-break: break-all; }
+  table.state tr.chg { background: var(--chg); }
+  table.state tr.chg .vv { color: var(--chgline); font-weight: 650; }
+  ul.asserts { list-style: none; margin: 12px 0 0; padding: 0; font-size: 13px; }
+  ul.asserts li { padding: 2px 0; }
+  code { font-family: ui-monospace, monospace; background: #1d2330; padding: 1px 5px; border-radius: 4px; }
+  .ok { color: var(--ok); }
+  .bad { color: var(--bad); }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+  .actions { display: flex; flex-direction: column; gap: 6px; }
+  .action-btn { text-align: left; font-family: ui-monospace, monospace; font-size: 13px; }
+  .action-btn .an { color: var(--accent); font-weight: 650; }
+  .action-btn .ac { color: var(--chgline); }
+  .crumbs { font-family: ui-monospace, monospace; font-size: 12px; color: var(--dim); margin-bottom: 10px; word-break: break-word; }
+  .crumbs .cur { color: var(--fg); }
+  select, input[type=text] { background: #1d2330; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
+  input[type=text] { width: 100%; font-family: ui-monospace, monospace; font-size: 13px; }
+  .repl-out { margin-top: 6px; font-family: ui-monospace, monospace; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+  .hint { color: var(--dim); font-size: 12px; }
+  footer { position: fixed; bottom: 0; left: 0; right: 0; padding: 8px 22px; background: var(--panel); border-top: 1px solid var(--line); color: var(--dim); font-size: 12px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="demo-title"></h1>
+  <div class="tabs">
+    <button class="tab active" id="tab-walk">Walkthrough</button>
+    <button class="tab" id="tab-explore">Explore</button>
+  </div>
+</header>
+
+<nav id="beat-list"></nav>
+<main id="beat-view"></main>
+
+<main id="explore-view" class="hidden"></main>
+
+<footer id="foot">← / → step &nbsp;·&nbsp; [ / ] beat &nbsp;·&nbsp; click a beat above</footer>
+
+<script type="module">
+/*WASM_GLUE*/
+
+const WASM_B64 = "/*WASM_B64*/";
+const DATA = /*DEMO_DATA*/;
+
+let engineReady = false;
+function ensureEngine() {
+  if (engineReady) return true;
+  try {
+    const bytes = Uint8Array.from(atob(WASM_B64), c => c.charCodeAt(0));
+    initSync({ module: bytes });
+    engineReady = true;
+  } catch (e) {
+    engineReady = false;
+    console.error("wasm init failed", e);
+  }
+  return engineReady;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/* ---------- Walkthrough (static, pre-computed beats) ---------- */
+let beatIdx = 0, step = 0;
+
+function maxStep(beat) {
+  return Math.max(0, ...beat.runs.map(r => r.trace.length - 1));
+}
+function badge(passed) {
+  return passed ? '<span class="ok">✓</span>' : '<span class="bad">✗</span>';
+}
+function renderBeatList() {
+  const nav = document.getElementById("beat-list");
+  nav.innerHTML = "";
+  DATA.beats.forEach((b, i) => {
+    const el = document.createElement("button");
+    el.className = "beat-tab " + (b.passed ? "pass" : "fail") + (i === beatIdx ? " active" : "");
+    el.textContent = (i + 1) + ". " + b.title + (b.passed ? "  ✓" : "  ✗");
+    el.onclick = () => { beatIdx = i; step = 0; renderWalk(); };
+    nav.appendChild(el);
+  });
+}
+function renderBeat() {
+  const beat = DATA.beats[beatIdx];
+  const top = maxStep(beat);
+  if (step > top) step = top;
+
+  let h = "";
+  h += "<h2>" + esc(beat.title) + " " + badge(beat.passed) + "</h2>";
+  if (beat.note) h += '<p class="note">' + esc(beat.note) + "</p>";
+
+  h += '<div class="scenario">';
+  beat.scenario.forEach((line, k) => {
+    h += '<div class="sline' + (k + 1 === step ? " cur" : "") + '">' + esc(line) + "</div>";
+  });
+  h += "</div>";
+
+  h += '<div class="steps">';
+  h += '<button id="prev">‹ prev</button>';
+  h += '<span class="pos">step ' + step + " / " + top + "</span>";
+  h += '<button id="next">next ›</button>';
+  h += "</div>";
+
+  h += '<div class="cols">';
+  beat.runs.forEach(run => {
+    h += '<div class="col">';
+    h += '<div class="vhead">' + esc(run.variant) + " " + badge(run.passed) + "</div>";
+    if (run.failure) h += '<div class="bad">error: ' + esc(run.failure) + "</div>";
+    const cur = run.trace[Math.min(step, run.trace.length - 1)];
+    const prev = step > 0 ? run.trace[Math.min(step - 1, run.trace.length - 1)] : null;
+    h += '<div class="label">' + esc(cur.label) + "</div>";
+    h += '<table class="state">';
+    run.vars.forEach(v => {
+      const val = cur.vars[v] !== undefined ? cur.vars[v] : "";
+      const changed = prev && prev.vars[v] !== val;
+      h += "<tr class=\"" + (changed ? "chg" : "") + "\">";
+      h += '<td class="vn">' + esc(v) + "</td>";
+      h += '<td class="vv">' + esc(val) + "</td></tr>";
+    });
+    h += "</table>";
+    if (run.assertions.length) {
+      h += '<ul class="asserts">';
+      run.assertions.forEach(a => {
+        let line = (a.passed ? "✓" : "✗") + " <code>" + esc(a.expectation) + "</code>";
+        if (!a.passed && a.detail) line += " — " + esc(a.detail);
+        h += '<li class="' + (a.passed ? "ok" : "bad") + '">' + line + "</li>";
+      });
+      h += "</ul>";
+    }
+    if (DATA.variants && DATA.variants[run.variant]) {
+      h += '<button class="btn explore-here" data-variant="' + esc(run.variant) +
+           '" data-step="' + step + '" style="margin-top:10px">Explore from this step ›</button>';
+    }
+    h += "</div>";
+  });
+  h += "</div>";
+
+  const view = document.getElementById("beat-view");
+  view.innerHTML = h;
+  document.getElementById("prev").onclick = () => { if (step > 0) { step--; renderWalk(); } };
+  document.getElementById("next").onclick = () => { if (step < maxStep(beat)) { step++; renderWalk(); } };
+  view.querySelectorAll(".explore-here").forEach(btn => {
+    btn.onclick = () => {
+      const variant = btn.getAttribute("data-variant");
+      const s = parseInt(btn.getAttribute("data-step"), 10);
+      const run = beat.runs.find(r => r.variant === variant);
+      const tr = run && run.trace[Math.min(s, run.trace.length - 1)];
+      seedExplorerFromBeat(variant, tr);
+    };
+  });
+}
+function renderWalk() {
+  document.getElementById("demo-title").textContent = DATA.title;
+  document.title = DATA.title;
+  renderBeatList();
+  renderBeat();
+}
+
+/* ---------- Explore (live wasm engine) ---------- */
+let exVariant = null;
+let exPath = [];     // [{label, payload}]
+let exError = null;
+
+function variantNames() {
+  return DATA.variants ? Object.keys(DATA.variants) : [];
+}
+function variantArgs(name) {
+  const v = DATA.variants[name];
+  return [v.spec, v.cfg || "", JSON.stringify(v.constants || {})];
+}
+function callJSON(fn, ...args) {
+  try { return JSON.parse(fn(...args)); }
+  catch (e) { return { ok: false, error: String(e) }; }
+}
+
+function startVariant(name) {
+  exVariant = name;
+  exPath = [];
+  exError = null;
+  if (!ensureEngine()) { exError = "WASM engine failed to initialize."; renderExplore(); return; }
+  const [spec, cfg, consts] = variantArgs(name);
+  const res = callJSON(explore_init, spec, cfg, consts);
+  if (!res.ok) { exError = res.error; renderExplore(); return; }
+  if (!res.states.length) { exError = "no initial states"; renderExplore(); return; }
+  exPath.push({ label: "Init", payload: res.states[0] });
+  renderExplore();
+}
+
+function seedExplorerFromBeat(variant, traceStep) {
+  showExplore();
+  exVariant = variant;
+  exError = null;
+  if (!ensureEngine()) { exError = "WASM engine failed to initialize."; renderExplore(); return; }
+  // Rebuild a payload from the trace step's display vars by round-tripping through the engine:
+  // re-run init then accept the trace's state as the starting point via its json if present.
+  if (traceStep && traceStep.json) {
+    exPath = [{ label: traceStep.label || "from beat", payload: { json: traceStep.json, display: traceStep.vars } }];
+  } else {
+    startVariant(variant);
+    return;
+  }
+  renderExplore();
+}
+
+function current() { return exPath[exPath.length - 1]; }
+
+function stateTable(payload, prevPayload) {
+  const vars = Object.keys(payload.display);
+  let h = '<table class="state">';
+  vars.forEach(v => {
+    const val = payload.display[v];
+    const changed = prevPayload && prevPayload.display[v] !== val;
+    h += '<tr class="' + (changed ? "chg" : "") + '">';
+    h += '<td class="vn">' + esc(v) + '</td><td class="vv">' + esc(val) + "</td></tr>";
+  });
+  h += "</table>";
+  return h;
+}
+
+function renderExplore() {
+  const view = document.getElementById("explore-view");
+  const names = variantNames();
+  let h = "";
+
+  h += '<div class="steps">';
+  h += '<label class="hint">variant&nbsp;</label><select id="ex-variant">';
+  names.forEach(n => {
+    h += '<option value="' + esc(n) + '"' + (n === exVariant ? " selected" : "") + ">" + esc(n) + "</option>";
+  });
+  h += "</select>";
+  h += '<button class="btn" id="ex-back">‹ back</button>';
+  h += '<button class="btn" id="ex-reset">reset to Init</button>';
+  h += "</div>";
+
+  if (exError) {
+    h += '<div class="bad">' + esc(exError) + "</div>";
+    view.innerHTML = h;
+    wireExploreControls();
+    return;
+  }
+  if (!exVariant || !exPath.length) {
+    h += '<p class="hint">Pick a variant to start exploring from its initial state.</p>';
+    view.innerHTML = h;
+    wireExploreControls();
+    return;
+  }
+
+  const cur = current();
+  const prev = exPath.length > 1 ? exPath[exPath.length - 2] : null;
+
+  h += '<div class="crumbs">';
+  h += exPath.map((p, i) => (i === exPath.length - 1
+    ? '<span class="cur">' + esc(p.label) + "</span>"
+    : esc(p.label))).join(" → ");
+  h += "</div>";
+
+  h += '<div class="row">';
+
+  // State + invariants column
+  h += '<div class="col">';
+  h += '<div class="vhead">State</div>';
+  h += stateTable(cur.payload, prev ? prev.payload : null);
+  const [spec, cfg, consts] = variantArgs(exVariant);
+  const inv = callJSON(explore_invariants, spec, cfg, consts, JSON.stringify(cur.payload.json));
+  if (inv.ok && inv.invariants.length) {
+    h += '<ul class="asserts">';
+    inv.invariants.forEach(i => {
+      if (i.error !== undefined) {
+        h += '<li class="bad">⚠ <code>' + esc(i.name) + "</code> — " + esc(i.error) + "</li>";
+      } else {
+        h += '<li class="' + (i.holds ? "ok" : "bad") + '">' + (i.holds ? "✓" : "✗") + " <code>" + esc(i.name) + "</code></li>";
+      }
+    });
+    h += "</ul>";
+  }
+  h += "</div>";
+
+  // Enabled actions column
+  h += '<div class="col">';
+  h += '<div class="vhead">Enabled actions</div>';
+  const nx = callJSON(explore_next, spec, cfg, consts, JSON.stringify(cur.payload.json));
+  if (!nx.ok) {
+    h += '<div class="bad">' + esc(nx.error) + "</div>";
+  } else if (!nx.transitions.length) {
+    h += '<div class="hint">(no successors — deadlock)</div>';
+  } else {
+    h += '<div class="actions">';
+    nx.transitions.forEach((t, i) => {
+      const name = t.action || "(unnamed)";
+      const chg = t.changes.join(", ");
+      h += '<button class="btn action-btn" data-i="' + i + '"><span class="an">→ ' + esc(name) + "</span>" +
+           (chg ? ' <span class="ac">' + esc(chg) + "</span>" : "") + "</button>";
+    });
+    h += "</div>";
+  }
+  h += "</div>";
+
+  // REPL column
+  h += '<div class="col">';
+  h += '<div class="vhead">Evaluate</div>';
+  h += '<input type="text" id="ex-repl" placeholder="TLA+ expression over current state, e.g. x + 1" />';
+  h += '<div class="repl-out" id="ex-repl-out"></div>';
+  h += '<div class="hint" style="margin-top:6px">Enter to evaluate. Unprimed vars = current state.</div>';
+  h += "</div>";
+
+  h += "</div>";
+
+  view.innerHTML = h;
+  wireExploreControls();
+
+  view.querySelectorAll(".action-btn").forEach(btn => {
+    btn.onclick = () => {
+      const i = parseInt(btn.getAttribute("data-i"), 10);
+      const t = nx.transitions[i];
+      exPath.push({ label: t.action || "step", payload: t.state });
+      renderExplore();
+    };
+  });
+
+  const repl = document.getElementById("ex-repl");
+  const out = document.getElementById("ex-repl-out");
+  repl.onkeydown = (e) => {
+    if (e.key !== "Enter") return;
+    const expr = repl.value.trim();
+    if (!expr) return;
+    const r = callJSON(explore_eval, spec, cfg, consts, JSON.stringify(cur.payload.json), expr);
+    if (r.ok) out.innerHTML = '<span class="ok">= ' + esc(r.value) + "</span>";
+    else out.innerHTML = '<span class="bad">' + esc(r.error) + "</span>";
+  };
+}
+
+function wireExploreControls() {
+  const sel = document.getElementById("ex-variant");
+  if (sel) sel.onchange = () => startVariant(sel.value);
+  const back = document.getElementById("ex-back");
+  if (back) back.onclick = () => { if (exPath.length > 1) { exPath.pop(); renderExplore(); } };
+  const reset = document.getElementById("ex-reset");
+  if (reset) reset.onclick = () => { if (exVariant) startVariant(exVariant); };
+}
+
+/* ---------- Tabs / navigation ---------- */
+function showWalk() {
+  document.getElementById("tab-walk").classList.add("active");
+  document.getElementById("tab-explore").classList.remove("active");
+  document.getElementById("beat-list").classList.remove("hidden");
+  document.getElementById("beat-view").classList.remove("hidden");
+  document.getElementById("explore-view").classList.add("hidden");
+  document.getElementById("foot").textContent = "← / → step  ·  [ / ] beat  ·  click a beat above";
+}
+function showExplore() {
+  document.getElementById("tab-walk").classList.remove("active");
+  document.getElementById("tab-explore").classList.add("active");
+  document.getElementById("beat-list").classList.add("hidden");
+  document.getElementById("beat-view").classList.add("hidden");
+  document.getElementById("explore-view").classList.remove("hidden");
+  document.getElementById("foot").textContent = "live exploration — click an action to step, back/reset to navigate";
+  if (!exVariant && variantNames().length) startVariant(variantNames()[0]);
+  else renderExplore();
+}
+
+document.getElementById("tab-walk").onclick = showWalk;
+document.getElementById("tab-explore").onclick = showExplore;
+
+document.addEventListener("keydown", e => {
+  if (!document.getElementById("explore-view").classList.contains("hidden")) return;
+  const beat = DATA.beats[beatIdx];
+  if (e.key === "ArrowRight") { if (step < maxStep(beat)) { step++; renderWalk(); } }
+  else if (e.key === "ArrowLeft") { if (step > 0) { step--; renderWalk(); } }
+  else if (e.key === "]") { beatIdx = (beatIdx + 1) % DATA.beats.length; step = 0; renderWalk(); }
+  else if (e.key === "[") { beatIdx = (beatIdx - 1 + DATA.beats.length) % DATA.beats.length; step = 0; renderWalk(); }
+});
+
+renderWalk();
+</script>
+</body>
+</html>
