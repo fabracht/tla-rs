@@ -35,6 +35,7 @@ pub fn render_html(manifest_dir: &Path, manifest: &Manifest) -> (String, bool) {
                             "label": step.label,
                             "changes": step.changes,
                             "vars": J::Object(vars),
+                            "json": crate::trace_io::state_to_json(&step.state, &run.vars),
                         })
                     })
                     .collect();
@@ -82,6 +83,139 @@ pub fn render_html(manifest_dir: &Path, manifest: &Manifest) -> (String, bool) {
         .replace("</", "<\\/");
 
     (TEMPLATE.replace("/*DEMO_DATA*/", &data_str), all_passed)
+}
+
+#[cfg(feature = "embed-wasm")]
+fn variant_constant_json(raw: &str) -> J {
+    match crate::config::parse_constant_value(raw) {
+        Some(value) => crate::trace_io::value_to_json(&value),
+        None => J::String(raw.to_string()),
+    }
+}
+
+#[cfg(feature = "embed-wasm")]
+fn build_variants(manifest_dir: &Path, manifest: &Manifest) -> J {
+    let mut map = Map::new();
+    for (name, variant) in &manifest.variants {
+        let spec = std::fs::read_to_string(manifest_dir.join(&variant.spec)).unwrap_or_default();
+        let cfg = match &variant.config {
+            Some(c) => std::fs::read_to_string(manifest_dir.join(c)).ok(),
+            None => {
+                std::fs::read_to_string(manifest_dir.join(&variant.spec).with_extension("cfg")).ok()
+            }
+        };
+        let constants: Map<String, J> = variant
+            .constants
+            .iter()
+            .map(|(k, raw)| (k.clone(), variant_constant_json(raw)))
+            .collect();
+        map.insert(
+            name.clone(),
+            json!({ "spec": spec, "cfg": cfg, "constants": J::Object(constants) }),
+        );
+    }
+    J::Object(map)
+}
+
+#[cfg(feature = "embed-wasm")]
+const EXPLORABLE_TEMPLATE: &str = include_str!("explorable.html");
+#[cfg(feature = "embed-wasm")]
+const WASM_BYTES: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/pkg/tla_checker_bg.wasm"
+));
+#[cfg(feature = "embed-wasm")]
+const WASM_GLUE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/pkg/tla_checker.js"));
+
+#[cfg(feature = "embed-wasm")]
+pub fn render_explorable(
+    manifest_dir: &Path,
+    manifest: &Manifest,
+) -> Result<(String, bool), String> {
+    use base64::Engine;
+
+    let mut all_passed = true;
+    let mut beats: Vec<J> = Vec::new();
+    for (idx, beat) in manifest.beats.iter().enumerate() {
+        let report = run_beat(manifest_dir, manifest, beat);
+        all_passed &= report.passed();
+        let runs: Vec<J> = report
+            .runs
+            .iter()
+            .map(|run| {
+                let trace: Vec<J> = run
+                    .trace
+                    .iter()
+                    .map(|step| {
+                        let mut vars = Map::new();
+                        for (i, name) in run.vars.iter().enumerate() {
+                            if let Some(value) = step.state.values.get(i) {
+                                vars.insert(name.to_string(), J::String(format_value(value)));
+                            }
+                        }
+                        json!({
+                            "label": step.label,
+                            "changes": step.changes,
+                            "vars": J::Object(vars),
+                            "json": crate::trace_io::state_to_json(&step.state, &run.vars),
+                        })
+                    })
+                    .collect();
+                let assertions: Vec<J> = run
+                    .assertions
+                    .iter()
+                    .map(
+                        |a| json!({ "expectation": a.raw, "passed": a.passed, "detail": a.detail }),
+                    )
+                    .collect();
+                json!({
+                    "variant": run.variant,
+                    "passed": run.passed(),
+                    "failure": run.failure,
+                    "vars": run.vars.iter().map(|v| v.to_string()).collect::<Vec<_>>(),
+                    "trace": trace,
+                    "assertions": assertions,
+                })
+            })
+            .collect();
+        beats.push(json!({
+            "index": idx,
+            "title": report.title,
+            "note": report.note,
+            "passed": report.passed(),
+            "scenario": beat.scenario,
+            "runs": runs,
+        }));
+    }
+
+    let data = json!({
+        "title": manifest.title.clone().unwrap_or_else(|| "TLA+ demo".to_string()),
+        "beats": beats,
+        "variants": build_variants(manifest_dir, manifest),
+    });
+    let data_str = serde_json::to_string(&data)
+        .unwrap_or_else(|_| "{}".to_string())
+        .replace("</", "<\\/");
+    let glue = WASM_GLUE.replace("</", "<\\/");
+    let b64 = base64::engine::general_purpose::STANDARD.encode(WASM_BYTES);
+
+    let html = EXPLORABLE_TEMPLATE
+        .replace("/*WASM_GLUE*/", &glue)
+        .replace("/*WASM_B64*/", &b64)
+        .replace("/*DEMO_DATA*/", &data_str);
+    Ok((html, all_passed))
+}
+
+#[cfg(not(feature = "embed-wasm"))]
+pub fn render_explorable(
+    _manifest_dir: &Path,
+    _manifest: &Manifest,
+) -> Result<(String, bool), String> {
+    Err(
+        "explorable HTML export requires building with --features embed-wasm \
+         (run `cargo make wasm` first to produce pkg/tla_checker_bg.wasm and pkg/tla_checker.js)"
+            .to_string(),
+    )
 }
 
 #[cfg(test)]

@@ -17,7 +17,7 @@ use tla_checker::checker::{
 };
 use tla_checker::config::{apply_config, parse_cfg, parse_constant_value, split_top_level};
 #[cfg(not(target_arch = "wasm32"))]
-use tla_checker::demo::{Manifest, render_doc, render_html, run_beat};
+use tla_checker::demo::{Manifest, render_doc, render_explorable, render_html, run_beat};
 use tla_checker::diagnostic::{ColorConfig, Diagnostic};
 use tla_checker::export::DotMode;
 #[cfg(not(target_arch = "wasm32"))]
@@ -109,7 +109,7 @@ fn run_present_export(manifest_path: &Path, out_path: &Path) -> ExitCode {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn run_present_export_html(manifest_path: &Path, out_path: &Path) -> ExitCode {
+fn run_present_export_html(manifest_path: &Path, out_path: &Path, explorable: bool) -> ExitCode {
     let manifest = match Manifest::load(manifest_path) {
         Ok(m) => m,
         Err(e) => {
@@ -118,7 +118,17 @@ fn run_present_export_html(manifest_path: &Path, out_path: &Path) -> ExitCode {
         }
     };
     let dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
-    let (html, all_passed) = render_html(dir, &manifest);
+    let (html, all_passed) = if explorable {
+        match render_explorable(dir, &manifest) {
+            Ok(result) => result,
+            Err(e) => {
+                eprintln!("error: {}", e);
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        render_html(dir, &manifest)
+    };
     if let Err(e) = fs::write(out_path, html) {
         eprintln!("failed to write {}: {}", out_path.display(), e);
         return ExitCode::FAILURE;
@@ -307,6 +317,8 @@ fn main() -> ExitCode {
     let mut export_md_path: Option<PathBuf> = None;
     #[cfg(not(target_arch = "wasm32"))]
     let mut export_html_path: Option<PathBuf> = None;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut explorable = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -498,6 +510,10 @@ fn main() -> ExitCode {
                 export_html_path = Some(PathBuf::from(&args[i]));
             }
             #[cfg(not(target_arch = "wasm32"))]
+            "--explorable" => {
+                explorable = true;
+            }
+            #[cfg(not(target_arch = "wasm32"))]
             "--interactive" | "-i" => {
                 interactive_mode = true;
             }
@@ -602,6 +618,9 @@ fn main() -> ExitCode {
                 println!(
                     "  --export-html FILE         With --present: write a self-contained HTML walkthrough"
                 );
+                println!(
+                    "  --explorable               With --export-html: embed the wasm engine for ad-hoc state exploration"
+                );
                 println!("  --interactive, -i          Interactive TUI exploration mode");
                 println!("  --help, -h                 Show this help");
                 println!();
@@ -645,7 +664,7 @@ fn main() -> ExitCode {
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(manifest_path) = present_path {
         if let Some(out) = export_html_path {
-            return run_present_export_html(&manifest_path, &out);
+            return run_present_export_html(&manifest_path, &out, explorable);
         }
         if let Some(out) = export_md_path {
             return run_present_export(&manifest_path, &out);

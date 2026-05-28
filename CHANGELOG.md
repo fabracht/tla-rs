@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.3] - 2026-05-28
+
+### Added
+
+- `tla --present <manifest> --export-html <file> --explorable` embeds the wasm model-checking engine directly in the exported HTML, turning the offline walkthrough into a live state explorer (like interactive CLI mode, in the browser). The "Explore" tab steps through enabled actions from any state, shows live invariant results (`✓`/`✗` per spec invariant) at each state, and includes a REPL for evaluating TLA+ expressions against the current state. Requires building with `--features embed-wasm` (run `cargo make wasm` first to produce the `pkg/` artifacts that get inlined); the engine is base64-inlined and instantiated synchronously, so the file stays fully self-contained and works over `file://`. File-based `INSTANCE` modules are not available in-browser (single-file specs only).
+- WASM bindings `explore_init` / `explore_next` / `explore_eval` / `explore_invariants` expose per-state stepping, successor enumeration, expression evaluation, and invariant checking to JS.
+
 ## [0.5.2] - 2026-05-27
 
 ### Fixed
