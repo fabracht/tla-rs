@@ -631,7 +631,19 @@ pub fn append_beat(input: &AppendBeatInput) -> AppendBeatOutput {
 
     let mut written = false;
     if !input.validate_only && runnable {
-        if let Err(e) = fs::write(manifest_path, manifest.to_json()) {
+        let serialized = match manifest.serialize_for(manifest_path) {
+            Ok(s) => s,
+            Err(e) => {
+                return AppendBeatOutput {
+                    schema_version: SCHEMA_VERSION.to_string(),
+                    status: DemoStatus::Error,
+                    written: false,
+                    beat: Some(summary),
+                    error: Some(StructuredError::config(e)),
+                };
+            }
+        };
+        if let Err(e) = fs::write(manifest_path, serialized) {
             return AppendBeatOutput {
                 schema_version: SCHEMA_VERSION.to_string(),
                 status: DemoStatus::Error,

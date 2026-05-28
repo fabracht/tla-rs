@@ -1157,3 +1157,87 @@ fn export_demo_doc_writes_markdown() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn validate_demo_loads_toml_manifest() {
+    let dir = unique_temp_dir("toml_load");
+    std::fs::copy("test_cases/demo/Counter.tla", dir.join("Counter.tla")).unwrap();
+    let manifest_path = dir.join("Counter.demo.toml");
+    std::fs::write(
+        &manifest_path,
+        r#"
+title = "toml demo"
+[variants.low]
+spec = "Counter.tla"
+constants = { Max = "2" }
+[[beats]]
+title = "one increment"
+variant = "low"
+scenario = ["action: Inc"]
+expect = ["final: x = 1", "all: x <= Max"]
+"#,
+    )
+    .unwrap();
+
+    let out = runner::validate_demo(&ValidateDemoInput {
+        manifest_path: manifest_path.to_string_lossy().to_string(),
+    });
+    assert!(matches!(out.status, DemoStatus::Passed), "{:?}", out.error);
+    assert_eq!(out.beats.len(), 1);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn append_beat_preserves_toml_format() {
+    let dir = unique_temp_dir("toml_append");
+    std::fs::copy("test_cases/demo/Counter.tla", dir.join("Counter.tla")).unwrap();
+    let manifest_path = dir.join("Counter.demo.toml");
+    std::fs::write(
+        &manifest_path,
+        r#"
+title = "toml demo"
+[variants.low]
+spec = "Counter.tla"
+constants = { Max = "2" }
+[[beats]]
+title = "one increment"
+variant = "low"
+scenario = ["action: Inc"]
+expect = ["final: x = 1"]
+"#,
+    )
+    .unwrap();
+    let mp = manifest_path.to_string_lossy().to_string();
+
+    let out = runner::append_beat(&AppendBeatInput {
+        manifest_path: mp.clone(),
+        title: "reset to zero".to_string(),
+        variant: Some("low".to_string()),
+        compare: Vec::new(),
+        scenario: vec!["action: Inc".to_string(), "action: Reset".to_string()],
+        note: None,
+        expect: vec!["final: x = 0".to_string()],
+        expect_per_variant: BTreeMap::new(),
+        validate_only: false,
+    });
+    assert!(matches!(out.status, DemoStatus::Passed), "{:?}", out.error);
+    assert!(out.written);
+
+    let written = std::fs::read_to_string(&manifest_path).unwrap();
+    assert!(
+        written.contains("[[beats]]"),
+        "file must stay TOML, got:\n{}",
+        written
+    );
+    assert!(
+        !written.trim_start().starts_with('{'),
+        "file must not become JSON"
+    );
+
+    let reloaded = runner::validate_demo(&ValidateDemoInput { manifest_path: mp });
+    assert_eq!(reloaded.beats.len(), 2);
+    assert!(matches!(reloaded.status, DemoStatus::Passed));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -77,7 +77,7 @@ impl TlaMcpServer {
     }
 
     #[tool(
-        description = "Validate a demo manifest (a JSON file next to the spec bundling named `variants` and ordered `beats`). Runs every beat — each beat is a `scenario` (step:/action: lines) or a `replay`, run against one `variant` or several via `compare` — and checks its `expect`/`expect_per_variant` assertions (`final:` / `all:` / `never:` / `step N:` predicates) against the resulting trace. Returns per-beat, per-variant pass/fail with the full trace, so you can confirm a demo behaves as described WITHOUT re-running replay_scenario by hand and eyeballing each trace. status='passed' (all assertions hold), 'failed' (some assertion false), or 'error' (a beat could not run — bad spec/scenario/variant reference)."
+        description = "Validate a demo manifest (a JSON or TOML file next to the spec bundling named `variants` and ordered `beats`; humans tend to author TOML, the MCP emits JSON). Runs every beat — each beat is a `scenario` (step:/action: lines) or a `replay`, run against one `variant` or several via `compare` — and checks its `expect`/`expect_per_variant` assertions (`final:` / `all:` / `never:` / `step N:` predicates) against the resulting trace. Returns per-beat, per-variant pass/fail with the full trace, so you can confirm a demo behaves as described WITHOUT re-running replay_scenario by hand and eyeballing each trace. status='passed' (all assertions hold), 'failed' (some assertion false), or 'error' (a beat could not run — bad spec/scenario/variant reference)."
     )]
     async fn validate_demo(
         &self,
@@ -92,7 +92,7 @@ impl TlaMcpServer {
     }
 
     #[tool(
-        description = "Append a beat to a demo manifest and validate it in one step. Provide `title`, a `scenario` (step:/action: lines), `variant` OR `compare` (variant names that must already exist in the manifest), an optional `note`, and `expect`/`expect_per_variant` assertions. The beat is run before writing: if it cannot run (bad scenario/variant) nothing is written and status='error'. Set `validate_only: true` to preview the beat's result WITHOUT persisting — use this to iterate on expectations, then call again without it to write. When persisted, `written` is true. This is the authoring loop: craft a scenario, append_beat to check + record it, instead of running replay_scenario and hand-maintaining a separate doc."
+        description = "Append a beat to a demo manifest and validate it in one step. Provide `title`, a `scenario` (step:/action: lines), `variant` OR `compare` (variant names that must already exist in the manifest), an optional `note`, and `expect`/`expect_per_variant` assertions. The beat is run before writing: if it cannot run (bad scenario/variant) nothing is written and status='error'. Set `validate_only: true` to preview the beat's result WITHOUT persisting — use this to iterate on expectations, then call again without it to write. When persisted, `written` is true; the manifest is rewritten in its own format (a `.toml` file stays TOML, otherwise JSON), so appending to a human's TOML does not clobber it. This is the authoring loop: craft a scenario, append_beat to check + record it, instead of running replay_scenario and hand-maintaining a separate doc."
     )]
     async fn append_beat(
         &self,
