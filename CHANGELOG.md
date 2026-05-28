@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.2] - 2026-05-27
+
+### Fixed
+
+- `action: <Name>` pinning in `replay_scenario` (and therefore `append_beat` / `validate_demo` beats and `--present` scenarios) could not match an action whose definition body is a top-level existential quantifier — `Op == \E x \in S: ...`. Those transitions were emitted unlabeled, so no `action: Op` line matched them and the user saw a misleading "no transition matches condition" even though the transition existed and was reachable. The action-name labeler descended through a top-level `\E` to name the inner body (which never equals the operator's stored body) before trying to match the whole `\E`; it now matches the whole existential against the operator definitions as a fallback. Affects the common `Action == \E p \in Procs: Step(p)` idiom. `available_actions` diagnostics and per-action stats now label these transitions by name as well.
+
 ## [0.5.1] - 2026-05-27
 
 ### Added
