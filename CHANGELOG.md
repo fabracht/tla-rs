@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.5.1] - 2026-05-27
+
+### Added
+
+- Demo present mode. A demo manifest (JSON or TOML beside the spec) bundles named `variants` (spec + cfg / inline constant overrides) and ordered `beats`; each beat runs a `scenario` or a `replay` against one `variant` or several via `compare`, and checks `expect` / `expect_per_variant` assertions (`final:` / `all:` / `never:` / `step N:`).
+  - `tla --present <manifest>` — guided TUI walkthrough: step beats, flip variants on compare beats, drop into live exploration mid-beat (`f`).
+  - `tla --present <manifest> --validate` — non-interactive pass/fail report.
+  - `tla --present <manifest> --export-md <file>` — generated, tested Markdown walkthrough.
+  - `tla --present <manifest> --export-html <file>` — self-contained offline HTML walkthrough (side-by-side variant compare, step navigation, change highlighting, inline assertion results).
+- Scenario `action: <Name>` / `action: <Name>; <predicate>` step kind pins a transition by action name, removing the need for a synthetic action-tag variable in specs.
+- `tla-mcp`: `validate_demo`, `append_beat` (format-preserving — a `.toml` manifest stays TOML), `export_demo_doc`, and `export_demo_html` tools.
+- `examples/time-integrity/` — a time-integrity alert state machine demo (3 variants, 4 beats; comparison beats + assertions), validated end to end.
+- `default-run = "tla"` so plain `cargo run` resolves to the CLI.
+
+### Fixed
+
+- `tla-mcp`: `CheckStatsSummary.actions` and `.property_stats` were marked required in the generated output schema but omitted from responses whenever empty (any passing spec with no count properties), so strict MCP clients rejected every `check_spec` response with `-32602` "structured content does not match the tool's output schema". Both fields now carry `#[serde(default)]` and are correctly optional in the schema.
+- `tla-mcp`: `append_beat` now persists a beat only when all its assertions pass; a beat that runs but fails an assertion returns status `failed` with the failing assertions and is not written.
+- Scenario step predicates now resolve cfg constants (the matching env previously dropped them).
+- `tla-mcp` exits on client disconnect, on SIGTERM/SIGINT, and on parent death (Linux `PR_SET_PDEATHSIG`) — prevents orphaned servers lingering for days.
+- `scripts/install.sh` downloads to a temp file and atomically renames over the target, avoiding `ETXTBSY` and clobbering a running binary.
+
 ## [0.4.5] - 2026-05-25
 
 ### Added
