@@ -2,7 +2,7 @@
 
 A TLA+ model checker and interactive exploration tool written in Rust.
 
-tla-rs verifies TLA+ specifications by exploring all reachable states, checking invariants, and reporting counterexamples. Beyond pass/fail checking, it provides an interactive TUI for stepping through state spaces, scenario-driven exploration, property satisfaction analytics with depth breakdowns, and parameter sweeps for sensitivity analysis. The core library compiles to WebAssembly, so it can be embedded in browser applications. It's designed as a lightweight alternative to the official TLC model checker for specs that fit its supported subset.
+tla-rs verifies TLA+ specifications by exploring all reachable states, checking invariants, and reporting counterexamples. Beyond pass/fail checking it offers an interactive TUI for stepping through state spaces, scenario-driven exploration, property-satisfaction analytics, parameter sweeps, tested demo walkthroughs (with an optional in-browser explorer), and an MCP server for agentic clients. The core library compiles to WebAssembly for browser embedding. It's a lightweight alternative to the official TLC model checker for specs that fit its supported subset.
 
 ## Installation
 
@@ -10,7 +10,7 @@ tla-rs verifies TLA+ specifications by exploring all reachable states, checking 
 cargo build --release
 ```
 
-The binary will be at `target/release/tla`.
+The binary will be at `target/release/tla`. Prebuilt binaries and the `tla-mcp` server are available via Homebrew, an install script, or GitHub releases — see the [MCP Server guide](MCP.md#install).
 
 ## Quick Start
 
@@ -44,302 +44,24 @@ Constants accept integers (`42`), booleans (`TRUE`), strings (`"hello"`), and se
 | `--sweep NAME=V1;V2;...` | Sweep a constant across values, compare results |
 | `--scenario TEXT` | Explore a specific scenario (or `@file`) |
 | `-i` | Interactive TUI exploration mode |
+| `--present FILE` | Run a demo manifest (`.json`/`.toml`); TUI walkthrough, or `--validate` for a pass/fail report |
+| `--export-md FILE` | With `--present`: write a Markdown walkthrough |
+| `--export-html FILE` | With `--present`: write a self-contained HTML walkthrough |
+| `--explorable` | With `--export-html`: embed the wasm engine for in-browser state exploration |
 | `--json` | JSON output |
 | `-v` | Verbose output (depth breakdowns, etc.) |
 
-## Configuration Files
-
-tla-rs supports TLC-compatible `.cfg` files. If `Spec.cfg` exists next to `Spec.tla`, it is loaded automatically. Use `--config PATH` to specify an explicit path.
-
-```
-CONSTANT RM = {rm1, rm2, rm3}
-INIT TPInit
-NEXT TPNext
-INVARIANT TPTypeOK
-CHECK_DEADLOCK TRUE
-```
-
-Supported directives: `INIT`/`NEXT`, `SPECIFICATION` (temporal formula in `Init /\ [][Next]_vars` form), `CONSTANT`/`CONSTANTS`, `INVARIANT`/`INVARIANTS`, `PROPERTY`/`PROPERTIES`, `SYMMETRY`, and `CHECK_DEADLOCK`. CLI flags override cfg values.
-
-## Scenarios
-
-Drive the checker along specific execution paths using TLA+ expressions:
-
-```bash
-tla spec.tla --scenario "step: count' = count + 1
-step: count' = count + 1
-step: count' = count + 1"
-```
-
-Or load from a file with `--scenario @scenario.txt`. Each `step:` line is a TLA+ predicate over current (unprimed) and next (primed) state variables.
-
-```
-step: x' > x                    # x increases
-step: "s1" \in active'          # s1 becomes active
-step: pc'["p1"] = "critical"    # p1 enters critical section
-```
-
-## Analytics
-
-These flags are for understanding *how* a protocol fails, not just *whether* it fails.
-
-Without `--continue`, the checker stops at the first violation. With it, all violations are collected and counted per-invariant across the full state space:
-
-```bash
-tla spec.tla --allow-deadlock --continue
-```
-
-`--count-satisfying` measures what fraction of reachable states satisfy a predicate. Add `--verbose` to get per-depth breakdowns showing at which exploration depth violations start appearing:
-
-```bash
-tla spec.tla --allow-deadlock --continue \
-  --count-satisfying InvSafety --verbose
-```
-
-`--sweep` varies a constant across multiple values and produces a comparison table, useful for sensitivity analysis:
-
-```bash
-tla spec.tla --sweep 'N=2;3;4;5' --count-satisfying Inv --allow-deadlock
-```
-
-`--json` returns structured data including `properties` array with `depth_breakdown` per property.
-
-### The C-3PO Example
-
-C-3PO famously calculates "the possibility of successfully navigating an asteroid field is approximately 3,720 to 1." The spec `examples/c3po_asteroid_field.tla` models the Empire Strikes Back asteroid chase: variable-damage asteroid impacts, TIE fighter attacks, TIEs getting destroyed by asteroids, hiding in the space slug's cave, mynock damage, escaping the exogorth's mouth, and the only real escape — attaching to a Star Destroyer's hull and floating away with the garbage. No hyperspace: the hyperdrive is dead.
-
-The `Density` constant controls asteroid damage range (1..Density). Higher values create more damage variants per action, biasing the state space toward destruction.
-
-```bash
-tla examples/c3po_asteroid_field.tla -c 'Density=3' \
-  --allow-deadlock --continue \
-  --count-satisfying InvNeverTellMeTheOdds \
-  --count-satisfying Escaped --verbose
-```
-
-The depth breakdown shows destruction starting early and escape requiring a long sequence of correct decisions — surviving asteroids, hiding in the cave, taking mynock damage, escaping the slug, then waiting for all TIE fighters to be destroyed before drifting onto a Star Destroyer's hull.
-
-## Interactive Mode
-
-Launch the TUI with `-i` to step through state spaces manually. You can select and take transitions, backtrack, evaluate expressions in a REPL, trace variable changes across history, test hypotheses against all visited states, and toggle guard condition display. Actions with many variable changes expand inline so you can see exactly what each transition does.
-
-![Interactive mode — navigating the C-3PO asteroid field spec](falcon-escape.gif)
-
-Key bindings: `↑`/`↓` select actions, `Enter` takes the selected action, `→`/`Space` expands grouped changes, `←` collapses, `b` backtracks, `e` opens the REPL, `t` shows variable trace, `h` tests a hypothesis, `g` toggles guards, `w` random walks N steps, `u` steps until a condition holds, `s`/`l` save/load traces, `r` resets to initial state, `q` quits.
-
-```bash
-tla examples/c3po_asteroid_field.tla -c 'Density=3' --allow-deadlock -i
-```
-
-## Supported TLA+ Subset
-
-tla-rs implements the Naturals, Integers, Sequences, FiniteSets, TLC, Bags, and Bits standard modules. See `SYNTAX_STATUS.md` for the full operator-by-operator coverage table.
-
-The supported operator categories: logic (`/\`, `\/`, `~`, `=>`), comparison, arithmetic, sets (`\in`, `\union`, `\intersect`, `SUBSET`, `UNION`), functions (`[x \in S |-> e]`, `DOMAIN`, `EXCEPT`, `@@`), quantifiers (`\E`, `\A`, `CHOOSE`), records, tuples/sequences, `IF-THEN-ELSE`, `CASE`, `LET-IN`, primed variables, `UNCHANGED`, transitive closure, module instances (`INSTANCE` with qualified calls), and Unicode equivalents for all operators.
-
-### Module Instances
-
-Specs can use `INSTANCE` to import and compose modules:
-
-```tla
----- MODULE pingpong ----
-LOCAL INSTANCE Naturals
-
-VARIABLES server_to_client, client_to_server
-
-Data == [message: {"ping"}] \cup [message: {"pong"}]
-
-ServerToClientChannel(Id) == INSTANCE MChannel WITH channels <- server_to_client
-ClientToServerChannel(Id) == INSTANCE MChannel WITH channels <- client_to_server
-
-Next ==
-    \/ \E id \in ClientIds: ServerToClientChannel(id)!Send([message |-> "ping"])
-    \/ \E id \in ClientIds: ClientToServerChannel(id)!Recv([message |-> "pong"])
-====
-```
-
-Both static (`Alias == INSTANCE M WITH ...`) and parameterized (`Alias(p) == INSTANCE M WITH ...`) instances are supported. Library modules without Init/Next work as expected. The module file must be in the same directory as the spec.
-
-### Spec Structure
-
-```tla
----- MODULE Example ----
-EXTENDS Naturals
-
-CONSTANT N
-VARIABLES x, y
-
-Init == x = 0 /\ y = 0
-
-Next ==
-    \/ (x < N /\ x' = x + 1 /\ y' = y)
-    \/ (y < N /\ x' = x /\ y' = y + 1)
-
-TypeOK == x \in 0..N /\ y \in 0..N
-Inv == x + y <= 2 * N
-====
-```
-
-Invariants are detected by naming convention: definitions starting with `Inv`, `TypeOK`, or `NotSolved` are automatically checked.
-
-## Output
-
-On success:
-```
-Model checking complete. No errors found.
-
-  States explored: 1331
-  Transitions: 3630
-  Max depth: 31
-  Time: 0.019s
-```
-
-On invariant violation, you get a counterexample trace with state diffs marking changed variables. On deadlock, a trace to the deadlock state with a suggestion to use `--allow-deadlock`. Parse errors show source locations, and undefined variables suggest similar names.
-
-## State Graph Visualization
-
-```bash
-tla spec.tla --export-dot graph.dot
-tla spec.tla --export-dot graph.dot --dot-mode full
-dot -Tpng graph.dot -o graph.png
-```
-
-Four export modes are available via `--dot-mode`:
-
-| Mode | Description |
-|------|-------------|
-| `clean` (default) | All nodes, no self-loops, parallel edges merged into single labeled edges |
-| `full` | All nodes and all edges including self-loops, each edge separate |
-| `trace` | Only counterexample trace nodes and edges (falls back to full if no trace) |
-| `choices` | Trace path plus alternative transitions at each trace state; non-trace nodes shown dashed, alternative edges gray/dashed (falls back to full if no trace) |
-
-Error states are highlighted in red. Trace edges are red and thick in all modes.
-
-## WebAssembly
-
-The core library compiles to WASM for browser embedding:
-
-```bash
-cargo make wasm
-```
-
-This produces a `pkg/` directory with the WASM module and JS bindings. The WASM API provides `check_spec`, `check_spec_with_config`, `check_spec_with_cfg`, and `check_spec_with_options` — all returning JSON results with success status, state count, error traces, and optional DOT graph output.
-
-The `check_spec_with_options` API accepts a JSON options object:
-
-```js
-const result = JSON.parse(check_spec_with_options(specSource, JSON.stringify({
-  constants: { N: 3 },
-  max_states: 10000,
-  max_depth: 50,
-  allow_deadlock: true,
-  export_dot: true,
-  dot_mode: "choices",   // "full", "trace", "clean" (default), "choices"
-  cfg_source: "INIT Init\nNEXT Next\n"
-})));
-
-if (result.dot) {
-  // DOT graph string: "digraph StateGraph { ... }"
-}
-```
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `constants` | object | Constant values (`{"N": 3, "Procs": ["a","b"]}`) |
-| `cfg_source` | string | TLC-style cfg file contents |
-| `max_states` | number | Maximum states to explore |
-| `max_depth` | number | Maximum trace depth |
-| `allow_deadlock` | bool | Allow states with no successors |
-| `export_dot` | bool | Include DOT graph in result |
-| `dot_mode` | string | DOT export mode: `full`, `trace`, `clean` (default), `choices` |
-
-## MCP Server
-
-`tla-mcp` exposes the model checker as a Model Context Protocol server over stdio, so agentic clients (Claude Code, Cursor, etc.) can call it as a first-class tool.
-
-### Install
-
-Several paths are supported — pick whichever fits your toolchain.
-
-**Homebrew (macOS, Linuxbrew)** — installs both `tla` and `tla-mcp`:
-
-```bash
-brew install fabracht/tla/tla-mcp
-```
-
-Requires the `homebrew-tla` tap to exist. The formula source lives at [`packaging/homebrew/tla-mcp.rb`](packaging/homebrew/tla-mcp.rb); [`packaging/homebrew/README.md`](packaging/homebrew/README.md) explains the one-time tap setup.
-
-**Install script (Linux, macOS)** — downloads a prebuilt binary and verifies its SHA256, no Rust toolchain required:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/fabracht/tla-rs/main/scripts/install.sh | bash
-```
-
-Pass flags to scope the install: `--bin tla-mcp` for just the MCP server, `--version v0.4.3` to pin a release (releases prior to v0.4.3 do not ship a `SHA256SUMS` asset and are rejected), `--dir /usr/local/bin` for a system-wide install (requires `sudo`).
-
-**Cargo (any platform with a Rust toolchain)**:
-
-```bash
-cargo install tla-checker --bin tla-mcp
-```
-
-**GitHub release downloads** — prebuilt binaries for Linux x86_64, macOS x86_64, macOS arm64, and Windows x86_64 are attached to every [release](https://github.com/fabracht/tla-rs/releases/latest) as `tla-<platform>` and `tla-mcp-<platform>`.
-
-**From a working copy**:
-
-```bash
-cargo install --path . --bin tla-mcp
-```
-
-### Register with your client
-
-**Claude Code (community plugin marketplace)** — once `tla-mcp` is on PATH:
-
-```
-/plugin marketplace add anthropics/claude-plugins-community
-/plugin install tla-rs@claude-community
-```
-
-**Manual registration (any MCP client)** — add to `~/.claude/mcp.json`, `claude_desktop_config.json`, or your client's equivalent:
-
-```json
-{
-  "mcpServers": {
-    "tla": {
-      "command": "tla-mcp"
-    }
-  }
-}
-```
-
-### Tools
-
-All tools return a `schema_version: "1"` field — the contract is frozen at version 1 and will be bumped explicitly on breaking changes.
-
-| Tool | Purpose |
-|------|---------|
-| `validate_spec` | Parse a `.tla` file and return a summary (vars, **constants with resolved values**, invariants, init/next presence). Returns a structured parse/config error with source span on failure. Inspect the `constants` array before every `check_spec` call — outlier values are the most common cause of timeouts. |
-| `list_invariants` | Return the detected invariants (definitions matching `Inv*`, `TypeOK*`, `NotSolved*`, plus anything declared in a cfg `INVARIANT` directive). |
-| `check_spec` | Run full model checking. **Requires** `max_states`, `max_depth`, AND `max_seconds` (no defaults — agents must budget all three upfront). The `max_seconds` budget is enforced during both BFS exploration and the liveness phase. Returns one of: `ok`, `invariant_violation` (with trace + invariant name + actions), `deadlock`, `liveness_violation` (with prefix + cycle), `limit_reached` (budget exhausted — not an error; `limit` is one of `max_states`/`max_depth`/`max_seconds`), or `error` (with structured phase + message + optional source span). |
-| `replay_scenario` | Walk a spec step-by-step through a guided scenario (text of `step: <TLA+ expression>` lines). Returns the same `StateSnapshot` shape as `check_spec`, plus per-step `changes` descriptions. On a step that no transition satisfies, returns `status: "failed"` with `available_actions` to help diagnose the mismatch. |
-
-The boolean toggles `allow_deadlock` and `check_liveness` are `Option<bool>` — omit them to defer to the cfg file (e.g., `CHECK_DEADLOCK FALSE` or `PROPERTY` directives), pass `true` / `false` to override the cfg. The `symmetry` field appends to any constants declared via cfg `SYMMETRY` rather than replacing them.
-
-`validate_spec` and `list_invariants` include a `warnings` array surfacing parser-tolerance warnings — when the parser fails to parse an operator body it silently skips that operator and emits a warning. The same array also surfaces unsupported temporal constructs (`<<A>>_v` diamond actions, `<>[]P` stable-eventually) that the fairness extractor drops. Without the warnings array, a typo in an invariant's body would let `check_spec` "pass" without ever checking that invariant.
-
-`check_spec` honors the cfg's `CONSTRAINT` directive (state-space pruning predicate) and accepts an inline `state_constraint: "<TLA+ expression>"` parameter. Constraints are evaluated on every state — states where the expression is false are dropped from the reachable set and not explored further. Use this to bound otherwise-explosive state spaces (e.g., `state_constraint: "Len(queue) <= 3"`) without modifying the spec.
-
-### Counterexample format
-
-Each state in a trace is `{ vars: { var_name: { display, json } } }`. The `display` field is the TLA+-formatted value (`"{1, 2, 3}"`, `"<<a, b>>"`); the `json` field is a typed JSON form preserving set/tuple/record/function structure via a `kind` tag.
-
-### Mid-session reload
-
-MCP clients spawn server processes at session startup. Rebuilding or reinstalling `tla-mcp` while a Claude Code session is already running will not hot-reload the new binary — restart the client (or open a new session) to pick up changes. Verifying outside an MCP client: `tla-mcp` invoked directly will exit with `ConnectionClosed` after stdin EOF, which is the correct behavior for a stdio server with no peer.
-
-## Limitations
-
-`Nat` and `Int` are bounded (-100 to 100 by default). Temporal operators `[]`, `<>`, `~>` are parsed but cannot be evaluated directly — use `--check-liveness` for fairness/liveness properties via SCC analysis. Unbounded quantifiers (`\E x : P` without `\in S`) and `Seq(S)` enumeration are not supported. Recursive operators must be declared with `RECURSIVE`.
+## Documentation
+
+| Guide | Contents |
+|-------|----------|
+| [CLI Guide](CLI_GUIDE.md) | Configuration files, scenarios, demo walkthroughs (incl. the `--explorable` browser explorer), interactive mode, analytics, output, and state-graph visualization |
+| [TLA+ Support](TLA_SUPPORT.md) | Supported operator subset, module instances, spec structure, and limitations |
+| [WebAssembly](WASM.md) | Browser-embeddable WASM API, including the live stepping bindings |
+| [MCP Server](MCP.md) | `tla-mcp` install, client registration, and tool reference |
+| [Syntax Status](SYNTAX_STATUS.md) | Operator-by-operator coverage table |
+| [Architecture](ARCHITECTURE.md) | Internal design |
+| [Practical TLA+ Guide](USER_GUIDE_TO_PRACTICAL_TLA.md) | Worked guidance for writing checkable specs |
 
 ## License
 
