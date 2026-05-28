@@ -10,6 +10,25 @@ use super::manifest::Manifest;
 const TEMPLATE: &str = include_str!("walkthrough.html");
 
 pub fn render_html(manifest_dir: &Path, manifest: &Manifest) -> (String, bool) {
+    let (beats, all_passed) = build_beats_json(manifest_dir, manifest, false);
+
+    let data = json!({
+        "title": manifest.title.clone().unwrap_or_else(|| "TLA+ demo".to_string()),
+        "beats": beats,
+    });
+
+    let data_str = serde_json::to_string(&data)
+        .unwrap_or_else(|_| "{}".to_string())
+        .replace("</", "<\\/");
+
+    (TEMPLATE.replace("/*DEMO_DATA*/", &data_str), all_passed)
+}
+
+fn build_beats_json(
+    manifest_dir: &Path,
+    manifest: &Manifest,
+    include_state_json: bool,
+) -> (Vec<J>, bool) {
     let mut all_passed = true;
     let mut beats: Vec<J> = Vec::new();
 
@@ -31,12 +50,15 @@ pub fn render_html(manifest_dir: &Path, manifest: &Manifest) -> (String, bool) {
                                 vars.insert(name.to_string(), J::String(format_value(value)));
                             }
                         }
-                        json!({
+                        let mut entry = json!({
                             "label": step.label,
                             "changes": step.changes,
                             "vars": J::Object(vars),
-                            "json": crate::trace_io::state_to_json(&step.state, &run.vars),
-                        })
+                        });
+                        if include_state_json {
+                            entry["json"] = crate::trace_io::state_to_json(&step.state, &run.vars);
+                        }
+                        entry
                     })
                     .collect();
 
@@ -73,16 +95,7 @@ pub fn render_html(manifest_dir: &Path, manifest: &Manifest) -> (String, bool) {
         }));
     }
 
-    let data = json!({
-        "title": manifest.title.clone().unwrap_or_else(|| "TLA+ demo".to_string()),
-        "beats": beats,
-    });
-
-    let data_str = serde_json::to_string(&data)
-        .unwrap_or_else(|_| "{}".to_string())
-        .replace("</", "<\\/");
-
-    (TEMPLATE.replace("/*DEMO_DATA*/", &data_str), all_passed)
+    (beats, all_passed)
 }
 
 #[cfg(feature = "embed-wasm")]
@@ -134,59 +147,7 @@ pub fn render_explorable(
 ) -> Result<(String, bool), String> {
     use base64::Engine;
 
-    let mut all_passed = true;
-    let mut beats: Vec<J> = Vec::new();
-    for (idx, beat) in manifest.beats.iter().enumerate() {
-        let report = run_beat(manifest_dir, manifest, beat);
-        all_passed &= report.passed();
-        let runs: Vec<J> = report
-            .runs
-            .iter()
-            .map(|run| {
-                let trace: Vec<J> = run
-                    .trace
-                    .iter()
-                    .map(|step| {
-                        let mut vars = Map::new();
-                        for (i, name) in run.vars.iter().enumerate() {
-                            if let Some(value) = step.state.values.get(i) {
-                                vars.insert(name.to_string(), J::String(format_value(value)));
-                            }
-                        }
-                        json!({
-                            "label": step.label,
-                            "changes": step.changes,
-                            "vars": J::Object(vars),
-                            "json": crate::trace_io::state_to_json(&step.state, &run.vars),
-                        })
-                    })
-                    .collect();
-                let assertions: Vec<J> = run
-                    .assertions
-                    .iter()
-                    .map(
-                        |a| json!({ "expectation": a.raw, "passed": a.passed, "detail": a.detail }),
-                    )
-                    .collect();
-                json!({
-                    "variant": run.variant,
-                    "passed": run.passed(),
-                    "failure": run.failure,
-                    "vars": run.vars.iter().map(|v| v.to_string()).collect::<Vec<_>>(),
-                    "trace": trace,
-                    "assertions": assertions,
-                })
-            })
-            .collect();
-        beats.push(json!({
-            "index": idx,
-            "title": report.title,
-            "note": report.note,
-            "passed": report.passed(),
-            "scenario": beat.scenario,
-            "runs": runs,
-        }));
-    }
+    let (beats, all_passed) = build_beats_json(manifest_dir, manifest, true);
 
     let data = json!({
         "title": manifest.title.clone().unwrap_or_else(|| "TLA+ demo".to_string()),
@@ -245,5 +206,46 @@ mod tests {
         assert!(html.contains("const DATA ="));
         assert!(html.contains("Counter overflow demo"));
         assert!(html.contains("Three increments"));
+    }
+
+    #[cfg(feature = "embed-wasm")]
+    #[test]
+    fn explorable_html_embeds_engine_and_is_self_contained() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_cases/demo");
+        let manifest = Manifest::load(&dir.join("Counter.demo.json")).unwrap();
+        let (html, all_passed) = render_explorable(&dir, &manifest).expect("explorable render");
+
+        assert!(all_passed);
+        assert!(!html.contains("/*WASM_GLUE*/"), "glue placeholder replaced");
+        assert!(!html.contains("/*WASM_B64*/"), "wasm placeholder replaced");
+        assert!(!html.contains("/*DEMO_DATA*/"), "data placeholder replaced");
+        assert!(
+            !html.contains("const WASM_B64 = \"\""),
+            "embedded wasm must be non-empty"
+        );
+        assert!(
+            html.contains("export function explore_init"),
+            "engine bindings must be inlined"
+        );
+        assert!(
+            !html.contains("http://"),
+            "must not reference external http"
+        );
+        assert!(
+            !html.contains("https://"),
+            "must not reference external https"
+        );
+    }
+
+    #[cfg(not(feature = "embed-wasm"))]
+    #[test]
+    fn explorable_render_requires_embed_wasm_feature() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_cases/demo");
+        let manifest = Manifest::load(&dir.join("Counter.demo.json")).unwrap();
+        let err = render_explorable(&dir, &manifest).unwrap_err();
+        assert!(
+            err.contains("embed-wasm"),
+            "error should name the required feature: {err}"
+        );
     }
 }
