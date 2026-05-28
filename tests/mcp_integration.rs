@@ -1139,6 +1139,42 @@ fn append_beat_rejects_unknown_variant() {
 }
 
 #[test]
+fn append_beat_does_not_write_when_assertion_fails() {
+    let dir = unique_temp_dir("failassert");
+    std::fs::copy("test_cases/demo/Counter.tla", dir.join("Counter.tla")).unwrap();
+    std::fs::copy(DEMO_MANIFEST, dir.join("Counter.demo.json")).unwrap();
+    let manifest_path = dir.join("Counter.demo.json").to_string_lossy().to_string();
+
+    let out = runner::append_beat(&AppendBeatInput {
+        manifest_path: manifest_path.clone(),
+        title: "runs but expectation is wrong".to_string(),
+        variant: Some("low".to_string()),
+        compare: Vec::new(),
+        scenario: vec!["action: Inc".to_string()],
+        note: None,
+        expect: vec!["final: x = 99".to_string()],
+        expect_per_variant: BTreeMap::new(),
+        validate_only: false,
+    });
+    assert!(matches!(out.status, DemoStatus::Failed));
+    assert!(
+        !out.written,
+        "a beat with a failing assertion must not be persisted"
+    );
+    let beat = out.beat.expect("summary returned for diagnosis");
+    assert!(beat.runs[0].assertions.iter().any(|a| !a.passed));
+
+    let reloaded = runner::validate_demo(&ValidateDemoInput { manifest_path });
+    assert_eq!(
+        reloaded.beats.len(),
+        2,
+        "failing beat must not be persisted"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn export_demo_doc_writes_markdown() {
     let dir = unique_temp_dir("doc");
     let out_path = dir.join("walkthrough.md").to_string_lossy().to_string();

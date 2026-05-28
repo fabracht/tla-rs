@@ -631,7 +631,7 @@ pub fn append_beat(input: &AppendBeatInput) -> AppendBeatOutput {
     let summary = beat_report_to_summary(manifest.beats.len() - 1, &report);
 
     let mut written = false;
-    if !input.validate_only && runnable {
+    if !input.validate_only && report.passed() {
         let serialized = match manifest.serialize_for(manifest_path) {
             Ok(s) => s,
             Err(e) => {
