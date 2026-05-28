@@ -50,21 +50,25 @@ pub(crate) fn format_expr_brief(expr: &Expr) -> String {
     }
 }
 
+fn match_def_body(expr: &Expr, defs: &Definitions) -> Option<Arc<str>> {
+    for (name, (params, body)) in defs {
+        if params.is_empty() && body == expr {
+            return Some(name.clone());
+        }
+    }
+    None
+}
+
 pub(crate) fn infer_action_name(expr: &Expr, defs: &Definitions) -> Option<Arc<str>> {
     match expr {
         Expr::LabeledAction(label, _) => Some(label.clone()),
         Expr::Var(name) => Some(name.clone()),
         Expr::FnCall(name, _) => Some(name.clone()),
         Expr::Let(_, _, _) => infer_name_from_let_chain(expr, defs),
-        Expr::Exists(_, _, body) => infer_action_name(body, defs),
-        _ => {
-            for (name, (params, body)) in defs {
-                if params.is_empty() && body == expr {
-                    return Some(name.clone());
-                }
-            }
-            None
+        Expr::Exists(_, _, body) => {
+            infer_action_name(body, defs).or_else(|| match_def_body(expr, defs))
         }
+        _ => match_def_body(expr, defs),
     }
 }
 
@@ -96,22 +100,15 @@ pub(crate) fn collect_disjuncts_with_labels<'a>(
         Expr::LabeledAction(label, action) => vec![(action.as_ref(), Some(label.clone()))],
         Expr::Var(name) => vec![(expr, Some(name.clone()))],
         Expr::FnCall(name, _) => vec![(expr, Some(name.clone()))],
-        Expr::Exists(_, _, body) => {
-            let label = infer_action_name(body, defs);
+        Expr::Exists(_, _, _) => {
+            let label = infer_action_name(expr, defs);
             vec![(expr, label)]
         }
         Expr::Let(_, _, _) => {
             let label = infer_name_from_let_chain(expr, defs);
             vec![(expr, label)]
         }
-        _ => {
-            for (name, (params, body)) in defs {
-                if params.is_empty() && body == expr {
-                    return vec![(expr, Some(name.clone()))];
-                }
-            }
-            vec![(expr, None)]
-        }
+        _ => vec![(expr, match_def_body(expr, defs))],
     }
 }
 
