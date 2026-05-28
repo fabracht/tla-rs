@@ -44,12 +44,13 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.108 --locked
-
       - name: Build wasm engine
         run: |
           cargo rustc --lib --release --target wasm32-unknown-unknown --features wasm --crate-type cdylib
+          WB_VERSION=$(cargo tree --features wasm | grep -oE 'wasm-bindgen v[0-9.]+' | head -1 | sed -E 's/^wasm-bindgen v//')
+          if [ -z "$WB_VERSION" ]; then echo "could not determine resolved wasm-bindgen version"; exit 1; fi
+          echo "Installing wasm-bindgen-cli $WB_VERSION to match the resolved dependency"
+          cargo install wasm-bindgen-cli --version "$WB_VERSION" --locked
           wasm-bindgen --target web --out-dir pkg target/wasm32-unknown-unknown/release/tla_checker.wasm
 
       - name: Upload wasm pkg
