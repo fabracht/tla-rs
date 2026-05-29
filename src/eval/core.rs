@@ -11,7 +11,7 @@ use super::global_state::{
 };
 use super::helpers::{
     apply_fn_value, cartesian_product_records, eval_bool, eval_fn, eval_int, eval_record, eval_set,
-    eval_tuple, flatten_fnapp_chain, fn_as_tuple, get_nested, in_set_symbolic, update_nested,
+    eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, update_nested,
 };
 use super::recursive::eval_fn_def_recursive;
 use crate::ast::{Env, Expr, Value};
@@ -636,19 +636,9 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 }
                 return result;
             }
-            let (base, keys) = flatten_fnapp_chain(expr);
-            if keys.is_empty() {
-                let fval = eval(f, env, defs)?;
-                let av = eval(arg, env, defs)?;
-                apply_fn_value(fval, av)
-            } else {
-                let mut current = eval(base, env, defs)?;
-                for key_expr in keys {
-                    let key = eval(key_expr, env, defs)?;
-                    current = apply_fn_value(current, key)?;
-                }
-                Ok(current)
-            }
+            let fval = eval(f, env, defs)?;
+            let av = eval(arg, env, defs)?;
+            apply_fn_value(fval, av)
         }
 
         Expr::Lambda(_params, _body) => Err(EvalError::domain_error(

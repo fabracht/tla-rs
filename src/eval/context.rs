@@ -1,7 +1,7 @@
 use super::core::eval;
 use super::error::{EvalError, Result};
 use super::global_state::EvalContext;
-use super::helpers::{apply_fn_value, eval_set, flatten_fnapp_chain, in_set_symbolic};
+use super::helpers::{apply_fn_value, eval_set, in_set_symbolic};
 use super::state::is_action_enabled;
 use super::{Definitions, ResolvedInstances};
 use crate::ast::{Env, Expr, Value};
@@ -318,19 +318,9 @@ pub fn eval_with_context(
                 }
                 return result;
             }
-            let (base, keys) = flatten_fnapp_chain(expr);
-            if keys.is_empty() {
-                let fval = eval_with_context(f, env, defs, ctx)?;
-                let av = eval_with_context(arg, env, defs, ctx)?;
-                apply_fn_value(fval, av)
-            } else {
-                let mut current = eval_with_context(base, env, defs, ctx)?;
-                for key_expr in keys {
-                    let key = eval_with_context(key_expr, env, defs, ctx)?;
-                    current = apply_fn_value(current, key)?;
-                }
-                Ok(current)
-            }
+            let fval = eval_with_context(f, env, defs, ctx)?;
+            let av = eval_with_context(arg, env, defs, ctx)?;
+            apply_fn_value(fval, av)
         }
         Expr::Eq(l, r) => {
             let lv = eval_with_context(l, env, defs, ctx)?;

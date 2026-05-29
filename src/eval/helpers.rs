@@ -6,20 +6,6 @@ use crate::checker::format_value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-pub(crate) fn flatten_fnapp_chain(expr: &Expr) -> (&Expr, Vec<&Expr>) {
-    let mut keys = Vec::new();
-    let mut current = expr;
-    while let Expr::FnApp(f, arg) = current {
-        if matches!(f.as_ref(), Expr::Lambda(..)) {
-            break;
-        }
-        keys.push(arg.as_ref());
-        current = f.as_ref();
-    }
-    keys.reverse();
-    (current, keys)
-}
-
 pub(crate) fn apply_fn_value(fval: Value, key: Value) -> Result<Value> {
     match fval {
         Value::Fn(fv) => fv.get(&key).cloned().ok_or_else(|| {
