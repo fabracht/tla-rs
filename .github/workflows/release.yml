@@ -98,11 +98,8 @@ jobs:
           name: wasm-pkg
           path: pkg
 
-      - name: Build tla (with embedded wasm engine)
-        run: cargo build --release --bin tla --features embed-wasm --target ${{ matrix.target }}
-
-      - name: Build tla-mcp
-        run: cargo build --release --bin tla-mcp --target ${{ matrix.target }}
+      - name: Build CLI binaries (with embedded wasm engine)
+        run: cargo build --release --bin tla --bin tla-mcp --features embed-wasm --target ${{ matrix.target }}
 
       - name: Stage binaries
         shell: bash

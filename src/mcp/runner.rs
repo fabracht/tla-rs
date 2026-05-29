@@ -729,7 +729,22 @@ pub fn export_demo_html(input: &ExportDemoHtmlInput) -> ExportDemoHtmlOutput {
     };
 
     let dir = manifest_dir(&input.manifest_path);
-    let (html, all_passed) = demo::render_html(&dir, &manifest);
+    let rendered = if input.explorable {
+        demo::render_explorable(&dir, &manifest)
+    } else {
+        Ok(demo::render_html(&dir, &manifest))
+    };
+    let (html, all_passed) = match rendered {
+        Ok(pair) => pair,
+        Err(e) => {
+            return ExportDemoHtmlOutput {
+                schema_version: SCHEMA_VERSION.to_string(),
+                status: DemoStatus::Error,
+                written_path: None,
+                error: Some(StructuredError::config(e)),
+            };
+        }
+    };
 
     match fs::write(&input.out_path, html) {
         Ok(()) => ExportDemoHtmlOutput {

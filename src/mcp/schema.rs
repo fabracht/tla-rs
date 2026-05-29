@@ -682,6 +682,8 @@ pub struct ExportDemoDocOutput {
 pub struct ExportDemoHtmlInput {
     pub manifest_path: String,
     pub out_path: String,
+    #[serde(default)]
+    pub explorable: bool,
 }
 
 #[derive(Serialize, JsonSchema, Debug)]

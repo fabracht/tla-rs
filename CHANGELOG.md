@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.5] - 2026-05-28
+
+### Added
+
+- `export_demo_html` MCP tool gained an `explorable` option (default `false`). When `true`, it embeds the wasm engine in the exported file — the same live in-browser state explorer as the CLI's `tla --present … --export-html … --explorable` — so an agent can hand a user a runnable explorer, not just a static walkthrough. The prebuilt `tla-mcp` release binary is now built with the `embed-wasm` feature so this works out of the box; a `tla-mcp` built without it returns a structured config error when `explorable` is requested.
+
 ## [0.5.4] - 2026-05-28
 
 ### Fixed
