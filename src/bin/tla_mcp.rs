@@ -122,7 +122,7 @@ impl TlaMcpServer {
     }
 
     #[tool(
-        description = "Render a demo manifest to a self-contained HTML walkthrough at `out_path`. Same content as export_demo_doc but as a single offline file (no external resources, nothing leaves the file) with an interactive viewer: step through each beat, compare variants side by side, see per-step state diffs and the verified ✓/✗ assertions. Use this to share a runnable demo for a talk or review without requiring the recipient to install tla. status reflects whether all beats passed; the file is written either way."
+        description = "Render a demo manifest to a self-contained HTML walkthrough at `out_path`. Same content as export_demo_doc but as a single offline file (no external resources, nothing leaves the file) with an interactive viewer: step through each beat, compare variants side by side, see per-step state diffs and the verified ✓/✗ assertions. Set `explorable: true` to also embed the wasm model-checking engine, turning the file into a live state explorer — step through enabled actions from any state, see live invariant results, and evaluate TLA+ expressions against the current state, all in the browser. Use this to share a runnable demo for a talk or review without requiring the recipient to install tla. status reflects whether all beats passed; the file is written either way."
     )]
     async fn export_demo_html(
         &self,

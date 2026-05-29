@@ -1286,6 +1286,7 @@ fn export_demo_html_writes_self_contained_file() {
     let out = runner::export_demo_html(&ExportDemoHtmlInput {
         manifest_path: "test_cases/demo/Counter.demo.json".to_string(),
         out_path: out_path.clone(),
+        explorable: false,
     });
     assert!(matches!(out.status, DemoStatus::Passed), "{:?}", out.error);
     assert_eq!(out.written_path.as_deref(), Some(out_path.as_str()));
@@ -1294,6 +1295,54 @@ fn export_demo_html_writes_self_contained_file() {
     assert!(contents.contains("Counter overflow demo"));
     assert!(contents.contains("const DATA ="));
     assert!(!contents.contains("https://"), "must stay self-contained");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(feature = "embed-wasm")]
+#[test]
+fn export_demo_html_explorable_embeds_engine() {
+    let dir = unique_temp_dir("html_explorable");
+    let out_path = dir.join("explorer.html").to_string_lossy().to_string();
+
+    let out = runner::export_demo_html(&ExportDemoHtmlInput {
+        manifest_path: "test_cases/demo/Counter.demo.json".to_string(),
+        out_path: out_path.clone(),
+        explorable: true,
+    });
+    assert!(matches!(out.status, DemoStatus::Passed), "{:?}", out.error);
+
+    let contents = std::fs::read_to_string(&out_path).unwrap();
+    assert!(
+        contents.contains("export function explore_init"),
+        "engine bindings must be inlined"
+    );
+    assert!(
+        !contents.contains("const WASM_B64 = \"\""),
+        "embedded wasm must be non-empty"
+    );
+    assert!(!contents.contains("https://"), "must stay self-contained");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(not(feature = "embed-wasm"))]
+#[test]
+fn export_demo_html_explorable_requires_embed_wasm() {
+    let dir = unique_temp_dir("html_explorable_noembed");
+    let out_path = dir.join("explorer.html").to_string_lossy().to_string();
+
+    let out = runner::export_demo_html(&ExportDemoHtmlInput {
+        manifest_path: "test_cases/demo/Counter.demo.json".to_string(),
+        out_path,
+        explorable: true,
+    });
+    assert!(matches!(out.status, DemoStatus::Error));
+    let msg = format!("{:?}", out.error);
+    assert!(
+        msg.contains("embed-wasm"),
+        "error should name the feature: {msg}"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
