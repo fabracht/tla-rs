@@ -269,6 +269,7 @@ pub fn check_spec_with_options(spec_source: &str, options_json: &str) -> String 
 }
 
 fn check_internal(inputs: WasmInputs) -> WasmCheckResult {
+    crate::intern::clear();
     let WasmInputs {
         spec,
         domains,
@@ -441,6 +442,7 @@ fn prepare_explorer(
     cfg_source: &str,
     constants_json: &str,
 ) -> Result<(Spec, Env, Definitions), String> {
+    crate::intern::clear();
     let mut spec = parse(spec_source).map_err(|e| format!("{e:?}"))?;
 
     let mut domains = Env::new();
