@@ -233,6 +233,51 @@ pub(crate) fn infer_all_candidates(
     Ok(result)
 }
 
+pub(crate) fn action_needs_refinement(expr: &Expr, defs: &Definitions) -> bool {
+    !candidate_sources_independent(expr, defs)
+}
+
+fn candidate_sources_independent(expr: &Expr, defs: &Definitions) -> bool {
+    match expr {
+        Expr::Eq(l, r) => match (l.as_ref(), r.as_ref()) {
+            (Expr::Prime(_), _) => !contains_prime_ref(r, defs),
+            (_, Expr::Prime(_)) => !contains_prime_ref(l, defs),
+            _ => !contains_prime_ref(l, defs) && !contains_prime_ref(r, defs),
+        },
+        Expr::In(elem, set) => match elem.as_ref() {
+            Expr::Prime(_) => !contains_prime_ref(set, defs),
+            _ => !contains_prime_ref(elem, defs) && !contains_prime_ref(set, defs),
+        },
+        Expr::And(l, r) | Expr::Or(l, r) | Expr::Implies(l, r) | Expr::Equiv(l, r) => {
+            candidate_sources_independent(l, defs) && candidate_sources_independent(r, defs)
+        }
+        Expr::Exists(_, domain, body) | Expr::Forall(_, domain, body) => {
+            !contains_prime_ref(domain, defs) && candidate_sources_independent(body, defs)
+        }
+        Expr::If(cond, then_br, else_br) => {
+            !contains_prime_ref(cond, defs)
+                && candidate_sources_independent(then_br, defs)
+                && candidate_sources_independent(else_br, defs)
+        }
+        Expr::Case(branches) => branches
+            .iter()
+            .all(|(g, r)| !contains_prime_ref(g, defs) && candidate_sources_independent(r, defs)),
+        Expr::Let(_, binding, body) => {
+            !contains_prime_ref(binding, defs) && candidate_sources_independent(body, defs)
+        }
+        Expr::LabeledAction(_, action) => candidate_sources_independent(action, defs),
+        Expr::FnCall(name, args) => {
+            args.iter().all(|a| !contains_prime_ref(a, defs))
+                && match defs.get(name) {
+                    Some((_, body)) => candidate_sources_independent(body, defs),
+                    None => !contains_prime_ref(expr, defs),
+                }
+        }
+        Expr::Unchanged(_) => true,
+        _ => !contains_prime_ref(expr, defs),
+    }
+}
+
 pub(crate) fn restore_env(env: &mut Env, saved: Vec<(Arc<str>, Option<Value>)>) {
     for (param, prev) in saved {
         match prev {

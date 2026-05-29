@@ -3,7 +3,7 @@ use super::ast_utils::{
     collect_conjuncts, collect_disjuncts_with_labels, contains_prime_ref, format_expr_brief,
     infer_action_name,
 };
-use super::candidates::infer_all_candidates;
+use super::candidates::{action_needs_refinement, infer_all_candidates};
 use super::error::Result;
 #[cfg(feature = "profiling")]
 use super::global_state::PROFILING_STATS;
@@ -206,32 +206,34 @@ fn enumerate_next_with_refinement(
 
     let mut all_candidates = infer_all_candidates(next, env, ctx.vars, ctx.defs)?;
 
-    for (i, primed) in ctx.primed_vars.iter().enumerate() {
-        if let Some(first) = all_candidates[i].first() {
-            env.insert(primed.clone(), first.clone());
+    if action_needs_refinement(next, ctx.defs) {
+        for (i, primed) in ctx.primed_vars.iter().enumerate() {
+            if let Some(first) = all_candidates[i].first() {
+                env.insert(primed.clone(), first.clone());
+            }
         }
-    }
 
-    let mut changed = true;
-    let mut iterations = 0;
-    while changed && iterations < 3 {
-        changed = false;
-        iterations += 1;
+        let mut changed = true;
+        let mut iterations = 0;
+        while changed && iterations < 3 {
+            changed = false;
+            iterations += 1;
 
-        let new_all = infer_all_candidates(next, env, ctx.vars, ctx.defs)?;
-        for (i, new_candidates) in new_all.into_iter().enumerate() {
-            if new_candidates != all_candidates[i] {
-                all_candidates[i] = new_candidates;
-                changed = true;
-                if let Some(first) = all_candidates[i].first() {
-                    env.insert(ctx.primed_vars[i].clone(), first.clone());
+            let new_all = infer_all_candidates(next, env, ctx.vars, ctx.defs)?;
+            for (i, new_candidates) in new_all.into_iter().enumerate() {
+                if new_candidates != all_candidates[i] {
+                    all_candidates[i] = new_candidates;
+                    changed = true;
+                    if let Some(first) = all_candidates[i].first() {
+                        env.insert(ctx.primed_vars[i].clone(), first.clone());
+                    }
                 }
             }
         }
-    }
 
-    for primed in ctx.primed_vars {
-        env.remove(primed);
+        for primed in ctx.primed_vars {
+            env.remove(primed);
+        }
     }
 
     enumerate_combinations(next, env, ctx, 0, &all_candidates, &action, results)
