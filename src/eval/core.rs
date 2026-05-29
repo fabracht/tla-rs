@@ -63,7 +63,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Prime(name) => {
-            let primed: Arc<str> = format!("{}'", name).into();
+            let primed = crate::intern::primed_name(name);
             env.get(&primed)
                 .cloned()
                 .ok_or_else(|| EvalError::undefined_var_with_env(primed, env, defs))
@@ -1491,7 +1491,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 let current = env
                     .get(var)
                     .ok_or_else(|| EvalError::undefined_var_with_env(var.clone(), env, defs))?;
-                let primed: Arc<str> = format!("{}'", var).into();
+                let primed = crate::intern::primed_name(var);
                 let next = env
                     .get(&primed)
                     .ok_or_else(|| EvalError::undefined_var_with_env(primed, env, defs))?;

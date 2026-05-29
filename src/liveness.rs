@@ -131,7 +131,7 @@ fn action_matches(
         if let Some(val) = current.values.get(i) {
             env.insert(var.clone(), val.clone());
         }
-        let primed: Arc<str> = format!("{}'", var).into();
+        let primed = crate::intern::primed_name(var);
         if let Some(val) = next.values.get(i) {
             env.insert(primed, val.clone());
         }
