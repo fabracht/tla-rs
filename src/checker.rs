@@ -346,7 +346,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     let mut symmetry = SymmetryConfig::new();
     for sym_const in &config.symmetric_constants {
         if let Some(Value::Set(elements)) = domains.get(sym_const) {
-            symmetry.add_symmetric_set(elements.clone());
+            symmetry.add_symmetric_set(elements.as_ref().clone());
         } else if !config.quiet {
             let available: Vec<_> = spec.constants.iter().map(|c| c.as_ref()).collect();
             eprintln!(
@@ -1858,7 +1858,7 @@ mod tests {
         let state = State {
             values: vec![
                 Value::Int(42),
-                Value::Set([Value::Int(1), Value::Int(2)].into()),
+                Value::set([Value::Int(1), Value::Int(2)].into()),
             ],
         };
 

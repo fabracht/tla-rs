@@ -224,7 +224,7 @@ fn parse_constant_value_from_tokens(tokens: &[Token], pos: &mut usize) -> Result
             let mut set = BTreeSet::new();
             if *pos < tokens.len() && tokens[*pos] == Token::RBrace {
                 *pos += 1;
-                return Ok(Value::Set(set));
+                return Ok(Value::set(set));
             }
             loop {
                 let val = parse_constant_value_from_tokens(tokens, pos)?;
@@ -242,7 +242,7 @@ fn parse_constant_value_from_tokens(tokens: &[Token], pos: &mut usize) -> Result
                     return Err(format!("expected ',' or '}}', got {:?}", tokens[*pos]));
                 }
             }
-            Ok(Value::Set(set))
+            Ok(Value::set(set))
         }
         Token::Ident(s) => {
             let val = Value::Str(Arc::from(s.as_str()));
@@ -315,7 +315,7 @@ pub fn parse_constant_value(s: &str) -> Option<Value> {
     if s.starts_with('{') && s.ends_with('}') {
         let inner = s[1..s.len() - 1].trim();
         if inner.is_empty() {
-            return Some(Value::Set(BTreeSet::new()));
+            return Some(Value::set(BTreeSet::new()));
         }
         let mut set = BTreeSet::new();
         for part in split_top_level(inner, ',') {
@@ -325,7 +325,7 @@ pub fn parse_constant_value(s: &str) -> Option<Value> {
                 return None;
             }
         }
-        return Some(Value::Set(set));
+        return Some(Value::set(set));
     }
     if !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_') {
         return Some(Value::Str(s.into()));
@@ -714,7 +714,7 @@ mod tests {
         expected_set.insert(Value::Str("rm1".into()));
         expected_set.insert(Value::Str("rm2".into()));
         expected_set.insert(Value::Str("rm3".into()));
-        assert_eq!(cfg.constants[0].1, Value::Set(expected_set));
+        assert_eq!(cfg.constants[0].1, Value::set(expected_set));
         assert_eq!(cfg.constants[1].1, Value::Int(5));
         assert_eq!(cfg.constants[2].1, Value::Bool(true));
     }
@@ -730,7 +730,7 @@ mod tests {
     fn parse_constant_empty_set() {
         let input = "CONSTANT\nS = {}";
         let cfg = parse_cfg(input).unwrap();
-        assert_eq!(cfg.constants[0].1, Value::Set(BTreeSet::new()));
+        assert_eq!(cfg.constants[0].1, Value::set(BTreeSet::new()));
     }
 
     #[test]
@@ -892,7 +892,7 @@ mod tests {
         let mut expected = BTreeSet::new();
         expected.insert(Value::Str("a".into()));
         expected.insert(Value::Str("b".into()));
-        assert_eq!(parse_constant_value("{a,b}"), Some(Value::Set(expected)));
+        assert_eq!(parse_constant_value("{a,b}"), Some(Value::set(expected)));
     }
 
     #[test]
@@ -920,7 +920,7 @@ mod tests {
         expected.insert(Value::Str("a".into()));
         expected.insert(Value::Str("b".into()));
         expected.insert(Value::Str("c".into()));
-        assert_eq!(cfg.constants[0].1, Value::Set(expected));
+        assert_eq!(cfg.constants[0].1, Value::set(expected));
     }
 
     #[test]
@@ -930,7 +930,7 @@ mod tests {
         let mut expected = BTreeSet::new();
         expected.insert(Value::Str(r#"hello\"world"#.into()));
         expected.insert(Value::Str("ok".into()));
-        assert_eq!(cfg.constants[0].1, Value::Set(expected));
+        assert_eq!(cfg.constants[0].1, Value::set(expected));
     }
 
     #[test]

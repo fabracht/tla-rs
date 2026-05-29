@@ -107,29 +107,29 @@ fn apply_update(base: &Value, keys: &[Value], new_val: Value) -> Option<Value> {
         Value::Fn(f) => {
             let key = &keys[0];
             if keys.len() == 1 {
-                let mut new_f = f.clone();
+                let mut new_f = f.as_ref().clone();
                 new_f.insert(key.clone(), new_val);
-                Some(Value::Fn(new_f))
+                Some(Value::func(new_f))
             } else {
                 let inner = f.get(key)?;
                 let updated_inner = apply_update(inner, &keys[1..], new_val)?;
-                let mut new_f = f.clone();
+                let mut new_f = f.as_ref().clone();
                 new_f.insert(key.clone(), updated_inner);
-                Some(Value::Fn(new_f))
+                Some(Value::func(new_f))
             }
         }
         Value::Record(rec) => {
             if let Value::Str(field) = &keys[0] {
                 if keys.len() == 1 {
-                    let mut new_rec = rec.clone();
+                    let mut new_rec = rec.as_ref().clone();
                     new_rec.insert(field.clone(), new_val);
-                    Some(Value::Record(new_rec))
+                    Some(Value::record(new_rec))
                 } else {
                     let inner = rec.get(field)?;
                     let updated_inner = apply_update(inner, &keys[1..], new_val)?;
-                    let mut new_rec = rec.clone();
+                    let mut new_rec = rec.as_ref().clone();
                     new_rec.insert(field.clone(), updated_inner);
-                    Some(Value::Record(new_rec))
+                    Some(Value::record(new_rec))
                 }
             } else {
                 None
@@ -142,15 +142,15 @@ fn apply_update(base: &Value, keys: &[Value], new_val: Value) -> Option<Value> {
                 }
                 let idx = *idx as usize;
                 if keys.len() == 1 {
-                    let mut new_tup = tup.clone();
+                    let mut new_tup = tup.as_ref().clone();
                     new_tup[idx - 1] = new_val;
-                    Some(Value::Tuple(new_tup))
+                    Some(Value::tuple(new_tup))
                 } else {
                     let inner = tup.get(idx - 1)?;
                     let updated_inner = apply_update(inner, &keys[1..], new_val)?;
-                    let mut new_tup = tup.clone();
+                    let mut new_tup = tup.as_ref().clone();
                     new_tup[idx - 1] = updated_inner;
-                    Some(Value::Tuple(new_tup))
+                    Some(Value::tuple(new_tup))
                 }
             } else {
                 None

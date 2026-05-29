@@ -238,7 +238,7 @@ pub fn eval_with_context(
                 let ev = eval_with_context(elem, env, defs, ctx)?;
                 if let Value::Tuple(seq) = ev {
                     let domain = eval_set(domain_expr, env, defs)?;
-                    for e in &seq {
+                    for e in seq.iter() {
                         if !domain.contains(e) {
                             return Ok(Value::Bool(false));
                         }
@@ -284,7 +284,7 @@ pub fn eval_with_context(
                 let ev = eval_with_context(elem, env, defs, ctx)?;
                 if let Value::Tuple(seq) = ev {
                     let domain = eval_set(domain_expr, env, defs)?;
-                    for e in &seq {
+                    for e in seq.iter() {
                         if !domain.contains(e) {
                             return Ok(Value::Bool(true));
                         }

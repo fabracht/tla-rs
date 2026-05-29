@@ -28,7 +28,7 @@ pub(crate) fn enumerate_subbags(
     results: &mut BTreeSet<Value>,
 ) {
     if idx >= elements.len() {
-        results.insert(Value::Fn(current));
+        results.insert(Value::func(current));
         return;
     }
     let (elem, max_count) = &elements[idx];
@@ -177,7 +177,7 @@ pub(crate) fn generate_subsets_with_constraint(
     for k in min_k..=max_k.min(n) {
         for combo in k_combinations(elements, k) {
             let subset: BTreeSet<Value> = combo.into_iter().collect();
-            result.insert(Value::Set(subset));
+            result.insert(Value::set(subset));
         }
     }
     result

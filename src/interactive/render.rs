@@ -204,7 +204,7 @@ fn format_nested_changes(
     let mut changes = Vec::new();
     match (old_val, new_val) {
         (Value::Fn(old_map), Value::Fn(new_map)) => {
-            for (k, new_v) in new_map {
+            for (k, new_v) in new_map.iter() {
                 let key_str = format_value(k);
                 let new_path = format!("{}[{}]", path, key_str);
                 match old_map.get(k) {
@@ -217,7 +217,7 @@ fn format_nested_changes(
                     _ => {}
                 }
             }
-            for (k, v) in old_map {
+            for (k, v) in old_map.iter() {
                 if !new_map.contains_key(k) {
                     let key_str = format_value(k);
                     let new_path = format!("{}[{}]", path, key_str);
@@ -226,7 +226,7 @@ fn format_nested_changes(
             }
         }
         (Value::Record(old_rec), Value::Record(new_rec)) => {
-            for (k, new_v) in new_rec {
+            for (k, new_v) in new_rec.iter() {
                 let new_path = format!("{}.{}", path, k);
                 match old_rec.get(k) {
                     Some(old_v) if old_v != new_v => {

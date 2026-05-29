@@ -6,10 +6,28 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Str(Arc<str>),
-    Set(BTreeSet<Value>),
-    Fn(BTreeMap<Value, Value>),
-    Record(BTreeMap<Arc<str>, Value>),
-    Tuple(Vec<Value>),
+    Set(Arc<BTreeSet<Value>>),
+    Fn(Arc<BTreeMap<Value, Value>>),
+    Record(Arc<BTreeMap<Arc<str>, Value>>),
+    Tuple(Arc<Vec<Value>>),
+}
+
+impl Value {
+    pub fn set(s: BTreeSet<Value>) -> Self {
+        Value::Set(Arc::new(s))
+    }
+
+    pub fn func(m: BTreeMap<Value, Value>) -> Self {
+        Value::Fn(Arc::new(m))
+    }
+
+    pub fn record(m: BTreeMap<Arc<str>, Value>) -> Self {
+        Value::Record(Arc::new(m))
+    }
+
+    pub fn tuple(v: Vec<Value>) -> Self {
+        Value::Tuple(Arc::new(v))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

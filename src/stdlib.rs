@@ -7,7 +7,7 @@ pub fn load_builtins(env: &mut Env) {
     let boolean: BTreeSet<Value> = [Value::Bool(false), Value::Bool(true)]
         .into_iter()
         .collect();
-    env.insert(Arc::from("BOOLEAN"), Value::Set(boolean));
+    env.insert(Arc::from("BOOLEAN"), Value::set(boolean));
 }
 
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -32,13 +32,13 @@ pub fn load_module(name: &str, env: &mut Env) {
 
 fn load_naturals(env: &mut Env) {
     let nat: BTreeSet<Value> = (0..=100).map(Value::Int).collect();
-    env.insert(Arc::from("Nat"), Value::Set(nat));
+    env.insert(Arc::from("Nat"), Value::set(nat));
 }
 
 fn load_integers(env: &mut Env) {
     load_naturals(env);
     let int: BTreeSet<Value> = (-100..=100).map(Value::Int).collect();
-    env.insert(Arc::from("Int"), Value::Set(int));
+    env.insert(Arc::from("Int"), Value::set(int));
 }
 
 fn load_sequences(_env: &mut Env) {}

@@ -293,7 +293,7 @@ impl ExplorerState {
     ) {
         match (old_val, new_val) {
             (Value::Fn(old_map), Value::Fn(new_map)) => {
-                for (k, v) in new_map {
+                for (k, v) in new_map.iter() {
                     let key_str = format_value(k);
                     let new_path = format!("{}[{}]", path, key_str);
                     match old_map.get(k) {
@@ -310,7 +310,7 @@ impl ExplorerState {
                             self.var_changes.push(VarChange {
                                 state_idx,
                                 path: new_path,
-                                old_value: Value::Set(std::collections::BTreeSet::new()),
+                                old_value: Value::set(std::collections::BTreeSet::new()),
                                 new_value: v.clone(),
                                 action: action.clone(),
                             });
@@ -326,14 +326,14 @@ impl ExplorerState {
                             state_idx,
                             path: new_path,
                             old_value: old_map.get(k).cloned().unwrap_or(Value::Bool(false)),
-                            new_value: Value::Set(std::collections::BTreeSet::new()),
+                            new_value: Value::set(std::collections::BTreeSet::new()),
                             action: action.clone(),
                         });
                     }
                 }
             }
             (Value::Record(old_rec), Value::Record(new_rec)) => {
-                for (k, v) in new_rec {
+                for (k, v) in new_rec.iter() {
                     let new_path = format!("{}.{}", path, k);
                     match old_rec.get(k) {
                         Some(old_v) if old_v != v => {

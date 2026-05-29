@@ -37,7 +37,7 @@ pub fn json_to_value(j: &serde_json::Value) -> Option<Value> {
         serde_json::Value::Array(arr) => {
             let set: std::collections::BTreeSet<Value> =
                 arr.iter().filter_map(json_to_value).collect();
-            Some(Value::Set(set))
+            Some(Value::set(set))
         }
         serde_json::Value::Object(obj) => {
             if let Some(fn_arr) = obj.get("__fn") {
@@ -51,7 +51,7 @@ pub fn json_to_value(j: &serde_json::Value) -> Option<Value> {
                         Some((k, v))
                     })
                     .collect();
-                return Some(Value::Fn(map));
+                return Some(Value::func(map));
             }
             if let Some(tuple_arr) = obj.get("__tuple") {
                 let elems: Vec<Value> = tuple_arr
@@ -59,13 +59,13 @@ pub fn json_to_value(j: &serde_json::Value) -> Option<Value> {
                     .iter()
                     .filter_map(json_to_value)
                     .collect();
-                return Some(Value::Tuple(elems));
+                return Some(Value::tuple(elems));
             }
             let fields: BTreeMap<Arc<str>, Value> = obj
                 .iter()
                 .filter_map(|(k, v)| Some((Arc::from(k.as_str()), json_to_value(v)?)))
                 .collect();
-            Some(Value::Record(fields))
+            Some(Value::record(fields))
         }
         serde_json::Value::Null => None,
     }

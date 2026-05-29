@@ -109,8 +109,8 @@ fn infer_init_candidates(
                     && name == var
                     && let Ok(Value::Set(s)) = eval(set, env, defs)
                 {
-                    for val in s {
-                        candidates.insert(val);
+                    for val in s.iter() {
+                        candidates.insert(val.clone());
                     }
                 }
             }
