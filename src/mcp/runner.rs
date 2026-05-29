@@ -40,6 +40,7 @@ pub fn prepare(
     config_path: Option<&str>,
     user_constants: &BTreeMap<String, String>,
 ) -> Result<LoadedSpec, StructuredError> {
+    crate::intern::clear();
     let path = PathBuf::from(spec_path);
     let contents = fs::read_to_string(&path)
         .map_err(|e| StructuredError::io(format!("failed to read {}: {}", spec_path, e)))?;
@@ -545,6 +546,7 @@ fn beat_report_to_summary(index: usize, report: &BeatReport) -> BeatSummary {
 }
 
 pub fn validate_demo(input: &ValidateDemoInput) -> ValidateDemoOutput {
+    crate::intern::clear();
     let manifest = match Manifest::load(Path::new(&input.manifest_path)) {
         Ok(m) => m,
         Err(e) => {
@@ -589,6 +591,7 @@ pub fn validate_demo(input: &ValidateDemoInput) -> ValidateDemoOutput {
 }
 
 pub fn append_beat(input: &AppendBeatInput) -> AppendBeatOutput {
+    crate::intern::clear();
     let manifest_path = Path::new(&input.manifest_path);
     let mut manifest = match Manifest::load(manifest_path) {
         Ok(m) => m,
@@ -677,6 +680,7 @@ pub fn append_beat(input: &AppendBeatInput) -> AppendBeatOutput {
 }
 
 pub fn export_demo_doc(input: &ExportDemoDocInput) -> ExportDemoDocOutput {
+    crate::intern::clear();
     let manifest = match Manifest::load(Path::new(&input.manifest_path)) {
         Ok(m) => m,
         Err(e) => {
@@ -716,6 +720,7 @@ pub fn export_demo_doc(input: &ExportDemoDocInput) -> ExportDemoDocOutput {
 }
 
 pub fn export_demo_html(input: &ExportDemoHtmlInput) -> ExportDemoHtmlOutput {
+    crate::intern::clear();
     let manifest = match Manifest::load(Path::new(&input.manifest_path)) {
         Ok(m) => m,
         Err(e) => {

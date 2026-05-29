@@ -399,7 +399,7 @@ fn test_symmetry_reduces_states() {
         .collect();
 
     let mut domains = Env::new();
-    domains.insert(Arc::from("Proc"), Value::Set(proc_set));
+    domains.insert(Arc::from("Proc"), Value::set(proc_set));
 
     let config_no_sym = CheckerConfig {
         allow_deadlock: true,
@@ -513,7 +513,7 @@ fn test_official_twophase() {
         .collect();
 
     let mut domains = Env::new();
-    domains.insert(Arc::from("RM"), Value::Set(rm_set));
+    domains.insert(Arc::from("RM"), Value::set(rm_set));
 
     let config = CheckerConfig {
         allow_deadlock: true,
@@ -865,7 +865,7 @@ fn test_cfg_cli_constant_overrides_cfg() {
     let mut rm_set = BTreeSet::new();
     rm_set.insert(Value::Str("r1".into()));
     rm_set.insert(Value::Str("r2".into()));
-    let cli_constants = vec![(Arc::from("RM"), Value::Set(rm_set))];
+    let cli_constants = vec![(Arc::from("RM"), Value::set(rm_set))];
 
     let mut domains = Env::new();
     let mut config = CheckerConfig {
@@ -1018,7 +1018,7 @@ fn test_constant_override_user_wins() {
     custom_set.insert(Value::Str("c".into()));
 
     let mut domains = Env::new();
-    domains.insert(Arc::from("BOOLEAN"), Value::Set(custom_set));
+    domains.insert(Arc::from("BOOLEAN"), Value::set(custom_set));
 
     let config = CheckerConfig {
         allow_deadlock: true,

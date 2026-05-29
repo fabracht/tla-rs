@@ -6,20 +6,6 @@ use crate::checker::format_value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-pub(crate) fn flatten_fnapp_chain(expr: &Expr) -> (&Expr, Vec<&Expr>) {
-    let mut keys = Vec::new();
-    let mut current = expr;
-    while let Expr::FnApp(f, arg) = current {
-        if matches!(f.as_ref(), Expr::Lambda(..)) {
-            break;
-        }
-        keys.push(arg.as_ref());
-        current = f.as_ref();
-    }
-    keys.reverse();
-    (current, keys)
-}
-
 pub(crate) fn apply_fn_value(fval: Value, key: Value) -> Result<Value> {
     match fval {
         Value::Fn(fv) => fv.get(&key).cloned().ok_or_else(|| {
@@ -88,7 +74,7 @@ pub(crate) fn in_set_symbolic(
     match set_expr {
         Expr::Powerset(inner) => {
             if let Value::Set(s) = val {
-                for member in s {
+                for member in s.iter() {
                     if !in_set_symbolic(member, inner, env, defs)? {
                         return Ok(false);
                     }
@@ -117,7 +103,7 @@ pub(crate) fn in_set_symbolic(
         }
         Expr::SeqSet(domain_expr) => {
             let seq = match val {
-                Value::Tuple(t) => Some(t.clone()),
+                Value::Tuple(t) => Some(t.as_ref().clone()),
                 Value::Fn(f) => fn_as_tuple(f),
                 _ => None,
             };
@@ -142,7 +128,7 @@ pub(crate) fn in_set_symbolic(
 
 pub(crate) fn eval_set(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<BTreeSet<Value>> {
     match eval(expr, env, defs)? {
-        Value::Set(s) => Ok(s),
+        Value::Set(s) => Ok(Arc::unwrap_or_clone(s)),
         other => Err(EvalError::TypeMismatch {
             expected: "Set",
             got: other,
@@ -158,7 +144,7 @@ pub(crate) fn eval_fn(
     defs: &Definitions,
 ) -> Result<BTreeMap<Value, Value>> {
     match eval(expr, env, defs)? {
-        Value::Fn(f) => Ok(f),
+        Value::Fn(f) => Ok(Arc::unwrap_or_clone(f)),
         other => Err(EvalError::TypeMismatch {
             expected: "Fn",
             got: other,
@@ -174,7 +160,7 @@ pub(crate) fn eval_record(
     defs: &Definitions,
 ) -> Result<BTreeMap<Arc<str>, Value>> {
     match eval(expr, env, defs)? {
-        Value::Record(r) => Ok(r),
+        Value::Record(r) => Ok(Arc::unwrap_or_clone(r)),
         other => Err(EvalError::TypeMismatch {
             expected: "Record",
             got: other,
@@ -198,7 +184,7 @@ pub(crate) fn fn_as_tuple(f: &BTreeMap<Value, Value>) -> Option<Vec<Value>> {
 
 pub(crate) fn eval_tuple(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Vec<Value>> {
     match eval(expr, env, defs)? {
-        Value::Tuple(t) => Ok(t),
+        Value::Tuple(t) => Ok(Arc::unwrap_or_clone(t)),
         Value::Fn(f) => fn_as_tuple(&f).ok_or(EvalError::TypeMismatch {
             expected: "Tuple",
             got: Value::Fn(f),
@@ -273,8 +259,8 @@ pub(crate) fn update_nested(
         ))
     })?;
     match inner {
-        Value::Fn(inner_fn) => update_nested(inner_fn, &keys[1..], val),
-        Value::Record(rec) => update_nested_record(rec, &keys[1..], val),
+        Value::Fn(inner_fn) => update_nested(Arc::make_mut(inner_fn), &keys[1..], val),
+        Value::Record(rec) => update_nested_record(Arc::make_mut(rec), &keys[1..], val),
         _ => Err(EvalError::TypeMismatch {
             expected: "Fn or Record",
             got: inner.clone(),
@@ -303,8 +289,8 @@ fn update_nested_record(
         .get_mut(field)
         .ok_or_else(|| EvalError::domain_error(format!("field '{}' not found in record", field)))?;
     match inner {
-        Value::Fn(inner_fn) => update_nested(inner_fn, &keys[1..], val),
-        Value::Record(inner_rec) => update_nested_record(inner_rec, &keys[1..], val),
+        Value::Fn(inner_fn) => update_nested(Arc::make_mut(inner_fn), &keys[1..], val),
+        Value::Record(inner_rec) => update_nested_record(Arc::make_mut(inner_rec), &keys[1..], val),
         _ => Err(EvalError::TypeMismatch {
             expected: "Fn or Record",
             got: inner.clone(),

@@ -201,7 +201,7 @@ mod tests {
         )
         .unwrap();
         let expected: BTreeSet<Value> = [Value::Int(1), Value::Int(2), Value::Int(3)].into();
-        assert_eq!(result, Value::Set(expected));
+        assert_eq!(result, Value::set(expected));
     }
 
     #[test]
@@ -210,7 +210,7 @@ mod tests {
         let mut env = Env::new();
         let result = eval(&set_range(lit_int(1), lit_int(3)), &mut env, &d).unwrap();
         let expected: BTreeSet<Value> = [Value::Int(1), Value::Int(2), Value::Int(3)].into();
-        assert_eq!(result, Value::Set(expected));
+        assert_eq!(result, Value::set(expected));
     }
 
     #[test]
@@ -468,7 +468,7 @@ mod tests {
         let mut env = Env::new();
         let expr = Expr::TupleLit(vec![lit_int(10), lit_int(20)]);
         let result = eval(&expr, &mut env, &d).unwrap();
-        assert_eq!(result, Value::Tuple(vec![Value::Int(10), Value::Int(20)]));
+        assert_eq!(result, Value::tuple(vec![Value::Int(10), Value::Int(20)]));
     }
 
     #[test]

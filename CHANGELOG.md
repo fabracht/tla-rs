@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.0] - 2026-05-29
+
+### Changed
+
+- Performance: state-space generation is substantially faster with identical results. Measured speedups (min of 3 runs): Two-Phase Commit ~2.5x (5 RMs 1.26s->0.50s, 6 RMs 9.22s->3.51s), N-Queens ~1.5x (N=4 0.59s->0.38s), and ~1.6x on the 409k-state TimeIntegrity example (63.9s->39.6s). Allocation churn roughly halved (dhat on N-Queens N=4: 7.74M->3.56M allocations). State counts and counterexample traces are bit-identical across all example and test specs. Four changes drove it: recursive function-application evaluation (no per-call vector), reference-counted collection values, skipping redundant candidate re-inference for actions whose primed variables are independent, and interning identifier and primed-variable names.
+
+### Breaking
+
+- The public `Value` enum now stores its collection payloads behind `Arc`: `Set(Arc<BTreeSet<Value>>)`, `Fn(Arc<BTreeMap<Value, Value>>)`, `Record(Arc<BTreeMap<Arc<str>, Value>>)`, and `Tuple(Arc<Vec<Value>>)`. Cloning a `Value` is now a reference-count bump rather than a deep copy. Pattern matches that bind these payloads now bind `&Arc<...>` (most read-only uses are unaffected via `Deref`); code that mutated or moved out the inner collection should use `Arc::make_mut` / `Arc::unwrap_or_clone`. New constructors `Value::set`, `Value::func`, `Value::record`, and `Value::tuple` wrap a plain collection.
+
 ## [0.5.5] - 2026-05-28
 
 ### Added

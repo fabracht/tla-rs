@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 pub fn make_primed_names(vars: &[Arc<str>]) -> Vec<Arc<str>> {
-    vars.iter().map(|v| Arc::from(format!("{}'", v))).collect()
+    vars.iter().map(|v| crate::intern::primed_name(v)).collect()
 }
 
 pub fn next_states(

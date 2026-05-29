@@ -201,7 +201,7 @@ fn build_scenario_env(current: &State, next: &State, constants: &Env, vars: &[Ar
             env.insert(var.clone(), val.clone());
         }
         if let Some(val) = next.values.get(i) {
-            let primed_name: Arc<str> = format!("{}'", var).into();
+            let primed_name = crate::intern::primed_name(var);
             env.insert(primed_name, val.clone());
         }
     }

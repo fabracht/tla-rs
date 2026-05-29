@@ -11,7 +11,7 @@ use super::global_state::{
 };
 use super::helpers::{
     apply_fn_value, cartesian_product_records, eval_bool, eval_fn, eval_int, eval_record, eval_set,
-    eval_tuple, flatten_fnapp_chain, fn_as_tuple, get_nested, in_set_symbolic, update_nested,
+    eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, update_nested,
 };
 use super::recursive::eval_fn_def_recursive;
 use crate::ast::{Env, Expr, Value};
@@ -63,7 +63,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Prime(name) => {
-            let primed: Arc<str> = format!("{}'", name).into();
+            let primed = crate::intern::primed_name(name);
             env.get(&primed)
                 .cloned()
                 .ok_or_else(|| EvalError::undefined_var_with_env(primed, env, defs))
@@ -143,7 +143,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Expr::Powerset(inner) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
                 if let Value::Set(s) = ev {
-                    for member in &s {
+                    for member in s.iter() {
                         if !in_set_symbolic(member, inner, env, defs)? {
                             return Ok(Value::Bool(false));
                         }
@@ -155,7 +155,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Expr::SeqSet(domain_expr) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
                 let seq = match &ev {
-                    Value::Tuple(t) => Some(t.clone()),
+                    Value::Tuple(t) => Some(t.as_ref().clone()),
                     Value::Fn(f) => fn_as_tuple(f),
                     _ => None,
                 };
@@ -199,7 +199,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Expr::Powerset(inner) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
                 if let Value::Set(s) = ev {
-                    for member in &s {
+                    for member in s.iter() {
                         if !in_set_symbolic(member, inner, env, defs)? {
                             return Ok(Value::Bool(true));
                         }
@@ -211,7 +211,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Expr::SeqSet(domain_expr) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
                 let seq = match &ev {
-                    Value::Tuple(t) => Some(t.clone()),
+                    Value::Tuple(t) => Some(t.as_ref().clone()),
                     Value::Fn(f) => fn_as_tuple(f),
                     _ => None,
                 };
@@ -287,7 +287,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                             && t2.len() == 2
                             && t1[1] == t2[0]
                         {
-                            let new_pair = Value::Tuple(vec![t1[0].clone(), t2[1].clone()]);
+                            let new_pair = Value::tuple(vec![t1[0].clone(), t2[1].clone()]);
                             if !result.contains(&new_pair) {
                                 result.insert(new_pair);
                                 changed = true;
@@ -296,7 +296,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     }
                 }
             }
-            Ok(Value::Set(result))
+            Ok(Value::set(result))
         }
 
         Expr::ReflexiveTransitiveClosure(rel_expr) => {
@@ -313,7 +313,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                             && t2.len() == 2
                             && t1[1] == t2[0]
                         {
-                            let new_pair = Value::Tuple(vec![t1[0].clone(), t2[1].clone()]);
+                            let new_pair = Value::tuple(vec![t1[0].clone(), t2[1].clone()]);
                             if !result.contains(&new_pair) {
                                 result.insert(new_pair);
                                 changed = true;
@@ -326,11 +326,11 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 if let Value::Tuple(t) = pair
                     && t.len() == 2
                 {
-                    result.insert(Value::Tuple(vec![t[0].clone(), t[0].clone()]));
-                    result.insert(Value::Tuple(vec![t[1].clone(), t[1].clone()]));
+                    result.insert(Value::tuple(vec![t[0].clone(), t[0].clone()]));
+                    result.insert(Value::tuple(vec![t[1].clone(), t[1].clone()]));
                 }
             }
-            Ok(Value::Set(result))
+            Ok(Value::set(result))
         }
 
         Expr::ActionCompose(_, _) => Err(EvalError::domain_error(
@@ -380,14 +380,14 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             for e in elems {
                 set.insert(eval(e, env, defs)?);
             }
-            Ok(Value::Set(set))
+            Ok(Value::set(set))
         }
 
         Expr::SetRange(lo, hi) => {
             let l = eval_int(lo, env, defs)?;
             let h = eval_int(hi, env, defs)?;
             let set: BTreeSet<Value> = (l..=h).map(Value::Int).collect();
-            Ok(Value::Set(set))
+            Ok(Value::set(set))
         }
 
         Expr::SetFilter(var, domain, predicate) => {
@@ -396,7 +396,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             {
                 let base_set = eval_set(inner, env, defs)?;
                 let elements: Vec<_> = base_set.into_iter().collect();
-                return Ok(Value::Set(generate_subsets_with_constraint(
+                return Ok(Value::set(generate_subsets_with_constraint(
                     &elements, constraint,
                 )));
             }
@@ -418,7 +418,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     env.remove(var);
                 }
             }
-            Ok(Value::Set(result))
+            Ok(Value::set(result))
         }
 
         Expr::SetMap(var, domain, body) => {
@@ -437,25 +437,25 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     env.remove(var);
                 }
             }
-            Ok(Value::Set(result))
+            Ok(Value::set(result))
         }
 
         Expr::Union(l, r) => {
             let ls = eval_set(l, env, defs)?;
             let rs = eval_set(r, env, defs)?;
-            Ok(Value::Set(ls.union(&rs).cloned().collect()))
+            Ok(Value::set(ls.union(&rs).cloned().collect()))
         }
 
         Expr::Intersect(l, r) => {
             let ls = eval_set(l, env, defs)?;
             let rs = eval_set(r, env, defs)?;
-            Ok(Value::Set(ls.intersection(&rs).cloned().collect()))
+            Ok(Value::set(ls.intersection(&rs).cloned().collect()))
         }
 
         Expr::SetMinus(l, r) => {
             let ls = eval_set(l, env, defs)?;
             let rs = eval_set(r, env, defs)?;
-            Ok(Value::Set(ls.difference(&rs).cloned().collect()))
+            Ok(Value::set(ls.difference(&rs).cloned().collect()))
         }
 
         Expr::Cartesian(l, r) => {
@@ -464,10 +464,10 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             let mut result = BTreeSet::new();
             for lv in &ls {
                 for rv in &rs {
-                    result.insert(Value::Tuple(vec![lv.clone(), rv.clone()]));
+                    result.insert(Value::tuple(vec![lv.clone(), rv.clone()]));
                 }
             }
-            Ok(Value::Set(result))
+            Ok(Value::set(result))
         }
 
         Expr::Subset(l, r) => {
@@ -500,9 +500,9 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                         subset.insert(elem.clone());
                     }
                 }
-                result.insert(Value::Set(subset));
+                result.insert(Value::set(subset));
             }
-            Ok(Value::Set(result))
+            Ok(Value::set(result))
         }
 
         Expr::Cardinality(e) => {
@@ -520,7 +520,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             let mut result = BTreeSet::new();
             for val in outer {
                 if let Value::Set(inner) = val {
-                    for v in inner {
+                    for v in Arc::unwrap_or_clone(inner) {
                         result.insert(v);
                     }
                 } else {
@@ -532,7 +532,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     });
                 }
             }
-            Ok(Value::Set(result))
+            Ok(Value::set(result))
         }
 
         Expr::Exists(var, domain, body) => {
@@ -636,19 +636,9 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 }
                 return result;
             }
-            let (base, keys) = flatten_fnapp_chain(expr);
-            if keys.is_empty() {
-                let fval = eval(f, env, defs)?;
-                let av = eval(arg, env, defs)?;
-                apply_fn_value(fval, av)
-            } else {
-                let mut current = eval(base, env, defs)?;
-                for key_expr in keys {
-                    let key = eval(key_expr, env, defs)?;
-                    current = apply_fn_value(current, key)?;
-                }
-                Ok(current)
-            }
+            let fval = eval(f, env, defs)?;
+            let av = eval(arg, env, defs)?;
+            apply_fn_value(fval, av)
         }
 
         Expr::Lambda(_params, _body) => Err(EvalError::domain_error(
@@ -660,7 +650,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             let dom_vec: Vec<_> = dom.into_iter().collect();
             let placeholder_name: Arc<str> = "".into();
             let result = eval_fn_def_recursive(&placeholder_name, var, &dom_vec, body, env, defs)?;
-            Ok(Value::Fn(result))
+            Ok(Value::func(result))
         }
 
         Expr::FnCall(name, args) => {
@@ -784,15 +774,16 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             let lv = eval(left, env, defs)?;
             let rv = eval(right, env, defs)?;
             match (lv, rv) {
-                (Value::Fn(mut lf), Value::Fn(rf)) => {
-                    for (k, v) in rf {
+                (Value::Fn(lf), Value::Fn(rf)) => {
+                    let mut lf = Arc::unwrap_or_clone(lf);
+                    for (k, v) in Arc::unwrap_or_clone(rf) {
                         lf.entry(k).or_insert(v);
                     }
-                    Ok(Value::Fn(lf))
+                    Ok(Value::func(lf))
                 }
                 (l, r) => Err(EvalError::TypeMismatch {
                     expected: "Fn @@ Fn",
-                    got: Value::Tuple(vec![l, r]),
+                    got: Value::tuple(vec![l, r]),
                     context: Some("function merge"),
                     span: None,
                 }),
@@ -804,7 +795,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             let v = eval(val, env, defs)?;
             let mut f = BTreeMap::new();
             f.insert(k, v);
-            Ok(Value::Fn(f))
+            Ok(Value::func(f))
         }
 
         Expr::CustomOp(name, _left, _right) => Err(EvalError::domain_error(format!(
@@ -838,13 +829,13 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 match &mut result {
                     Value::Record(rec) => {
                         if let [Value::Str(field)] = key_vals.as_slice() {
-                            rec.insert(field.clone(), v);
+                            Arc::make_mut(rec).insert(field.clone(), v);
                         } else {
                             return Err(EvalError::domain_error("invalid record update path"));
                         }
                     }
                     Value::Fn(fv) => {
-                        update_nested(fv, &key_vals, v)?;
+                        update_nested(Arc::make_mut(fv), &key_vals, v)?;
                     }
                     _ => {
                         return Err(EvalError::domain_error(
@@ -868,12 +859,12 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             match fv {
                 Value::Fn(fmap) => {
                     let dom: BTreeSet<Value> = fmap.keys().cloned().collect();
-                    Ok(Value::Set(dom))
+                    Ok(Value::set(dom))
                 }
                 Value::Tuple(seq) => {
                     let dom: BTreeSet<Value> =
                         (1..=seq.len()).map(|i| Value::Int(i as i64)).collect();
-                    Ok(Value::Set(dom))
+                    Ok(Value::set(dom))
                 }
                 other => Err(EvalError::type_mismatch_ctx(
                     "Fn or Sequence",
@@ -912,9 +903,9 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             let functions = enumerate_functions(&keys, &cod);
             let set: BTreeSet<Value> = functions
                 .into_iter()
-                .map(|f| fn_as_tuple(&f).map(Value::Tuple).unwrap_or(Value::Fn(f)))
+                .map(|f| fn_as_tuple(&f).map(Value::tuple).unwrap_or(Value::func(f)))
                 .collect();
-            Ok(Value::Set(set))
+            Ok(Value::set(set))
         }
 
         Expr::RecordLit(fields) => {
@@ -922,7 +913,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             for (name, expr) in fields {
                 rec.insert(name.clone(), eval(expr, env, defs)?);
             }
-            Ok(Value::Record(rec))
+            Ok(Value::record(rec))
         }
 
         Expr::RecordSet(fields) => {
@@ -932,7 +923,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 field_domains.push((name.clone(), domain.into_iter().collect()));
             }
             let result = cartesian_product_records(&field_domains);
-            Ok(Value::Set(result.into_iter().map(Value::Record).collect()))
+            Ok(Value::set(result.into_iter().map(Value::record).collect()))
         }
 
         Expr::RecordAccess(rec, field) => {
@@ -947,7 +938,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             for e in elems {
                 tup.push(eval(e, env, defs)?);
             }
-            Ok(Value::Tuple(tup))
+            Ok(Value::tuple(tup))
         }
 
         Expr::TupleAccess(tup, idx) => {
@@ -992,21 +983,21 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if tv.is_empty() {
                 return Err(EvalError::domain_error("Tail of empty sequence"));
             }
-            Ok(Value::Tuple(tv[1..].to_vec()))
+            Ok(Value::tuple(tv[1..].to_vec()))
         }
 
         Expr::Append(seq, elem) => {
             let mut tv = eval_tuple(seq, env, defs)?;
             let ev = eval(elem, env, defs)?;
             tv.push(ev);
-            Ok(Value::Tuple(tv))
+            Ok(Value::tuple(tv))
         }
 
         Expr::Concat(seq1, seq2) => {
             let mut tv1 = eval_tuple(seq1, env, defs)?;
             let tv2 = eval_tuple(seq2, env, defs)?;
             tv1.extend(tv2);
-            Ok(Value::Tuple(tv1))
+            Ok(Value::tuple(tv1))
         }
 
         Expr::SubSeq(seq, start, end) => {
@@ -1017,7 +1008,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 return Err(EvalError::domain_error("SubSeq index out of bounds"));
             }
             let subseq = tv.get((s - 1)..e).unwrap_or(&[]).to_vec();
-            Ok(Value::Tuple(subseq))
+            Ok(Value::tuple(subseq))
         }
 
         Expr::SelectSeq(seq, test) => {
@@ -1051,7 +1042,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     result.push(elem);
                 }
             }
-            Ok(Value::Tuple(result))
+            Ok(Value::tuple(result))
         }
 
         Expr::SeqSet(_) => Err(EvalError::domain_error(
@@ -1108,8 +1099,8 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 )));
             }
             let perms = permutations(&elements);
-            let result: BTreeSet<Value> = perms.into_iter().map(Value::Tuple).collect();
-            Ok(Value::Set(result))
+            let result: BTreeSet<Value> = perms.into_iter().map(Value::tuple).collect();
+            Ok(Value::set(result))
         }
 
         Expr::SortSeq(seq_expr, cmp_expr) => {
@@ -1138,7 +1129,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     "SortSeq comparator must be a LAMBDA expression",
                 ));
             }
-            Ok(Value::Tuple(result))
+            Ok(Value::tuple(result))
         }
 
         Expr::PrintT(val) => {
@@ -1235,7 +1226,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         Expr::BagToSet(bag_expr) => {
             let f = eval_fn(bag_expr, env, defs)?;
             let dom: BTreeSet<Value> = f.keys().cloned().collect();
-            Ok(Value::Set(dom))
+            Ok(Value::set(dom))
         }
 
         Expr::SetToBag(set_expr) => {
@@ -1244,7 +1235,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             for elem in s {
                 bag.insert(elem, Value::Int(1));
             }
-            Ok(Value::Fn(bag))
+            Ok(Value::func(bag))
         }
 
         Expr::BagIn(elem_expr, bag_expr) => {
@@ -1257,7 +1248,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             }
         }
 
-        Expr::EmptyBag => Ok(Value::Fn(BTreeMap::new())),
+        Expr::EmptyBag => Ok(Value::func(BTreeMap::new())),
 
         Expr::BagAdd(left, right) => {
             let b1 = eval_fn(left, env, defs)?;
@@ -1277,7 +1268,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     .unwrap_or(0);
                 result.insert(elem, Value::Int(c1 + c2));
             }
-            Ok(Value::Fn(result))
+            Ok(Value::func(result))
         }
 
         Expr::BagSub(left, right) => {
@@ -1301,7 +1292,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     result.insert(elem.clone(), Value::Int(diff));
                 }
             }
-            Ok(Value::Fn(result))
+            Ok(Value::func(result))
         }
 
         Expr::BagUnion(bags_expr) => {
@@ -1309,7 +1300,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             let mut result: BTreeMap<Value, Value> = BTreeMap::new();
             for bag_val in bags_set {
                 if let Value::Fn(bag) = bag_val {
-                    for (elem, count) in bag {
+                    for (elem, count) in Arc::unwrap_or_clone(bag) {
                         let c_new = if let Value::Int(n) = count { n } else { 0 };
                         let c_old = result
                             .get(&elem)
@@ -1332,7 +1323,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     });
                 }
             }
-            Ok(Value::Fn(result))
+            Ok(Value::func(result))
         }
 
         Expr::SqSubseteq(left, right) => {
@@ -1376,7 +1367,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             }
             let mut result_set = BTreeSet::new();
             enumerate_subbags(&elements, 0, BTreeMap::new(), &mut result_set);
-            Ok(Value::Set(result_set))
+            Ok(Value::set(result_set))
         }
 
         Expr::BagOfAll(expr, bag_expr) => {
@@ -1418,7 +1409,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     "BagOfAll requires a LAMBDA expression",
                 ));
             }
-            Ok(Value::Fn(result))
+            Ok(Value::func(result))
         }
 
         Expr::BagCardinality(bag_expr) => {
@@ -1458,7 +1449,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 let dom_vec: Vec<_> = dom.into_iter().collect();
                 let fn_result =
                     eval_fn_def_recursive(var, param, &dom_vec, fn_body, env, &local_defs)?;
-                let prev = env.insert(var.clone(), Value::Fn(fn_result));
+                let prev = env.insert(var.clone(), Value::func(fn_result));
                 let result = eval(body, env, &local_defs);
                 match prev {
                     Some(old) => {
@@ -1500,7 +1491,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 let current = env
                     .get(var)
                     .ok_or_else(|| EvalError::undefined_var_with_env(var.clone(), env, defs))?;
-                let primed: Arc<str> = format!("{}'", var).into();
+                let primed = crate::intern::primed_name(var);
                 let next = env
                     .get(&primed)
                     .ok_or_else(|| EvalError::undefined_var_with_env(primed, env, defs))?;

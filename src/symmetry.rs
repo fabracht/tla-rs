@@ -82,7 +82,7 @@ impl SymmetryConfig {
 
         match value {
             Value::Set(s) => {
-                for elem in s {
+                for elem in s.iter() {
                     self.collect_elements_in_order(elem, sym_set, seen, ordering);
                 }
             }
@@ -100,7 +100,7 @@ impl SymmetryConfig {
                 }
             }
             Value::Tuple(t) => {
-                for elem in t {
+                for elem in t.iter() {
                     self.collect_elements_in_order(elem, sym_set, seen, ordering);
                 }
             }
@@ -129,7 +129,7 @@ impl SymmetryConfig {
                     .iter()
                     .map(|e| self.apply_mapping_to_value(e, mapping))
                     .collect();
-                Value::Set(mapped)
+                Value::set(mapped)
             }
             Value::Fn(f) => {
                 let mapped: BTreeMap<_, _> = f
@@ -141,21 +141,21 @@ impl SymmetryConfig {
                         )
                     })
                     .collect();
-                Value::Fn(mapped)
+                Value::func(mapped)
             }
             Value::Record(r) => {
                 let mapped: BTreeMap<_, _> = r
                     .iter()
                     .map(|(k, v)| (k.clone(), self.apply_mapping_to_value(v, mapping)))
                     .collect();
-                Value::Record(mapped)
+                Value::record(mapped)
             }
             Value::Tuple(t) => {
                 let mapped: Vec<_> = t
                     .iter()
                     .map(|e| self.apply_mapping_to_value(e, mapping))
                     .collect();
-                Value::Tuple(mapped)
+                Value::tuple(mapped)
             }
         }
     }
@@ -215,7 +215,7 @@ mod tests {
         votes.insert(str_val("p1"), Value::Int(0));
         votes.insert(str_val("p3"), Value::Int(0));
         let state = State {
-            values: vec![Value::Fn(votes)],
+            values: vec![Value::func(votes)],
         };
 
         let canonical = config.canonicalize(&state);
@@ -254,7 +254,7 @@ mod tests {
 
         let inner_set = BTreeSet::from([str_val("y")]);
         let state = State {
-            values: vec![Value::Set(inner_set)],
+            values: vec![Value::set(inner_set)],
         };
 
         let canonical = config.canonicalize(&state);

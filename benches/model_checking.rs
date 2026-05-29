@@ -49,7 +49,7 @@ fn bench_symmetric_procs(c: &mut Criterion) {
         .collect();
 
     let mut env = Env::new();
-    env.insert(Arc::from("Proc"), Value::Set(proc_set));
+    env.insert(Arc::from("Proc"), Value::set(proc_set));
 
     let mut group = c.benchmark_group("symmetric_procs");
 
@@ -106,7 +106,7 @@ fn bench_tcommit(c: &mut Criterion) {
             .collect();
 
         let mut env = Env::new();
-        env.insert(Arc::from("RM"), Value::Set(rm_set));
+        env.insert(Arc::from("RM"), Value::set(rm_set));
 
         group.bench_with_input(BenchmarkId::new("rm_count", rm_count), &env, |b, env| {
             b.iter(|| {
@@ -165,7 +165,7 @@ fn validate_benchmarks() {
         .map(|s| Value::Str(Arc::from(*s)))
         .collect();
     let mut env = Env::new();
-    env.insert(Arc::from("Ids"), Value::Set(id_set));
+    env.insert(Arc::from("Ids"), Value::set(id_set));
     let config = CheckerConfig {
         allow_deadlock: true,
         quiet: true,
@@ -226,7 +226,7 @@ fn create_test_state(var_count: usize, set_size: usize) -> State {
     let values: Vec<Value> = (0..var_count)
         .map(|_| {
             let set: BTreeSet<Value> = (0..set_size).map(|j| Value::Int(j as i64)).collect();
-            Value::Set(set)
+            Value::set(set)
         })
         .collect();
     State { values }
@@ -239,7 +239,7 @@ fn bench_eval_operations(c: &mut Criterion) {
 
     for size in [5, 10, 15] {
         let set: BTreeSet<Value> = create_test_set(size);
-        let base_expr = Expr::Lit(Value::Set(set));
+        let base_expr = Expr::Lit(Value::set(set));
         let powerset_expr = Expr::Powerset(Box::new(base_expr));
 
         group.bench_with_input(
@@ -276,7 +276,7 @@ fn bench_eval_operations(c: &mut Criterion) {
         let mut env_to_clone = Env::new();
         for i in 0..var_count {
             let set: BTreeSet<Value> = create_test_set(10);
-            env_to_clone.insert(Arc::from(format!("var{}", i)), Value::Set(set));
+            env_to_clone.insert(Arc::from(format!("var{}", i)), Value::set(set));
         }
 
         group.bench_with_input(
@@ -304,7 +304,7 @@ fn bench_symmetry_canonicalize(c: &mut Criterion) {
         let values: Vec<Value> = (0..var_count)
             .map(|i| {
                 let subset: BTreeSet<Value> = sym_set.iter().take((i % 5) + 1).cloned().collect();
-                Value::Set(subset)
+                Value::set(subset)
             })
             .collect();
         let state = State { values };
@@ -412,7 +412,7 @@ fn bench_twophase(c: &mut Criterion) {
             .collect();
 
         let mut env = Env::new();
-        env.insert(Arc::from("RM"), Value::Set(rm_set));
+        env.insert(Arc::from("RM"), Value::set(rm_set));
 
         group.bench_with_input(BenchmarkId::new("rm_count", rm_count), &env, |b, env| {
             b.iter(|| {
@@ -509,7 +509,7 @@ fn bench_parameterized_instance(c: &mut Criterion) {
     for (ids, label) in configs {
         let id_set: BTreeSet<Value> = ids.iter().map(|s| Value::Str(Arc::from(*s))).collect();
         let mut env = Env::new();
-        env.insert(Arc::from("Ids"), Value::Set(id_set));
+        env.insert(Arc::from("Ids"), Value::set(id_set));
 
         group.bench_with_input(BenchmarkId::new("ids", label), &env, |b, env| {
             b.iter(|| {
@@ -570,7 +570,7 @@ fn bench_instance_overhead(c: &mut Criterion) {
         .collect();
 
     let mut instance_env = Env::new();
-    instance_env.insert(Arc::from("Ids"), Value::Set(id_set));
+    instance_env.insert(Arc::from("Ids"), Value::set(id_set));
 
     let inline_env = Env::new();
 

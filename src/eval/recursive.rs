@@ -159,7 +159,7 @@ pub(crate) fn eval_with_memo(
             let rv = eval_with_memo(r, env, defs, fn_name, fn_param, fn_domain, memo)?;
             match (lv, rv) {
                 (Value::Set(a), Value::Set(b)) => {
-                    Ok(Value::Set(a.difference(&b).cloned().collect()))
+                    Ok(Value::set(a.difference(&b).cloned().collect()))
                 }
                 (a, b) => Err(EvalError::domain_error(format!(
                     "set minus requires Set \\ Set, got {} \\ {}",
@@ -176,7 +176,7 @@ pub(crate) fn eval_with_memo(
                     e, env, defs, fn_name, fn_param, fn_domain, memo,
                 )?);
             }
-            Ok(Value::Set(result))
+            Ok(Value::set(result))
         }
 
         Expr::Var(name) => {

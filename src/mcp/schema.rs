@@ -421,7 +421,7 @@ fn value_to_json(value: &Value) -> serde_json::Value {
         }
         Value::Record(fields) => {
             let mut field_map = Map::new();
-            for (k, v) in fields {
+            for (k, v) in fields.iter() {
                 field_map.insert(k.to_string(), value_to_json(v));
             }
             let mut obj = Map::new();

@@ -838,7 +838,7 @@ impl<'a> Lexer<'a> {
                 "HIDE" => Token::By,
                 "DEFS" => Token::ProofDef,
                 "ONLY" => Token::By,
-                _ => Token::Ident(ident.into()),
+                _ => Token::Ident(crate::intern::intern(ident)),
             };
             return Ok(tok);
         }
@@ -1316,7 +1316,7 @@ impl<'a> Lexer<'a> {
                 "HIDE" => Token::By,
                 "DEFS" => Token::ProofDef,
                 "ONLY" => Token::By,
-                _ => Token::Ident(ident.into()),
+                _ => Token::Ident(crate::intern::intern(ident)),
             };
             return Ok(tok);
         }

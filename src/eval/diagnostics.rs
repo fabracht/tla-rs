@@ -45,7 +45,7 @@ fn explain_invariant_impl(
     match expr {
         Expr::Forall(var, domain, body) => {
             if let Ok(Value::Set(elements)) = eval(domain, env, defs) {
-                for elem in elements {
+                for elem in elements.iter() {
                     env.insert(var.clone(), elem.clone());
                     if let Ok(Value::Bool(false)) = eval(body, env, defs) {
                         info.failing_bindings.push((var.to_string(), elem.clone()));

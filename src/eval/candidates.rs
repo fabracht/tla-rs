@@ -107,29 +107,29 @@ fn apply_update(base: &Value, keys: &[Value], new_val: Value) -> Option<Value> {
         Value::Fn(f) => {
             let key = &keys[0];
             if keys.len() == 1 {
-                let mut new_f = f.clone();
+                let mut new_f = f.as_ref().clone();
                 new_f.insert(key.clone(), new_val);
-                Some(Value::Fn(new_f))
+                Some(Value::func(new_f))
             } else {
                 let inner = f.get(key)?;
                 let updated_inner = apply_update(inner, &keys[1..], new_val)?;
-                let mut new_f = f.clone();
+                let mut new_f = f.as_ref().clone();
                 new_f.insert(key.clone(), updated_inner);
-                Some(Value::Fn(new_f))
+                Some(Value::func(new_f))
             }
         }
         Value::Record(rec) => {
             if let Value::Str(field) = &keys[0] {
                 if keys.len() == 1 {
-                    let mut new_rec = rec.clone();
+                    let mut new_rec = rec.as_ref().clone();
                     new_rec.insert(field.clone(), new_val);
-                    Some(Value::Record(new_rec))
+                    Some(Value::record(new_rec))
                 } else {
                     let inner = rec.get(field)?;
                     let updated_inner = apply_update(inner, &keys[1..], new_val)?;
-                    let mut new_rec = rec.clone();
+                    let mut new_rec = rec.as_ref().clone();
                     new_rec.insert(field.clone(), updated_inner);
-                    Some(Value::Record(new_rec))
+                    Some(Value::record(new_rec))
                 }
             } else {
                 None
@@ -142,15 +142,15 @@ fn apply_update(base: &Value, keys: &[Value], new_val: Value) -> Option<Value> {
                 }
                 let idx = *idx as usize;
                 if keys.len() == 1 {
-                    let mut new_tup = tup.clone();
+                    let mut new_tup = tup.as_ref().clone();
                     new_tup[idx - 1] = new_val;
-                    Some(Value::Tuple(new_tup))
+                    Some(Value::tuple(new_tup))
                 } else {
                     let inner = tup.get(idx - 1)?;
                     let updated_inner = apply_update(inner, &keys[1..], new_val)?;
-                    let mut new_tup = tup.clone();
+                    let mut new_tup = tup.as_ref().clone();
                     new_tup[idx - 1] = updated_inner;
-                    Some(Value::Tuple(new_tup))
+                    Some(Value::tuple(new_tup))
                 }
             } else {
                 None
@@ -231,6 +231,51 @@ pub(crate) fn infer_all_candidates(
     });
 
     Ok(result)
+}
+
+pub(crate) fn action_needs_refinement(expr: &Expr, defs: &Definitions) -> bool {
+    !candidate_sources_independent(expr, defs)
+}
+
+fn candidate_sources_independent(expr: &Expr, defs: &Definitions) -> bool {
+    match expr {
+        Expr::Eq(l, r) => match (l.as_ref(), r.as_ref()) {
+            (Expr::Prime(_), _) => !contains_prime_ref(r, defs),
+            (_, Expr::Prime(_)) => !contains_prime_ref(l, defs),
+            _ => !contains_prime_ref(l, defs) && !contains_prime_ref(r, defs),
+        },
+        Expr::In(elem, set) => match elem.as_ref() {
+            Expr::Prime(_) => !contains_prime_ref(set, defs),
+            _ => !contains_prime_ref(elem, defs) && !contains_prime_ref(set, defs),
+        },
+        Expr::And(l, r) | Expr::Or(l, r) | Expr::Implies(l, r) | Expr::Equiv(l, r) => {
+            candidate_sources_independent(l, defs) && candidate_sources_independent(r, defs)
+        }
+        Expr::Exists(_, domain, body) | Expr::Forall(_, domain, body) => {
+            !contains_prime_ref(domain, defs) && candidate_sources_independent(body, defs)
+        }
+        Expr::If(cond, then_br, else_br) => {
+            !contains_prime_ref(cond, defs)
+                && candidate_sources_independent(then_br, defs)
+                && candidate_sources_independent(else_br, defs)
+        }
+        Expr::Case(branches) => branches
+            .iter()
+            .all(|(g, r)| !contains_prime_ref(g, defs) && candidate_sources_independent(r, defs)),
+        Expr::Let(_, binding, body) => {
+            !contains_prime_ref(binding, defs) && candidate_sources_independent(body, defs)
+        }
+        Expr::LabeledAction(_, action) => candidate_sources_independent(action, defs),
+        Expr::FnCall(name, args) => {
+            args.iter().all(|a| !contains_prime_ref(a, defs))
+                && match defs.get(name) {
+                    Some((_, body)) => candidate_sources_independent(body, defs),
+                    None => !contains_prime_ref(expr, defs),
+                }
+        }
+        Expr::Unchanged(_) => true,
+        _ => !contains_prime_ref(expr, defs),
+    }
 }
 
 pub(crate) fn restore_env(env: &mut Env, saved: Vec<(Arc<str>, Option<Value>)>) {
