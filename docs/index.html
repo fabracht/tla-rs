@@ -67,7 +67,7 @@
 
       <section id="install">
         <h2>Install</h2>
-        <p>Pick whichever fits your toolchain. All paths install the same v0.4.3 binary.</p>
+        <p>Pick whichever fits your toolchain. All paths install the same latest release.</p>
 
         <h3>Homebrew (macOS, Linuxbrew)</h3>
         <pre><code>brew install fabracht/tla/tla-mcp</code></pre>
@@ -104,7 +104,7 @@
 
       <section id="tools">
         <h2>What the agent gets</h2>
-        <p>Four tools, versioned JSON schemas (<code>schema_version: "1"</code>):</p>
+        <p>Eight tools, versioned JSON schemas (<code>schema_version: "1"</code>):</p>
         <table>
           <thead>
             <tr><th><code>tool</code></th><th>purpose</th></tr>
@@ -141,6 +141,28 @@
                 Returns per-step state snapshots + variable changes, or a failure with
                 <code>available_actions</code> on a mismatch.
               </td>
+            </tr>
+            <tr>
+              <td><code>validate_demo</code></td>
+              <td>
+                Run a demo manifest (named variants + ordered beats) and report
+                pass/fail per beat and variant, with the failing assertions on a miss.
+              </td>
+            </tr>
+            <tr>
+              <td><code>append_beat</code></td>
+              <td>
+                Append a beat to a manifest, persisting it only if all its assertions pass.
+                Format-preserving — a <code>.toml</code> manifest stays TOML.
+              </td>
+            </tr>
+            <tr>
+              <td><code>export_demo_doc</code></td>
+              <td>Render a demo manifest to a tested Markdown walkthrough.</td>
+            </tr>
+            <tr>
+              <td><code>export_demo_html</code></td>
+              <td>Render a demo manifest to a self-contained, offline HTML walkthrough.</td>
             </tr>
           </tbody>
         </table>
