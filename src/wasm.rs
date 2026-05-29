@@ -300,14 +300,14 @@ fn json_to_value(v: serde_json::Value) -> Value {
         serde_json::Value::Array(arr) => {
             let set: std::collections::BTreeSet<Value> =
                 arr.into_iter().map(json_to_value).collect();
-            Value::Set(set)
+            Value::set(set)
         }
         serde_json::Value::Object(obj) => {
             let rec: BTreeMap<Arc<str>, Value> = obj
                 .into_iter()
                 .map(|(k, v)| (Arc::from(k), json_to_value(v)))
                 .collect();
-            Value::Record(rec)
+            Value::record(rec)
         }
         serde_json::Value::Null => Value::Bool(false),
     }
