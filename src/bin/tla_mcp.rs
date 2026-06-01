@@ -122,7 +122,7 @@ impl TlaMcpServer {
     }
 
     #[tool(
-        description = "Render a demo manifest to a self-contained HTML walkthrough at `out_path`. Same content as export_demo_doc but as a single offline file (no external resources, nothing leaves the file) with an interactive viewer: step through each beat, compare variants side by side, see per-step state diffs and the verified ✓/✗ assertions. Set `explorable: true` to also embed the wasm model-checking engine, turning the file into a live state explorer — step through enabled actions from any state, see live invariant results, and evaluate TLA+ expressions against the current state, all in the browser. Use this to share a runnable demo for a talk or review without requiring the recipient to install tla. status reflects whether all beats passed; the file is written either way."
+        description = "Render a demo manifest to a self-contained HTML walkthrough at `out_path`. Same content as export_demo_doc but as a single offline file (no external resources, nothing leaves the file) with an interactive viewer: step through each beat, compare variants side by side, see per-step state diffs and the verified ✓/✗ assertions. Set `explorable: true` to also embed the wasm model-checking engine, turning the file into a live state explorer — step through enabled actions from any state (number-key hotkeys, actions grouped by name) and see live invariant results, all in the browser. Use this to share a runnable demo for a talk or review without requiring the recipient to install tla. status reflects whether all beats passed; the file is written either way."
     )]
     async fn export_demo_html(
         &self,
@@ -164,7 +164,9 @@ impl ServerHandler for TlaMcpServer {
             \n\
             • Safety ≠ liveness. Invariants (state predicates) are safety. Fairness, `<>`, `~>`, `WF_vars` are liveness — require `check_liveness: true` and run a different analysis (SCC). 'Spec passes safety check' does NOT mean 'spec satisfies its liveness property.'\n\
             \n\
-            • Model checking is bounded. Passing at small constants does not prove the algorithm correct for all sizes. Prefer phrasing like 'verified for these constants' over 'proven correct.'"
+            • Model checking is bounded. Passing at small constants does not prove the algorithm correct for all sizes. Prefer phrasing like 'verified for these constants' over 'proven correct.'\n\
+            \n\
+            • Demos read best on named-action specs. validate_demo / append_beat / export_demo_* pin each scenario step with `action: <Name>` — one self-describing step per move, and one hotkeyed explorer row per action. A spec whose `Next` is a single `\\E ...` quantifier has no action to name, so steps fall back to `step:` predicates that re-state the next state and the explorer collapses every transition under one row — it still works, just reads worse. When authoring a demo, prefer lifting common moves into named operators over adding a synthetic tag variable, and expose the key property as a named definition (e.g. `Solved == ...`) so beats can assert `final: Solved` and the explorer shows it live."
                 .to_string(),
         );
         info

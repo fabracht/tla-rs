@@ -56,15 +56,25 @@
   .ok { color: var(--ok); }
   .bad { color: var(--bad); }
   .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
-  .actions { display: flex; flex-direction: column; gap: 6px; }
+  .actions { display: flex; flex-direction: column; gap: 6px; max-height: 62vh; overflow-y: auto; padding-right: 4px; }
   .action-btn { text-align: left; font-family: ui-monospace, monospace; font-size: 13px; }
   .action-btn .an { color: var(--accent); font-weight: 650; }
   .action-btn .ac { color: var(--chgline); }
+  .agroup { display: flex; flex-direction: column; gap: 4px; }
+  .agroup-head { display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left; font-family: ui-monospace, monospace; font-size: 13px; }
+  .agroup-head .an { color: var(--accent); font-weight: 650; }
+  .agroup-head .ac { color: var(--chgline); }
+  .agroup-head .caret { color: var(--dim); font-size: 11px; }
+  .agroup-head .cnt { color: var(--dim); margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .agroup-head.solo { flex-direction: column; align-items: flex-start; gap: 3px; }
+  .agroup-head.solo .ac { margin-left: 24px; font-size: 12px; line-height: 1.4; }
+  .arow-top { display: flex; align-items: baseline; gap: 8px; }
+  .keycap { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 3px; border: 1px solid var(--line); border-radius: 4px; background: #11151d; color: var(--dim); font-size: 11px; font-family: ui-monospace, monospace; flex: none; }
+  .keycap.empty { border-color: transparent; background: transparent; }
+  .avariants { display: flex; flex-direction: column; gap: 4px; margin-left: 14px; padding-left: 8px; border-left: 1px solid var(--line); }
   .crumbs { font-family: ui-monospace, monospace; font-size: 12px; color: var(--dim); margin-bottom: 10px; word-break: break-word; }
   .crumbs .cur { color: var(--fg); }
-  select, input[type=text] { background: #1d2330; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
-  input[type=text] { width: 100%; font-family: ui-monospace, monospace; font-size: 13px; }
-  .repl-out { margin-top: 6px; font-family: ui-monospace, monospace; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+  select { background: #1d2330; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
   .hint { color: var(--dim); font-size: 12px; }
   footer { position: fixed; bottom: 0; left: 0; right: 0; padding: 8px 22px; background: var(--panel); border-top: 1px solid var(--line); color: var(--dim); font-size: 12px; }
   .hidden { display: none; }
@@ -91,6 +101,7 @@
 
 const WASM_B64 = "/*WASM_B64*/";
 const DATA = /*DEMO_DATA*/;
+const HOTKEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "="];
 
 let engineReady = false;
 function ensureEngine() {
@@ -326,31 +337,48 @@ function renderExplore() {
   h += "</div>";
 
   // Enabled actions column
-  h += '<div class="col">';
-  h += '<div class="vhead">Enabled actions</div>';
   const nx = callJSON(explore_next, spec, cfg, consts, JSON.stringify(cur.payload.json));
+  const txns = nx.ok && nx.transitions ? nx.transitions : [];
+  h += '<div class="col">';
+  h += '<div class="vhead">Enabled actions' + (nx.ok ? ' <span class="hint">(' + txns.length + ")</span>" : "") + "</div>";
   if (!nx.ok) {
     h += '<div class="bad">' + esc(nx.error) + "</div>";
-  } else if (!nx.transitions.length) {
+  } else if (!txns.length) {
     h += '<div class="hint">(no successors — deadlock)</div>';
   } else {
-    h += '<div class="actions">';
-    nx.transitions.forEach((t, i) => {
+    const groups = [];
+    const byName = new Map();
+    txns.forEach((t, i) => {
       const name = t.action || "(unnamed)";
-      const chg = t.changes.join(", ");
-      h += '<button class="btn action-btn" data-i="' + i + '"><span class="an">→ ' + esc(name) + "</span>" +
-           (chg ? ' <span class="ac">' + esc(chg) + "</span>" : "") + "</button>";
+      let g = byName.get(name);
+      if (!g) { g = { name, items: [] }; byName.set(name, g); groups.push(g); }
+      g.items.push({ t, i });
+    });
+    h += '<div class="actions">';
+    groups.forEach((g, gi) => {
+      const key = gi < HOTKEYS.length ? HOTKEYS[gi] : null;
+      const cap = '<span class="keycap' + (key ? "" : " empty") + '">' + (key ? esc(key) : "") + "</span>";
+      if (g.items.length === 1) {
+        const { t, i } = g.items[0];
+        const chg = t.changes.join(", ");
+        h += '<button class="btn agroup-head solo" id="arow-' + gi + '" data-i="' + i + '">' +
+             '<span class="arow-top">' + cap + '<span class="an">→ ' + esc(g.name) + "</span></span>" +
+             (chg ? '<span class="ac">' + esc(chg) + "</span>" : "") + "</button>";
+      } else {
+        h += '<div class="agroup">';
+        h += '<button class="btn agroup-head" id="arow-' + gi + '" data-group="' + esc(g.name) + '">' +
+             cap + '<span class="caret">▸</span><span class="an">' + esc(g.name) + "</span>" +
+             '<span class="cnt">' + g.items.length + " variants</span></button>";
+        h += '<div class="avariants hidden">';
+        g.items.forEach(({ t, i }) => {
+          const chg = t.changes.join(", ") || "(no change)";
+          h += '<button class="btn action-btn" data-i="' + i + '"><span class="ac">' + esc(chg) + "</span></button>";
+        });
+        h += "</div></div>";
+      }
     });
     h += "</div>";
   }
-  h += "</div>";
-
-  // REPL column
-  h += '<div class="col">';
-  h += '<div class="vhead">Evaluate</div>';
-  h += '<input type="text" id="ex-repl" placeholder="TLA+ expression over current state, e.g. x + 1" />';
-  h += '<div class="repl-out" id="ex-repl-out"></div>';
-  h += '<div class="hint" style="margin-top:6px">Enter to evaluate. Unprimed vars = current state.</div>';
   h += "</div>";
 
   h += "</div>";
@@ -358,25 +386,23 @@ function renderExplore() {
   view.innerHTML = h;
   wireExploreControls();
 
-  view.querySelectorAll(".action-btn").forEach(btn => {
+  view.querySelectorAll("[data-i]").forEach(btn => {
     btn.onclick = () => {
-      const i = parseInt(btn.getAttribute("data-i"), 10);
-      const t = nx.transitions[i];
+      const t = nx.transitions[parseInt(btn.getAttribute("data-i"), 10)];
+      if (!t) return;
       exPath.push({ label: t.action || "step", payload: t.state });
       renderExplore();
     };
   });
-
-  const repl = document.getElementById("ex-repl");
-  const out = document.getElementById("ex-repl-out");
-  repl.onkeydown = (e) => {
-    if (e.key !== "Enter") return;
-    const expr = repl.value.trim();
-    if (!expr) return;
-    const r = callJSON(explore_eval, spec, cfg, consts, JSON.stringify(cur.payload.json), expr);
-    if (r.ok) out.innerHTML = '<span class="ok">= ' + esc(r.value) + "</span>";
-    else out.innerHTML = '<span class="bad">' + esc(r.error) + "</span>";
-  };
+  view.querySelectorAll(".agroup-head[data-group]").forEach(btn => {
+    btn.onclick = () => {
+      const sub = btn.parentElement.querySelector(".avariants");
+      const caret = btn.querySelector(".caret");
+      if (!sub) return;
+      const nowHidden = sub.classList.toggle("hidden");
+      if (caret) caret.textContent = nowHidden ? "▸" : "▾";
+    };
+  });
 }
 
 function wireExploreControls() {
@@ -403,7 +429,7 @@ function showExplore() {
   document.getElementById("beat-list").classList.add("hidden");
   document.getElementById("beat-view").classList.add("hidden");
   document.getElementById("explore-view").classList.remove("hidden");
-  document.getElementById("foot").textContent = "live exploration — click an action to step, back/reset to navigate";
+  document.getElementById("foot").textContent = "live exploration — 1 2 3 … 0 - = fire the matching action  ·  Backspace = back  ·  or click";
   if (!exVariant && variantNames().length) startVariant(variantNames()[0]);
   else renderExplore();
 }
@@ -412,7 +438,21 @@ document.getElementById("tab-walk").onclick = showWalk;
 document.getElementById("tab-explore").onclick = showExplore;
 
 document.addEventListener("keydown", e => {
-  if (!document.getElementById("explore-view").classList.contains("hidden")) return;
+  const exploring = !document.getElementById("explore-view").classList.contains("hidden");
+  if (exploring) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const tag = e.target && e.target.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+    const ki = HOTKEYS.indexOf(e.key);
+    if (ki >= 0) {
+      const row = document.getElementById("arow-" + ki);
+      if (row) { e.preventDefault(); row.click(); }
+    } else if (e.key === "Backspace") {
+      const back = document.getElementById("ex-back");
+      if (back) { e.preventDefault(); back.click(); }
+    }
+    return;
+  }
   const beat = DATA.beats[beatIdx];
   if (e.key === "ArrowRight") { if (step < maxStep(beat)) { step++; renderWalk(); } }
   else if (e.key === "ArrowLeft") { if (step > 0) { step--; renderWalk(); } }

@@ -38,7 +38,7 @@ if (result.dot) {
 
 ## Stepping API
 
-For step-by-step exploration there are four additional bindings, which power the [`--explorable` HTML export](CLI_GUIDE.md#demo-walkthroughs):
+For step-by-step exploration there are four additional bindings. `explore_init`, `explore_next`, and `explore_invariants` power the [`--explorable` HTML export](CLI_GUIDE.md#demo-walkthroughs); `explore_eval` is available for embedders that want to evaluate an arbitrary expression at a state:
 
 | Binding | Returns |
 |---------|---------|

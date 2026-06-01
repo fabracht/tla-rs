@@ -70,7 +70,7 @@ All tools return a `schema_version: "1"` field — the contract is frozen at ver
 | `validate_demo` | Run a demo manifest (named variants + ordered beats) and report pass/fail per beat and variant, with the failing assertions on a miss. |
 | `append_beat` | Append a beat to a manifest, persisting it only if all its assertions pass. Format-preserving — a `.toml` manifest stays TOML. |
 | `export_demo_doc` | Render a demo manifest to a tested Markdown walkthrough at `out_path`. |
-| `export_demo_html` | Render a demo manifest to a self-contained, offline HTML walkthrough. Pass `explorable: true` to embed the wasm engine as a live in-browser state explorer (step actions, live invariants, expression REPL) — requires a `tla-mcp` built with the `embed-wasm` feature, which the prebuilt release binaries are. |
+| `export_demo_html` | Render a demo manifest to a self-contained, offline HTML walkthrough. Pass `explorable: true` to embed the wasm engine as a live in-browser state explorer (step actions via number-key hotkeys, actions grouped by name, live invariants) — requires a `tla-mcp` built with the `embed-wasm` feature, which the prebuilt release binaries are. |
 
 The boolean toggles `allow_deadlock` and `check_liveness` are `Option<bool>` — omit them to defer to the cfg file (e.g., `CHECK_DEADLOCK FALSE` or `PROPERTY` directives), pass `true` / `false` to override the cfg. The `symmetry` field appends to any constants declared via cfg `SYMMETRY` rather than replacing them.
 
