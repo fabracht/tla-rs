@@ -7,7 +7,7 @@ use crate::checker::format_value;
 use super::beat::run_beat;
 use super::manifest::Manifest;
 
-const TEMPLATE: &str = include_str!("walkthrough.html");
+const TEMPLATE: &str = include_str!("templates/walkthrough.html");
 
 pub fn render_html(manifest_dir: &Path, manifest: &Manifest) -> (String, bool) {
     let (beats, all_passed) = build_beats_json(manifest_dir, manifest, false);
@@ -131,7 +131,7 @@ fn build_variants(manifest_dir: &Path, manifest: &Manifest) -> J {
 }
 
 #[cfg(feature = "embed-wasm")]
-const EXPLORABLE_TEMPLATE: &str = include_str!("explorable.html");
+const EXPLORABLE_TEMPLATE: &str = include_str!("templates/explorable.html");
 #[cfg(feature = "embed-wasm")]
 const WASM_BYTES: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
