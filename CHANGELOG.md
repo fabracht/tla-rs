@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.1] - 2026-06-01
+
+### Changed
+
+- Explorable demo HTML (`--explorable` / `export_demo_html` with `explorable: true`): reworked the in-browser explorer for usability. Enabled actions are now grouped by name — a combinatorial action whose primed variable ranges over many values collapses into one expandable row with a variant count instead of flooding the page with one button per concrete transition. Top-level action rows map to MMORPG-style number-key hotkeys (`1`–`9`, `0`, `-`, `=`); a solo key fires its action, a group key expands it, and `Backspace` steps back. The actions panel is height-capped and scrollable so a large branching factor can't break the layout.
+
+### Removed
+
+- Dropped the explorer's Evaluate/REPL column — it only echoed variables already shown in the State panel. The `explore_eval` WASM binding remains available for embedders. The explorer is now a two-column State + Enabled-actions layout.
+
 ## [0.6.0] - 2026-05-29
 
 ### Changed
