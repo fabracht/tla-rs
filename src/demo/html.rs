@@ -235,6 +235,18 @@ mod tests {
             !html.contains("https://"),
             "must not reference external https"
         );
+        assert!(
+            html.contains("const HOTKEYS ="),
+            "explorer must wire number-key hotkeys"
+        );
+        assert!(
+            html.contains("arow-") && html.contains("agroup-head"),
+            "explorer must render grouped, hotkeyed action rows"
+        );
+        assert!(
+            !html.contains("ex-repl") && !html.contains("repl-out"),
+            "dropped Evaluate/REPL column must not reappear"
+        );
     }
 
     #[cfg(not(feature = "embed-wasm"))]
