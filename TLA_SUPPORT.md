@@ -49,6 +49,8 @@ Inv == x + y <= 2 * N
 
 Invariants are detected by naming convention: definitions starting with `Inv`, `TypeOK`, or `NotSolved` are automatically checked.
 
+The standard type-invariant idiom `vars \subseteq [f1: T1, f2: T2, ...]` (and the pointwise `r \in [f1: T1, ...]`) is checked structurally — the record-type set is never enumerated, so field types may be infinite, e.g. `queue: Seq(MsgId)`. Membership verifies that the value is a record with exactly those fields and that each field value belongs to its type set (recursively, so `SUBSET S`, `[D -> R]`, and `Seq(T)` field types all work).
+
 ## Limitations
 
 `Nat` and `Int` are bounded (-100 to 100 by default). Temporal operators `[]`, `<>`, `~>` are parsed but cannot be evaluated directly — use `--check-liveness` for fairness/liveness properties via SCC analysis. Unbounded quantifiers (`\E x : P` without `\in S`) and `Seq(S)` enumeration are not supported. Recursive operators must be declared with `RECURSIVE`.

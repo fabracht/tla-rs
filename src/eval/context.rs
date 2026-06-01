@@ -247,6 +247,10 @@ pub fn eval_with_context(
                 }
                 return Ok(Value::Bool(false));
             }
+            if matches!(set.as_ref(), Expr::RecordSet(_)) {
+                let ev = eval_with_context(elem, env, defs, ctx)?;
+                return Ok(Value::Bool(in_set_symbolic(&ev, set, env, defs)?));
+            }
             let ev = eval_with_context(elem, env, defs, ctx)?;
             let sv = eval_set(set, env, defs)?;
             Ok(Value::Bool(sv.contains(&ev)))
@@ -292,6 +296,10 @@ pub fn eval_with_context(
                     return Ok(Value::Bool(false));
                 }
                 return Ok(Value::Bool(true));
+            }
+            if matches!(set.as_ref(), Expr::RecordSet(_)) {
+                let ev = eval_with_context(elem, env, defs, ctx)?;
+                return Ok(Value::Bool(!in_set_symbolic(&ev, set, env, defs)?));
             }
             let ev = eval_with_context(elem, env, defs, ctx)?;
             let sv = eval_set(set, env, defs)?;

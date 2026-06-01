@@ -65,6 +65,13 @@ pub(crate) fn eval_int(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result
     }
 }
 
+pub(crate) fn is_structural_set_expr(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Powerset(_) | Expr::FunctionSet(_, _) | Expr::SeqSet(_) | Expr::RecordSet(_)
+    )
+}
+
 pub(crate) fn in_set_symbolic(
     val: &Value,
     set_expr: &Expr,
@@ -112,6 +119,26 @@ pub(crate) fn in_set_symbolic(
                 for e in &seq {
                     if !domain.contains(e) {
                         return Ok(false);
+                    }
+                }
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        Expr::RecordSet(fields) => {
+            if let Value::Record(r) = val {
+                if r.len() != fields.len() {
+                    return Ok(false);
+                }
+                for (name, type_expr) in fields {
+                    match r.get(name) {
+                        Some(field_val) => {
+                            if !in_set_symbolic(field_val, type_expr, env, defs)? {
+                                return Ok(false);
+                            }
+                        }
+                        None => return Ok(false),
                     }
                 }
                 Ok(true)

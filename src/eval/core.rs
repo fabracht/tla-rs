@@ -11,7 +11,7 @@ use super::global_state::{
 };
 use super::helpers::{
     apply_fn_value, cartesian_product_records, eval_bool, eval_fn, eval_int, eval_record, eval_set,
-    eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, update_nested,
+    eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_structural_set_expr, update_nested,
 };
 use super::recursive::eval_fn_def_recursive;
 use crate::ast::{Env, Expr, Value};
@@ -170,6 +170,10 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 }
                 return Ok(Value::Bool(false));
             }
+            if matches!(set.as_ref(), Expr::RecordSet(_)) {
+                let ev = eval(elem, env, defs)?;
+                return Ok(Value::Bool(in_set_symbolic(&ev, set, env, defs)?));
+            }
             let ev = eval(elem, env, defs)?;
             let sv = eval_set(set, env, defs)?;
             Ok(Value::Bool(sv.contains(&ev)))
@@ -225,6 +229,10 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     return Ok(Value::Bool(false));
                 }
                 return Ok(Value::Bool(true));
+            }
+            if matches!(set.as_ref(), Expr::RecordSet(_)) {
+                let ev = eval(elem, env, defs)?;
+                return Ok(Value::Bool(!in_set_symbolic(&ev, set, env, defs)?));
             }
             let ev = eval(elem, env, defs)?;
             let sv = eval_set(set, env, defs)?;
@@ -471,6 +479,15 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Subset(l, r) => {
+            if is_structural_set_expr(r) {
+                let ls = eval_set(l, env, defs)?;
+                for elem in &ls {
+                    if !in_set_symbolic(elem, r, env, defs)? {
+                        return Ok(Value::Bool(false));
+                    }
+                }
+                return Ok(Value::Bool(true));
+            }
             let ls = eval_set(l, env, defs)?;
             let rs = eval_set(r, env, defs)?;
             Ok(Value::Bool(ls.is_subset(&rs)))

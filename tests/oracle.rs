@@ -388,6 +388,18 @@ fn test_lazy_subset_membership() {
 }
 
 #[test]
+fn test_record_set_membership() {
+    let path = Path::new("test_cases/should_pass/record_set_membership.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "record_set_membership.tla should pass (structural membership in [f: T] \
+         record-type sets with an infinite Seq(T) field, via \\in / \\notin / \\subseteq), got: {:?}",
+        result
+    );
+}
+
+#[test]
 fn test_symmetry_reduces_states() {
     let path = Path::new("test_cases/benchmark/symmetric_procs.tla");
     let input = fs::read_to_string(path).expect("failed to read spec file");
