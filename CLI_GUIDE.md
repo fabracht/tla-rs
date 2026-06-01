@@ -16,6 +16,8 @@ CHECK_DEADLOCK TRUE
 
 Supported directives: `INIT`/`NEXT`, `SPECIFICATION` (temporal formula in `Init /\ [][Next]_vars` form), `CONSTANT`/`CONSTANTS`, `INVARIANT`/`INVARIANTS`, `PROPERTY`/`PROPERTIES`, `SYMMETRY`, and `CHECK_DEADLOCK`. CLI flags override cfg values.
 
+`CONSTANT` values (and `-c` on the CLI) accept integers (`42`), booleans (`TRUE`/`FALSE`), strings (`"hello"`), bare identifiers as model values (`rm1`), sets (`{a, b}`), tuples (`<<1, 2>>`), records (`[hp |-> 100, mp |-> 50]`), and functions built with `:>`/`@@` (`d1 :> 1 @@ d2 :> 2`, left-biased on key collisions). All shapes nest. The set-of-functions form `[S -> T]` is a spec-level expression, not a concrete value, so it is not accepted here.
+
 ## Scenarios
 
 Drive the checker along specific execution paths using TLA+ expressions:

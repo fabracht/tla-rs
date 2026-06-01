@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::ast::{Env, Expr, Spec, Value};
@@ -44,6 +44,14 @@ enum Token {
     Eq,
     LBrace,
     RBrace,
+    LBracket,
+    RBracket,
+    LTuple,
+    RTuple,
+    MapsTo,
+    ColonGt,
+    AtAt,
+    Arrow,
     Comma,
 }
 
@@ -102,6 +110,54 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
         if chars[i] == ',' {
             tokens.push(Token::Comma);
             i += 1;
+            continue;
+        }
+
+        if chars[i] == '[' {
+            tokens.push(Token::LBracket);
+            i += 1;
+            continue;
+        }
+
+        if chars[i] == ']' {
+            tokens.push(Token::RBracket);
+            i += 1;
+            continue;
+        }
+
+        if chars[i] == '<' && i + 1 < chars.len() && chars[i + 1] == '<' {
+            tokens.push(Token::LTuple);
+            i += 2;
+            continue;
+        }
+
+        if chars[i] == '>' && i + 1 < chars.len() && chars[i + 1] == '>' {
+            tokens.push(Token::RTuple);
+            i += 2;
+            continue;
+        }
+
+        if chars[i] == '|' && i + 2 < chars.len() && chars[i + 1] == '-' && chars[i + 2] == '>' {
+            tokens.push(Token::MapsTo);
+            i += 3;
+            continue;
+        }
+
+        if chars[i] == ':' && i + 1 < chars.len() && chars[i + 1] == '>' {
+            tokens.push(Token::ColonGt);
+            i += 2;
+            continue;
+        }
+
+        if chars[i] == '@' && i + 1 < chars.len() && chars[i + 1] == '@' {
+            tokens.push(Token::AtAt);
+            i += 2;
+            continue;
+        }
+
+        if chars[i] == '-' && i + 1 < chars.len() && chars[i + 1] == '>' {
+            tokens.push(Token::Arrow);
+            i += 2;
             continue;
         }
 
@@ -196,6 +252,51 @@ fn is_keyword(tok: &Token) -> bool {
 }
 
 fn parse_constant_value_from_tokens(tokens: &[Token], pos: &mut usize) -> Result<Value, String> {
+    let first = parse_constant_maps_to(tokens, pos)?;
+    if !matches!(tokens.get(*pos), Some(Token::AtAt)) {
+        return Ok(first);
+    }
+    let mut merged = match first {
+        Value::Fn(m) => (*m).clone(),
+        other => {
+            return Err(format!(
+                "'@@' requires function operands built with ':>', got {:?}",
+                other
+            ));
+        }
+    };
+    while matches!(tokens.get(*pos), Some(Token::AtAt)) {
+        *pos += 1;
+        match parse_constant_maps_to(tokens, pos)? {
+            Value::Fn(m) => {
+                for (k, v) in m.iter() {
+                    merged.entry(k.clone()).or_insert_with(|| v.clone());
+                }
+            }
+            other => {
+                return Err(format!(
+                    "'@@' requires function operands built with ':>', got {:?}",
+                    other
+                ));
+            }
+        }
+    }
+    Ok(Value::func(merged))
+}
+
+fn parse_constant_maps_to(tokens: &[Token], pos: &mut usize) -> Result<Value, String> {
+    let key = parse_constant_primary(tokens, pos)?;
+    if !matches!(tokens.get(*pos), Some(Token::ColonGt)) {
+        return Ok(key);
+    }
+    *pos += 1;
+    let value = parse_constant_primary(tokens, pos)?;
+    let mut m = BTreeMap::new();
+    m.insert(key, value);
+    Ok(Value::func(m))
+}
+
+fn parse_constant_primary(tokens: &[Token], pos: &mut usize) -> Result<Value, String> {
     if *pos >= tokens.len() {
         return Err("expected value, got end of input".to_string());
     }
@@ -243,6 +344,69 @@ fn parse_constant_value_from_tokens(tokens: &[Token], pos: &mut usize) -> Result
                 }
             }
             Ok(Value::set(set))
+        }
+        Token::LTuple => {
+            *pos += 1;
+            let mut items = Vec::new();
+            if matches!(tokens.get(*pos), Some(Token::RTuple)) {
+                *pos += 1;
+                return Ok(Value::tuple(items));
+            }
+            loop {
+                items.push(parse_constant_value_from_tokens(tokens, pos)?);
+                match tokens.get(*pos) {
+                    Some(Token::RTuple) => {
+                        *pos += 1;
+                        break;
+                    }
+                    Some(Token::Comma) => *pos += 1,
+                    other => return Err(format!("expected ',' or '>>', got {:?}", other)),
+                }
+            }
+            Ok(Value::tuple(items))
+        }
+        Token::LBracket => {
+            *pos += 1;
+            let mut fields = BTreeMap::new();
+            loop {
+                let field = match tokens.get(*pos) {
+                    Some(Token::Ident(name)) => {
+                        let name = name.clone();
+                        *pos += 1;
+                        name
+                    }
+                    other => {
+                        return Err(format!("expected record field name, got {:?}", other));
+                    }
+                };
+                match tokens.get(*pos) {
+                    Some(Token::MapsTo) => *pos += 1,
+                    Some(Token::Arrow) | Some(Token::ColonGt) => {
+                        return Err(
+                            "function-set syntax '[S -> T]' / '[f: S]' is not a concrete value; \
+                             provide an explicit record '[field |-> value]' instead"
+                                .to_string(),
+                        );
+                    }
+                    other => {
+                        return Err(format!(
+                            "expected '|->' after record field, got {:?}",
+                            other
+                        ));
+                    }
+                }
+                let value = parse_constant_value_from_tokens(tokens, pos)?;
+                fields.insert(Arc::from(field.as_str()), value);
+                match tokens.get(*pos) {
+                    Some(Token::RBracket) => {
+                        *pos += 1;
+                        break;
+                    }
+                    Some(Token::Comma) => *pos += 1,
+                    other => return Err(format!("expected ',' or ']', got {:?}", other)),
+                }
+            }
+            Ok(Value::record(fields))
         }
         Token::Ident(s) => {
             let val = Value::Str(Arc::from(s.as_str()));
@@ -298,39 +462,16 @@ pub fn split_top_level(s: &str, delim: char) -> Vec<String> {
 }
 
 pub fn parse_constant_value(s: &str) -> Option<Value> {
-    let s = s.trim();
-    if let Ok(n) = s.parse::<i64>() {
-        return Some(Value::Int(n));
+    let tokens = tokenize(s).ok()?;
+    if tokens.is_empty() {
+        return None;
     }
-    if s == "TRUE" {
-        return Some(Value::Bool(true));
+    let mut pos = 0;
+    let value = parse_constant_value_from_tokens(&tokens, &mut pos).ok()?;
+    if pos != tokens.len() {
+        return None;
     }
-    if s == "FALSE" {
-        return Some(Value::Bool(false));
-    }
-    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-        let inner: Arc<str> = s[1..s.len() - 1].into();
-        return Some(Value::Str(inner));
-    }
-    if s.starts_with('{') && s.ends_with('}') {
-        let inner = s[1..s.len() - 1].trim();
-        if inner.is_empty() {
-            return Some(Value::set(BTreeSet::new()));
-        }
-        let mut set = BTreeSet::new();
-        for part in split_top_level(inner, ',') {
-            if let Some(val) = parse_constant_value(&part) {
-                set.insert(val);
-            } else {
-                return None;
-            }
-        }
-        return Some(Value::set(set));
-    }
-    if !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_') {
-        return Some(Value::Str(s.into()));
-    }
-    None
+    Some(value)
 }
 
 pub fn parse_cfg(input: &str) -> Result<TlcConfig, String> {
@@ -901,6 +1042,107 @@ mod tests {
             parse_constant_value("myVal"),
             Some(Value::Str("myVal".into()))
         );
+    }
+
+    #[test]
+    fn parse_constant_value_tuple() {
+        assert_eq!(
+            parse_constant_value("<<1, 2, 3>>"),
+            Some(Value::tuple(vec![
+                Value::Int(1),
+                Value::Int(2),
+                Value::Int(3)
+            ]))
+        );
+        assert_eq!(parse_constant_value("<<>>"), Some(Value::tuple(vec![])));
+        assert_eq!(
+            parse_constant_value(r#"<<"a", TRUE, x>>"#),
+            Some(Value::tuple(vec![
+                Value::Str("a".into()),
+                Value::Bool(true),
+                Value::Str("x".into())
+            ]))
+        );
+    }
+
+    #[test]
+    fn parse_constant_value_record() {
+        let mut fields = BTreeMap::new();
+        fields.insert(Arc::from("a"), Value::Int(1));
+        fields.insert(Arc::from("b"), Value::Int(2));
+        assert_eq!(
+            parse_constant_value("[a |-> 1, b |-> 2]"),
+            Some(Value::record(fields))
+        );
+    }
+
+    #[test]
+    fn parse_constant_value_function() {
+        let mut m = BTreeMap::new();
+        m.insert(Value::Str("a".into()), Value::Int(1));
+        m.insert(Value::Str("b".into()), Value::Int(2));
+        assert_eq!(
+            parse_constant_value("a :> 1 @@ b :> 2"),
+            Some(Value::func(m.clone()))
+        );
+        let single = {
+            let mut s = BTreeMap::new();
+            s.insert(Value::Int(1), Value::Str("one".into()));
+            s
+        };
+        assert_eq!(
+            parse_constant_value("1 :> \"one\""),
+            Some(Value::func(single))
+        );
+    }
+
+    #[test]
+    fn parse_constant_value_function_merge_is_left_biased() {
+        let mut m = BTreeMap::new();
+        m.insert(Value::Str("a".into()), Value::Int(1));
+        assert_eq!(
+            parse_constant_value("a :> 1 @@ a :> 9"),
+            Some(Value::func(m))
+        );
+    }
+
+    #[test]
+    fn parse_constant_value_nested_shapes() {
+        let mut inner = BTreeMap::new();
+        inner.insert(
+            Arc::from("x"),
+            Value::tuple(vec![Value::Int(1), Value::Int(2)]),
+        );
+        assert_eq!(
+            parse_constant_value("[x |-> <<1, 2>>]"),
+            Some(Value::record(inner))
+        );
+    }
+
+    #[test]
+    fn parse_constant_value_rejects_function_set() {
+        assert_eq!(parse_constant_value("[S -> T]"), None);
+    }
+
+    #[test]
+    fn parse_constant_value_rejects_trailing_garbage() {
+        assert_eq!(parse_constant_value("1 2"), None);
+        assert_eq!(parse_constant_value("<<1, 2"), None);
+        assert_eq!(parse_constant_value("[a |-> 1"), None);
+    }
+
+    #[test]
+    fn parse_cfg_function_and_record_constants() {
+        let input = "CONSTANT F = d1 :> 1 @@ d2 :> 2\nCONSTANT R = [hp |-> 100, mp |-> 50]";
+        let cfg = parse_cfg(input).unwrap();
+        let mut f = BTreeMap::new();
+        f.insert(Value::Str("d1".into()), Value::Int(1));
+        f.insert(Value::Str("d2".into()), Value::Int(2));
+        assert_eq!(cfg.constants[0].1, Value::func(f));
+        let mut r = BTreeMap::new();
+        r.insert(Arc::from("hp"), Value::Int(100));
+        r.insert(Arc::from("mp"), Value::Int(50));
+        assert_eq!(cfg.constants[1].1, Value::record(r));
     }
 
     #[test]
