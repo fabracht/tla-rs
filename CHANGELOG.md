@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.3] - 2026-06-01
+
+### Added
+
+- Structural membership for record-type sets. `r \in [f1: T1, f2: T2, ...]` and the type-invariant idiom `vars \subseteq [f1: T1, ...]` are now checked structurally instead of by enumerating the right-hand side, so field types may be infinite — most importantly `Seq(T)`. Membership verifies the value is a record with exactly those fields and that each field value belongs to its type set, recursively (so `SUBSET S`, `[D -> R]`, and `Seq(T)` field types all compose). This unblocks the standard TLA+ type invariant for specs with sequence-valued record fields (e.g. message-queue models), which previously failed with "Seq(S) cannot be enumerated". `\notin` is handled symmetrically.
+
 ## [0.6.2] - 2026-06-01
 
 ### Added
