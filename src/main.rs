@@ -341,7 +341,7 @@ fn main() -> ExitCode {
                                 val_str
                             ))
                             .with_help(
-                                "supported formats: 42, TRUE, FALSE, \"hello\", {s1,s2}, {\"a\",\"b\"}",
+                                "supported formats: 42, TRUE, FALSE, \"hello\", {s1,s2}, <<1,2>>, [f |-> 1], a :> 1 @@ b :> 2",
                             )
                             .with_note(
                                 "bare identifiers like s1 are treated as model values (strings)",
@@ -574,8 +574,9 @@ fn main() -> ExitCode {
                 println!("Options:");
                 println!("  --constant, -c NAME=VALUE  Set a constant value");
                 println!(
-                    "                             Formats: 3, TRUE, FALSE, \"str\", name, {{s1,s2}}"
+                    "                             Formats: 3, TRUE, FALSE, \"str\", name, {{s1,s2}},"
                 );
+                println!("                             <<1,2>>, [f |-> 1], a :> 1 @@ b :> 2");
                 println!(
                     "  --symmetry, -s NAME        Enable symmetry reduction for a set constant"
                 );

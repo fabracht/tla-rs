@@ -23,7 +23,7 @@ tla spec.tla --quick    # limit to 10,000 states
 tla spec.tla -i         # interactive TUI
 ```
 
-Constants accept integers (`42`), booleans (`TRUE`), strings (`"hello"`), and sets (`{1,2,3}`).
+Constants accept integers (`42`), booleans (`TRUE`), strings (`"hello"`), sets (`{1,2,3}`), tuples (`<<1,2>>`), records (`[hp |-> 100]`), and functions (`a :> 1 @@ b :> 2`).
 
 ## Options
 

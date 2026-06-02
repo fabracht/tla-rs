@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.2] - 2026-06-01
+
+### Added
+
+- cfg `CONSTANT` values and the CLI `-c`/`--constant` flag now accept tuple, record, and function literals: `<<1, 2>>` (tuple), `[hp |-> 100, mp |-> 50]` (record), and `d1 :> 1 @@ d2 :> 2` (function, left-biased on key collisions). All shapes nest inside one another and inside sets. Previously only integers, booleans, strings, model values, and sets were accepted, so specs ported from TLC that relied on function- or record-valued constants could not be configured without rewriting the spec. The set-of-functions form `[S -> T]` remains rejected with a clear error — it is a spec-level expression, not a concrete value.
+
 ## [0.6.1] - 2026-06-01
 
 ### Changed
