@@ -49,7 +49,7 @@ tla --present demo.json --export-html out.html  # self-contained offline HTML
 
 `--export-html` writes a self-contained, offline HTML walkthrough (variant compare, step navigation, change highlighting, inline assertion results).
 
-Adding `--explorable` additionally embeds the wasm engine in the file, turning the walkthrough into a live state explorer — step through enabled actions from any state (number-key hotkeys, actions grouped by name) and see invariant results per state, like a lighter [Interactive Mode](#interactive-mode) in the browser. The explorable export must be built with the `embed-wasm` feature (run `cargo make wasm` first to produce the inlined `pkg/` artifacts):
+Adding `--explorable` additionally embeds the wasm engine in the file, turning the walkthrough into a live state explorer — step through enabled actions from any state (number-key hotkeys, actions grouped by name) and see invariant results per state, like a lighter [Interactive Mode](#interactive-mode) in the browser. A parametric action (one whose `Next` disjunct picks from a domain, e.g. `\E v \in 0..MaxTime : wallClock' = v`) is not rendered as one button per value — its variants are factored into the shared effect (shown once) plus one value picker per variable that differs, with cascading selection when several vary. So a reboot that chooses both an offline duration and a boot-time wall clock becomes two dropdowns, not their cross-product. The explorable export must be built with the `embed-wasm` feature (run `cargo make wasm` first to produce the inlined `pkg/` artifacts):
 
 ```bash
 cargo make wasm

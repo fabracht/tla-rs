@@ -247,6 +247,10 @@ mod tests {
             !html.contains("ex-repl") && !html.contains("repl-out"),
             "dropped Evaluate/REPL column must not reappear"
         );
+        assert!(
+            html.contains("function analyzeGroup") && html.contains("function renderChooser"),
+            "parametric variant chooser must ship in the explorer"
+        );
     }
 
     #[cfg(not(feature = "embed-wasm"))]
