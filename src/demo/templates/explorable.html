@@ -72,6 +72,14 @@
   .keycap { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 3px; border: 1px solid var(--line); border-radius: 4px; background: #11151d; color: var(--dim); font-size: 11px; font-family: ui-monospace, monospace; flex: none; }
   .keycap.empty { border-color: transparent; background: transparent; }
   .avariants { display: flex; flex-direction: column; gap: 4px; margin-left: 14px; padding-left: 8px; border-left: 1px solid var(--line); }
+  .acommon { color: var(--dim); font-family: ui-monospace, monospace; font-size: 12px; padding: 2px 0 4px 0; }
+  .morerow .hint { font-style: italic; }
+  .vhid { display: none; }
+  .chooser { display: flex; flex-direction: column; gap: 6px; padding: 2px 0; }
+  .chooserrow { display: flex; align-items: center; gap: 8px; font-family: ui-monospace, monospace; font-size: 13px; }
+  .chooserrow .cvar { color: var(--accent); font-weight: 650; white-space: nowrap; }
+  .cdim { flex: 1; min-width: 0; }
+  .cstep { align-self: flex-start; font-family: ui-monospace, monospace; font-size: 12px; }
   .crumbs { font-family: ui-monospace, monospace; font-size: 12px; color: var(--dim); margin-bottom: 10px; word-break: break-word; }
   .crumbs .cur { color: var(--fg); }
   select { background: #1d2330; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
@@ -102,6 +110,9 @@
 const WASM_B64 = "/*WASM_B64*/";
 const DATA = /*DEMO_DATA*/;
 const HOTKEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "="];
+const LIST_CAP = 8;
+const CHOOSER_MIN = 6;
+const MAX_DIMS = 3;
 
 let engineReady = false;
 function ensureEngine() {
@@ -119,6 +130,50 @@ function ensureEngine() {
 
 function esc(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/* ---------- Action-group analysis (collapse combinatorial variants) ---------- */
+// A named action whose variants differ only in a few variables' next-state values
+// is factored into: shared effect (shown once) + one picker per varying variable.
+function analyzeGroup(g, curDisplay) {
+  const vars = Object.keys(g.items[0].t.state.display);
+  const dims = [], common = [];
+  vars.forEach(v => {
+    const distinct = [...new Set(g.items.map(({ t }) => t.state.display[v]))];
+    if (distinct.length > 1) {
+      dims.push({ var: v, values: distinct });
+    } else if (curDisplay[v] !== distinct[0]) {
+      common.push({ var: v, to: distinct[0] });
+    }
+  });
+  g.dims = dims;
+  g.common = common;
+  g.variants = g.items.map(({ t, i }) => ({ i, key: dims.map(d => t.state.display[d.var]) }));
+  const uniqueKeys = new Set(g.variants.map(vt => JSON.stringify(vt.key)));
+  g.useChooser =
+    dims.length >= 1 &&
+    dims.length <= MAX_DIMS &&
+    uniqueKeys.size === g.variants.length &&
+    g.items.length > CHOOSER_MIN;
+}
+
+function variantLabel(g, t) {
+  if (!g.dims.length) return "(no change)";
+  return g.dims.map(d => esc(d.var) + " = " + esc(t.state.display[d.var])).join(", ");
+}
+
+function renderChooser(g, gi) {
+  let s = '<div class="chooser" data-chooser="' + gi + '">';
+  g.dims.forEach((d, di) => {
+    s += '<label class="chooserrow"><span class="cvar">' + esc(d.var) + "&prime; =</span>";
+    s += '<select class="cdim" data-gi="' + gi + '" data-di="' + di + '"><option value="">—</option>';
+    d.values.forEach((v, vi) => { s += '<option value="' + vi + '">' + esc(v) + "</option>"; });
+    s += "</select></label>";
+  });
+  if (g.dims.length > 1) {
+    s += '<button class="btn cstep" data-gi="' + gi + '" disabled>step &rsaquo;</button>';
+  }
+  return s + "</div>";
 }
 
 /* ---------- Walkthrough (static, pre-computed beats) ---------- */
@@ -339,6 +394,7 @@ function renderExplore() {
   // Enabled actions column
   const nx = callJSON(explore_next, spec, cfg, consts, JSON.stringify(cur.payload.json));
   const txns = nx.ok && nx.transitions ? nx.transitions : [];
+  let groups = [];
   h += '<div class="col">';
   h += '<div class="vhead">Enabled actions' + (nx.ok ? ' <span class="hint">(' + txns.length + ")</span>" : "") + "</div>";
   if (!nx.ok) {
@@ -346,7 +402,6 @@ function renderExplore() {
   } else if (!txns.length) {
     h += '<div class="hint">(no successors — deadlock)</div>';
   } else {
-    const groups = [];
     const byName = new Map();
     txns.forEach((t, i) => {
       const name = t.action || "(unnamed)";
@@ -354,6 +409,7 @@ function renderExplore() {
       if (!g) { g = { name, items: [] }; byName.set(name, g); groups.push(g); }
       g.items.push({ t, i });
     });
+    groups.forEach(g => { if (g.items.length > 1) analyzeGroup(g, cur.payload.display); });
     h += '<div class="actions">';
     groups.forEach((g, gi) => {
       const key = gi < HOTKEYS.length ? HOTKEYS[gi] : null;
@@ -370,10 +426,20 @@ function renderExplore() {
              cap + '<span class="caret">▸</span><span class="an">' + esc(g.name) + "</span>" +
              '<span class="cnt">' + g.items.length + " variants</span></button>";
         h += '<div class="avariants hidden">';
-        g.items.forEach(({ t, i }) => {
-          const chg = t.changes.join(", ") || "(no change)";
-          h += '<button class="btn action-btn" data-i="' + i + '"><span class="ac">' + esc(chg) + "</span></button>";
-        });
+        if (g.common.length) {
+          h += '<div class="acommon">' + g.common.map(c => esc(c.var) + " → " + esc(c.to)).join(", ") + "</div>";
+        }
+        if (g.useChooser) {
+          h += renderChooser(g, gi);
+        } else {
+          g.items.forEach(({ t, i }, vi) => {
+            const hide = vi >= LIST_CAP ? " vhid" : "";
+            h += '<button class="btn action-btn' + hide + '" data-i="' + i + '"><span class="ac">' + variantLabel(g, t) + "</span></button>";
+          });
+          if (g.items.length > LIST_CAP) {
+            h += '<button class="btn action-btn morerow" data-more="' + gi + '"><span class="hint">show all ' + g.items.length + " &rsaquo;</span></button>";
+          }
+        }
         h += "</div></div>";
       }
     });
@@ -386,13 +452,15 @@ function renderExplore() {
   view.innerHTML = h;
   wireExploreControls();
 
+  const fire = i => {
+    const t = nx.transitions[i];
+    if (!t) return;
+    exPath.push({ label: t.action || "step", payload: t.state });
+    renderExplore();
+  };
+
   view.querySelectorAll("[data-i]").forEach(btn => {
-    btn.onclick = () => {
-      const t = nx.transitions[parseInt(btn.getAttribute("data-i"), 10)];
-      if (!t) return;
-      exPath.push({ label: t.action || "step", payload: t.state });
-      renderExplore();
-    };
+    btn.onclick = () => fire(parseInt(btn.getAttribute("data-i"), 10));
   });
   view.querySelectorAll(".agroup-head[data-group]").forEach(btn => {
     btn.onclick = () => {
@@ -402,6 +470,38 @@ function renderExplore() {
       const nowHidden = sub.classList.toggle("hidden");
       if (caret) caret.textContent = nowHidden ? "▸" : "▾";
     };
+  });
+  view.querySelectorAll(".morerow[data-more]").forEach(btn => {
+    btn.onclick = () => {
+      btn.parentElement.querySelectorAll(".vhid").forEach(e => e.classList.remove("vhid"));
+      btn.remove();
+    };
+  });
+  view.querySelectorAll(".chooser").forEach(box => {
+    const g = groups[parseInt(box.getAttribute("data-chooser"), 10)];
+    const selects = [...box.querySelectorAll(".cdim")];
+    const stepBtn = box.querySelector(".cstep");
+    const update = () => {
+      const sel = selects.map(s => (s.value === "" ? null : g.dims[+s.dataset.di].values[+s.value]));
+      const consistent = (vt, skip) => sel.every((val, di) => di === skip || val === null || vt.key[di] === val);
+      selects.forEach((s, di) => {
+        const allowed = new Set(g.variants.filter(vt => consistent(vt, di)).map(vt => vt.key[di]));
+        [...s.options].forEach(opt => {
+          if (opt.value !== "") opt.disabled = !allowed.has(g.dims[di].values[+opt.value]);
+        });
+      });
+      const matches = g.variants.filter(vt => consistent(vt, -1));
+      if (stepBtn) stepBtn.disabled = matches.length !== 1;
+      if (g.dims.length === 1 && sel[0] !== null && matches.length === 1) fire(matches[0].i);
+    };
+    selects.forEach(s => (s.onchange = update));
+    if (stepBtn) {
+      stepBtn.onclick = () => {
+        const matches = g.variants.filter(vt =>
+          selects.every((s, di) => s.value === "" || vt.key[di] === g.dims[di].values[+s.value]));
+        if (matches.length === 1) fire(matches[0].i);
+      };
+    }
   });
 }
 

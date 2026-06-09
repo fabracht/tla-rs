@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.4] - 2026-06-03
+
+### Changed
+
+- Explorable demo HTML: combinatorial action variants are no longer rendered as one button per concrete transition. When a named action's variants differ only in a few variables' next-state values (e.g. `Reboot == \E v \in 0..MaxTime : wallClock' = v`), the explorer factors them into the effect shared by every variant (shown once) plus one value picker per differing variable. A single varying variable fires on selection; several render as cascading dropdowns — choosing one narrows the others to co-occurring values — plus a "step" button, so a reboot that picks both an offline duration and a boot-time wall clock becomes two dropdowns instead of their cross-product. Groups that don't factor into clean `var = value` dimensions fall back to a capped variant list with "show all". The per-variable next-state values come from the transitions the engine already returns, so no engine change was needed.
+
 ## [0.6.3] - 2026-06-01
 
 ### Added
