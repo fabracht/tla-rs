@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.6] - 2026-07-06
+
+### Added
+
+- Headless browser smoke test for the exported explorable demo's explorer JavaScript. A Playwright test drives the real embedded wasm engine in Chromium and asserts the runtime behavior the Rust render test can only check as string scaffolding: one action row per enabled-action group, a solo action's number-key hotkey firing the transition and advancing the state, `Backspace` stepping back, and a multi-variant group's hotkey expanding its variant sublist. Runs in a new `explorer-e2e` CI job that builds `tla` with the embedded wasm engine, exports a fixture demo, and runs the test against it.
+
 ## [0.6.5] - 2026-07-05
 
 ### Fixed

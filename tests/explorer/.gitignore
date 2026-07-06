@@ -1,0 +1,4 @@
+node_modules/
+fixtures/
+test-results/
+playwright-report/

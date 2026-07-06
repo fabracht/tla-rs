@@ -68,3 +68,46 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - run: cargo rustc --lib --release --target wasm32-unknown-unknown --features wasm --crate-type cdylib
+
+  explorer-e2e:
+    name: Explorer E2E (embed-wasm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build wasm engine
+        run: |
+          cargo rustc --lib --release --target wasm32-unknown-unknown --features wasm --crate-type cdylib
+          WB_VERSION=$(cargo tree --features wasm | grep -oE 'wasm-bindgen v[0-9.]+' | head -1 | sed -E 's/^wasm-bindgen v//')
+          if [ -z "$WB_VERSION" ]; then echo "could not determine resolved wasm-bindgen version"; exit 1; fi
+          cargo install wasm-bindgen-cli --version "$WB_VERSION" --locked
+          wasm-bindgen --target web --out-dir pkg target/wasm32-unknown-unknown/release/tla_checker.wasm
+
+      - name: Build tla with embedded wasm engine
+        run: cargo build --release --bin tla --features embed-wasm
+
+      - name: Export explorable demo fixture
+        run: |
+          mkdir -p tests/explorer/fixtures
+          ./target/release/tla --present test_cases/demo/ExploreDemo.demo.json \
+            --export-html tests/explorer/fixtures/explore.html --explorable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install explorer test deps
+        working-directory: tests/explorer
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: tests/explorer
+        run: npx playwright install --with-deps chromium
+
+      - name: Run explorer smoke test
+        working-directory: tests/explorer
+        run: npm test
