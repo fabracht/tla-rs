@@ -1,0 +1,16 @@
+{
+  "schema_version": "1",
+  "title": "Explorer smoke demo",
+  "variants": {
+    "base": { "spec": "ExploreDemo.tla", "constants": {} }
+  },
+  "beats": [
+    {
+      "title": "Tick then fan out",
+      "variant": "base",
+      "scenario": ["action: Tick", "step: x' = 2"],
+      "note": "a solo Tick then a multi-variant Fan step",
+      "expect": ["final: x = 2", "final: y = 1"]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "tla-explorer-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Headless smoke test for the exported explorable demo explorer JS",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
