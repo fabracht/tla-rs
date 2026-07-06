@@ -950,21 +950,6 @@ fn check_liveness_properties(
         );
     }
 
-    if !spec.fairness.is_empty()
-        && let Some(scc_idx) =
-            liveness::find_violating_scc(&graph, &sccs, &spec.fairness, &spec.vars, domains, defs)?
-    {
-        let violation = liveness::build_counterexample(
-            &graph,
-            &sccs[scc_idx],
-            &spec.fairness,
-            &spec.vars,
-            domains,
-            defs,
-        )?;
-        return Ok(LivenessCheckOutcome::Violation(violation));
-    }
-
     for property in &spec.liveness_properties {
         if time_exceeded() {
             return Ok(LivenessCheckOutcome::TimeExceeded);
@@ -989,6 +974,20 @@ fn check_liveness_properties(
             };
 
             if let Some(cycle_indices) = violating_states {
+                let cycle_scc = crate::scc::SCC::new(cycle_indices.clone(), false);
+                if !spec.fairness.is_empty()
+                    && !liveness::check_fairness_in_scc(
+                        &graph,
+                        &cycle_scc,
+                        &spec.fairness,
+                        &spec.vars,
+                        domains,
+                        defs,
+                    )?
+                {
+                    continue;
+                }
+
                 let prop_desc = match property {
                     Expr::LeadsTo(_, _) => format!("{:?}", property),
                     _ => format!("<>{:?}", property),
@@ -1001,7 +1000,14 @@ fn check_liveness_properties(
                         .filter_map(|&idx| graph.get_state(idx).cloned())
                         .collect(),
                     property: prop_desc,
-                    fairness_info: vec![],
+                    fairness_info: liveness::fairness_info_for_scc(
+                        &graph,
+                        &cycle_scc,
+                        &spec.fairness,
+                        &spec.vars,
+                        domains,
+                        defs,
+                    )?,
                 };
                 return Ok(LivenessCheckOutcome::Violation(violation));
             }

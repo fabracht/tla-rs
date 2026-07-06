@@ -742,6 +742,58 @@ fn check_spec_does_not_report_leads_to_violation_when_subscc_unreachable() {
 }
 
 #[test]
+fn check_spec_enforces_wf_vars_for_unfair_cycle_inside_larger_scc() {
+    let dir = std::env::temp_dir().join("tla_mcp_wf_embedded_cycle");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("Hold.tla");
+    let cfg_path = dir.join("Hold.cfg");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE Hold ----\n\
+         EXTENDS Naturals\n\
+         VARIABLES x, y\n\
+         vars == << x, y >>\n\
+         Init == x = \"free\" /\\ y = 0\n\
+         Hold   == x = \"free\" /\\ x' = \"held\" /\\ y' = y\n\
+         Tick   == x = \"held\" /\\ y' = (y + 1) % 2 /\\ x' = \"held\"\n\
+         Expire == x = \"held\" /\\ x' = \"free\" /\\ y' = 0\n\
+         Next == Hold \\/ Tick \\/ Expire\n\
+         Spec == Init /\\ [][Next]_vars /\\ WF_vars(Expire)\n\
+         Live == (x = \"held\") ~> (x = \"free\")\n\
+         ====\n",
+    )
+    .unwrap();
+    std::fs::write(&cfg_path, "SPECIFICATION Spec\nPROPERTY Live\n").unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 100,
+        max_depth: 50,
+        max_seconds: 30,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: Some(true),
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match out.outcome {
+        CheckOutcome::Ok { .. } => {}
+        other => panic!(
+            "WF_vars(Expire) forbids the held-forever cycle, so Live must hold; got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
 fn validate_spec_surfaces_resolved_constants() {
     let input = ValidateSpecInput {
         spec_path: pass_spec("base_counter"),

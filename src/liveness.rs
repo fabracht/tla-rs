@@ -329,67 +329,28 @@ fn reaches_target_state_within_subset(
     None
 }
 
-pub fn find_violating_scc(
-    graph: &StateGraph,
-    sccs: &[SCC],
-    fairness: &[FairnessConstraint],
-    vars: &[Arc<str>],
-    constants: &Env,
-    defs: &Definitions,
-) -> Result<Option<usize>> {
-    for (i, scc) in sccs.iter().enumerate() {
-        if !scc.is_trivial && !check_fairness_in_scc(graph, scc, fairness, vars, constants, defs)? {
-            return Ok(Some(i));
-        }
-    }
-    Ok(None)
-}
-
-pub fn build_counterexample(
+pub fn fairness_info_for_scc(
     graph: &StateGraph,
     scc: &SCC,
     fairness: &[FairnessConstraint],
     vars: &[Arc<str>],
     constants: &Env,
     defs: &Definitions,
-) -> Result<LivenessViolation> {
-    let first_scc_state = scc.states[0];
-    let prefix = graph.reconstruct_trace(first_scc_state);
-
-    let cycle: Vec<State> = scc
-        .states
-        .iter()
-        .filter_map(|&idx| graph.get_state(idx).cloned())
-        .collect();
-
+) -> Result<Vec<(String, bool)>> {
     let mut fairness_info = Vec::new();
     for constraint in fairness {
-        match constraint {
-            FairnessConstraint::Weak(_, action) => {
-                let enabled = scc_any_enabled(graph, scc, action, vars, constants, defs)?;
-                let taken = scc_has_action_edge(graph, scc, action, vars, constants, defs)?;
-                fairness_info.push((
-                    format!("WF(action): enabled={}, taken={}", enabled, taken),
-                    taken,
-                ));
-            }
-            FairnessConstraint::Strong(_, action) => {
-                let enabled = scc_any_enabled(graph, scc, action, vars, constants, defs)?;
-                let taken = scc_has_action_edge(graph, scc, action, vars, constants, defs)?;
-                fairness_info.push((
-                    format!("SF(action): enabled={}, taken={}", enabled, taken),
-                    taken,
-                ));
-            }
-        }
+        let (label, action) = match constraint {
+            FairnessConstraint::Weak(_, action) => ("WF", action),
+            FairnessConstraint::Strong(_, action) => ("SF", action),
+        };
+        let enabled = scc_any_enabled(graph, scc, action, vars, constants, defs)?;
+        let taken = scc_has_action_edge(graph, scc, action, vars, constants, defs)?;
+        fairness_info.push((
+            format!("{}(action): enabled={}, taken={}", label, enabled, taken),
+            taken,
+        ));
     }
-
-    Ok(LivenessViolation {
-        prefix,
-        cycle,
-        property: "fairness violation".into(),
-        fairness_info,
-    })
+    Ok(fairness_info)
 }
 
 #[cfg(test)]
