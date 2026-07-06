@@ -21,6 +21,7 @@ pub struct Parser {
     pub(super) instances: Vec<InstanceDecl>,
     pub(super) fairness: Vec<FairnessConstraint>,
     pub(super) liveness_properties: Vec<Expr>,
+    pub(super) quantified_temporal: Vec<(Arc<str>, Expr, Expr)>,
     pub(super) warnings: Vec<Spanned<String>>,
     pub(super) fresh_counter: u64,
 }
@@ -43,6 +44,7 @@ impl Parser {
             instances: Vec::new(),
             fairness: Vec::new(),
             liveness_properties: Vec::new(),
+            quantified_temporal: Vec::new(),
             warnings: Vec::new(),
             fresh_counter: 0,
         })

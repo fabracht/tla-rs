@@ -311,63 +311,92 @@ pub struct Spec {
     pub invariant_names: Vec<Option<Arc<str>>>,
     pub fairness: Vec<FairnessConstraint>,
     pub liveness_properties: Vec<Expr>,
+    pub quantified_temporal: Vec<(Arc<str>, Expr, Expr)>,
 }
 
 impl Spec {
     pub fn extract_fairness_and_liveness(&mut self, expr: &Expr) -> Vec<String> {
         let mut warnings = Vec::new();
-        self.extract_fairness_and_liveness_inner(expr, &mut warnings);
+        collect_temporal(
+            expr,
+            &mut self.fairness,
+            &mut self.liveness_properties,
+            &mut self.quantified_temporal,
+            &mut warnings,
+        );
         warnings
     }
+}
 
-    fn extract_fairness_and_liveness_inner(&mut self, expr: &Expr, warnings: &mut Vec<String>) {
-        match expr {
-            Expr::WeakFairness(var, action) => {
-                self.fairness.push(FairnessConstraint::Weak(
-                    Expr::Var(var.clone()),
-                    (**action).clone(),
-                ));
-            }
-            Expr::StrongFairness(var, action) => {
-                self.fairness.push(FairnessConstraint::Strong(
-                    Expr::Var(var.clone()),
-                    (**action).clone(),
-                ));
-            }
-            Expr::Eventually(inner) => {
-                if matches!(inner.as_ref(), Expr::Always(_)) {
-                    warnings.push(
-                        "temporal pattern <>[]P (stable-eventually) is not supported by the liveness checker — dropping its inner expression".to_string(),
-                    );
-                } else {
-                    self.liveness_properties.push((**inner).clone());
-                }
-            }
-            Expr::LeadsTo(p, q) => {
-                self.liveness_properties
-                    .push(Expr::LeadsTo(p.clone(), q.clone()));
-            }
-            Expr::And(l, r) | Expr::Or(l, r) => {
-                self.extract_fairness_and_liveness_inner(l, warnings);
-                self.extract_fairness_and_liveness_inner(r, warnings);
-            }
-            Expr::Always(inner) => {
-                if let Expr::Eventually(p) = inner.as_ref() {
-                    self.liveness_properties.push((**p).clone());
-                } else {
-                    self.extract_fairness_and_liveness_inner(inner, warnings);
-                }
-            }
-            Expr::BoxAction(inner, _) => {
-                self.extract_fairness_and_liveness_inner(inner, warnings);
-            }
-            Expr::DiamondAction(_, _) => {
-                warnings.push(
-                    "temporal operator <<A>>_v (diamond action) is not currently extracted into fairness or liveness — dropping".to_string(),
-                );
-            }
-            _ => {}
+pub fn expr_contains_temporal(expr: &Expr) -> bool {
+    match expr {
+        Expr::WeakFairness(_, _)
+        | Expr::StrongFairness(_, _)
+        | Expr::Eventually(_)
+        | Expr::LeadsTo(_, _)
+        | Expr::DiamondAction(_, _) => true,
+        Expr::And(l, r) | Expr::Or(l, r) => expr_contains_temporal(l) || expr_contains_temporal(r),
+        Expr::Always(inner) => expr_contains_temporal(inner),
+        Expr::Forall(_, _, body) | Expr::Exists(_, _, body) => expr_contains_temporal(body),
+        _ => false,
+    }
+}
+
+pub fn collect_temporal(
+    expr: &Expr,
+    fairness: &mut Vec<FairnessConstraint>,
+    liveness: &mut Vec<Expr>,
+    quantified: &mut Vec<(Arc<str>, Expr, Expr)>,
+    warnings: &mut Vec<String>,
+) {
+    match expr {
+        Expr::WeakFairness(var, action) => {
+            fairness.push(FairnessConstraint::Weak(
+                Expr::Var(var.clone()),
+                (**action).clone(),
+            ));
         }
+        Expr::StrongFairness(var, action) => {
+            fairness.push(FairnessConstraint::Strong(
+                Expr::Var(var.clone()),
+                (**action).clone(),
+            ));
+        }
+        Expr::Eventually(inner) => {
+            if matches!(inner.as_ref(), Expr::Always(_)) {
+                warnings.push(
+                    "temporal pattern <>[]P (stable-eventually) is not supported by the liveness checker — dropping its inner expression".to_string(),
+                );
+            } else {
+                liveness.push((**inner).clone());
+            }
+        }
+        Expr::LeadsTo(p, q) => {
+            liveness.push(Expr::LeadsTo(p.clone(), q.clone()));
+        }
+        Expr::And(l, r) | Expr::Or(l, r) => {
+            collect_temporal(l, fairness, liveness, quantified, warnings);
+            collect_temporal(r, fairness, liveness, quantified, warnings);
+        }
+        Expr::Always(inner) => {
+            if let Expr::Eventually(p) = inner.as_ref() {
+                liveness.push((**p).clone());
+            } else {
+                collect_temporal(inner, fairness, liveness, quantified, warnings);
+            }
+        }
+        Expr::BoxAction(inner, _) => {
+            collect_temporal(inner, fairness, liveness, quantified, warnings);
+        }
+        Expr::Forall(var, domain, body) if expr_contains_temporal(body) => {
+            quantified.push((var.clone(), (**domain).clone(), (**body).clone()));
+        }
+        Expr::DiamondAction(_, _) => {
+            warnings.push(
+                "temporal operator <<A>>_v (diamond action) is not currently extracted into fairness or liveness — dropping".to_string(),
+            );
+        }
+        _ => {}
     }
 }
 
