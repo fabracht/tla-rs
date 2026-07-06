@@ -794,6 +794,84 @@ fn check_spec_enforces_wf_vars_for_unfair_cycle_inside_larger_scc() {
 }
 
 #[test]
+fn check_spec_expands_quantified_fairness_and_leads_to_property() {
+    let dir = std::env::temp_dir().join("tla_mcp_quantified_temporal");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("Seats.tla");
+    let cfg_path = dir.join("Seats.cfg");
+    let module = "---- MODULE Seats ----\n\
+         EXTENDS Naturals\n\
+         CONSTANT Seats\n\
+         VARIABLES status, tick\n\
+         vars == << status, tick >>\n\
+         Init == status = [s \\in Seats |-> \"free\"] /\\ tick = 0\n\
+         Hold(s)   == status[s] = \"free\" /\\ status' = [status EXCEPT ![s] = \"held\"] /\\ tick' = tick\n\
+         Tick      == tick' = (tick + 1) % 2 /\\ status' = status\n\
+         Expire(s) == status[s] = \"held\" /\\ status' = [status EXCEPT ![s] = \"free\"] /\\ tick' = 0\n\
+         Next == Tick \\/ (\\E s \\in Seats : Hold(s) \\/ Expire(s))\n\
+         FAIR_SPEC\n\
+         Released(s) == status[s] = \"free\"\n\
+         SeatReleases == \\A s \\in Seats : (status[s] = \"held\") ~> Released(s)\n\
+         ====\n";
+
+    let run = |fair: bool| {
+        let spec_line = if fair {
+            "Spec == Init /\\ [][Next]_vars /\\ (\\A s \\in Seats : WF_vars(Expire(s)))"
+        } else {
+            "Spec == Init /\\ [][Next]_vars"
+        };
+        std::fs::write(&spec_path, module.replace("FAIR_SPEC", spec_line)).unwrap();
+        std::fs::write(
+            &cfg_path,
+            "CONSTANT Seats = {s1, s2}\nSPECIFICATION Spec\nPROPERTY SeatReleases\n",
+        )
+        .unwrap();
+        let input = CheckSpecInput {
+            spec_path: spec_path.to_string_lossy().into_owned(),
+            max_states: 200,
+            max_depth: 50,
+            max_seconds: 30,
+            constants: BTreeMap::new(),
+            symmetry: None,
+            allow_deadlock: None,
+            check_liveness: Some(true),
+            count_satisfying: vec![],
+            continue_on_violation: false,
+            state_constraint: None,
+            config_path: None,
+        };
+        runner::check_spec(&input).outcome
+    };
+
+    let with_fairness = run(true);
+    let without_fairness = run(false);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match with_fairness {
+        CheckOutcome::Ok { .. } => {}
+        other => panic!(
+            "quantified WF_vars(Expire(s)) must make the per-seat leads-to hold; got {:?}",
+            other
+        ),
+    }
+    match without_fairness {
+        CheckOutcome::LivenessViolation { property, .. } => {
+            assert!(
+                property.contains("LeadsTo"),
+                "expected the quantified property expanded to a per-seat leads-to, got {}",
+                property
+            );
+        }
+        other => panic!(
+            "without fairness a seat can stay held forever, so SeatReleases must be violated; got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
 fn validate_spec_surfaces_resolved_constants() {
     let input = ValidateSpecInput {
         spec_path: pass_spec("base_counter"),

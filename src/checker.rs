@@ -950,19 +950,15 @@ fn check_liveness_properties(
         );
     }
 
-    for property in &spec.liveness_properties {
+    let (fairness, liveness_properties) = expand_quantified_temporal(spec, domains, defs)?;
+
+    for property in &liveness_properties {
         if time_exceeded() {
             return Ok(LivenessCheckOutcome::TimeExceeded);
         }
         for scc in &sccs {
-            if !liveness::check_fairness_in_scc(
-                &graph,
-                scc,
-                &spec.fairness,
-                &spec.vars,
-                domains,
-                defs,
-            )? {
+            if !liveness::check_fairness_in_scc(&graph, scc, &fairness, &spec.vars, domains, defs)?
+            {
                 continue;
             }
 
@@ -975,14 +971,9 @@ fn check_liveness_properties(
 
             if let Some(cycle_indices) = violating_states {
                 let cycle_scc = crate::scc::SCC::new(cycle_indices.clone(), false);
-                if !spec.fairness.is_empty()
+                if !fairness.is_empty()
                     && !liveness::check_fairness_in_scc(
-                        &graph,
-                        &cycle_scc,
-                        &spec.fairness,
-                        &spec.vars,
-                        domains,
-                        defs,
+                        &graph, &cycle_scc, &fairness, &spec.vars, domains, defs,
                     )?
                 {
                     continue;
@@ -1001,12 +992,7 @@ fn check_liveness_properties(
                         .collect(),
                     property: prop_desc,
                     fairness_info: liveness::fairness_info_for_scc(
-                        &graph,
-                        &cycle_scc,
-                        &spec.fairness,
-                        &spec.vars,
-                        domains,
-                        defs,
+                        &graph, &cycle_scc, &fairness, &spec.vars, domains, defs,
                     )?,
                 };
                 return Ok(LivenessCheckOutcome::Violation(violation));
@@ -1015,6 +1001,51 @@ fn check_liveness_properties(
     }
 
     Ok(LivenessCheckOutcome::Ok)
+}
+
+fn expand_quantified_temporal(
+    spec: &Spec,
+    domains: &Env,
+    defs: &Definitions,
+) -> Result<(Vec<crate::ast::FairnessConstraint>, Vec<Expr>), EvalError> {
+    let mut fairness = spec.fairness.clone();
+    let mut liveness_properties: Vec<Expr> = Vec::new();
+    let mut pending = spec.quantified_temporal.clone();
+
+    for property in &spec.liveness_properties {
+        match property {
+            Expr::Forall(var, domain, body) if crate::ast::expr_contains_temporal(body) => {
+                pending.push((var.clone(), (**domain).clone(), (**body).clone()));
+            }
+            _ => liveness_properties.push(property.clone()),
+        }
+    }
+
+    while let Some((var, domain, body)) = pending.pop() {
+        let mut env = domains.clone();
+        let elements = match eval(&domain, &mut env, defs)? {
+            Value::Set(set) => set,
+            other => {
+                return Err(EvalError::domain_error(format!(
+                    "quantified fairness/liveness domain must evaluate to a set, got {other:?}"
+                )));
+            }
+        };
+        for element in elements.iter() {
+            let subs = [(var.clone(), Expr::Lit(element.clone()))];
+            let concrete = crate::substitution::substitute_expr(&body, &subs);
+            let mut warnings = Vec::new();
+            crate::ast::collect_temporal(
+                &concrete,
+                &mut fairness,
+                &mut liveness_properties,
+                &mut pending,
+                &mut warnings,
+            );
+        }
+    }
+
+    Ok((fairness, liveness_properties))
 }
 
 pub fn format_trace(trace: &[State], vars: &[Arc<str>]) -> String {
@@ -1605,6 +1636,7 @@ mod tests {
             invariant_names: vec![None],
             fairness: vec![],
             liveness_properties: vec![],
+            quantified_temporal: vec![],
         };
 
         let domains = Env::new();
@@ -1641,6 +1673,7 @@ mod tests {
             invariant_names: vec![None],
             fairness: vec![],
             liveness_properties: vec![],
+            quantified_temporal: vec![],
         };
 
         let domains = Env::new();
@@ -1683,6 +1716,7 @@ mod tests {
             invariant_names: vec![None],
             fairness: vec![],
             liveness_properties: vec![],
+            quantified_temporal: vec![],
         };
 
         let domains = Env::new();
@@ -1723,6 +1757,7 @@ mod tests {
             invariant_names: vec![None],
             fairness: vec![],
             liveness_properties: vec![],
+            quantified_temporal: vec![],
         };
 
         let domains = Env::new();
@@ -1776,6 +1811,7 @@ mod tests {
             invariant_names: vec![None, None],
             fairness: vec![],
             liveness_properties: vec![],
+            quantified_temporal: vec![],
         };
 
         let domains = Env::new();
@@ -1810,6 +1846,7 @@ mod tests {
             invariant_names: vec![None],
             fairness: vec![],
             liveness_properties: vec![],
+            quantified_temporal: vec![],
         };
 
         let domains = Env::new();
@@ -1846,6 +1883,7 @@ mod tests {
             invariant_names: vec![None],
             fairness: vec![],
             liveness_properties: vec![],
+            quantified_temporal: vec![],
         };
 
         let result = check(&spec, &Env::new(), &CheckerConfig::default());
@@ -1900,6 +1938,7 @@ mod tests {
             invariant_names: vec![None],
             fairness: vec![],
             liveness_properties: vec![],
+            quantified_temporal: vec![],
         };
 
         let result1 = check(&spec1, &Env::new(), &CheckerConfig::default());
@@ -1943,6 +1982,7 @@ mod tests {
             invariant_names: vec![None],
             fairness: vec![],
             liveness_properties: vec![],
+            quantified_temporal: vec![],
         };
 
         let result2 = check(&spec2, &Env::new(), &CheckerConfig::default());

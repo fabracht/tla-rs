@@ -272,6 +272,11 @@ impl Parser {
                     let right = self.parse_quantifier_or()?;
                     left = Expr::Equiv(Box::new(left), Box::new(right));
                 }
+                Token::LeadsTo => {
+                    self.advance();
+                    let right = self.parse_quantifier_or()?;
+                    left = Expr::LeadsTo(Box::new(left), Box::new(right));
+                }
                 _ => break,
             }
         }

@@ -776,6 +776,7 @@ fn collect_init(expr: &Expr) -> Option<Expr> {
         | Expr::Eventually(_)
         | Expr::LeadsTo(_, _)
         | Expr::Always(_) => None,
+        Expr::Forall(_, _, body) if crate::ast::expr_contains_temporal(body) => None,
         Expr::And(l, r) => match (collect_init(l), collect_init(r)) {
             (Some(a), Some(b)) => Some(Expr::And(Box::new(a), Box::new(b))),
             (a, None) => a,
@@ -1195,6 +1196,7 @@ mod tests {
             fairness: vec![],
             assumes: vec![],
             liveness_properties: vec![],
+            quantified_temporal: vec![],
             constants: vec![],
         };
         spec.definitions.insert(
@@ -1237,6 +1239,7 @@ mod tests {
             fairness: vec![],
             assumes: vec![],
             liveness_properties: vec![],
+            quantified_temporal: vec![],
             constants: vec![],
         };
 
@@ -1288,6 +1291,7 @@ mod tests {
             fairness: vec![],
             assumes: vec![],
             liveness_properties: vec![],
+            quantified_temporal: vec![],
             constants: vec![],
         };
 
@@ -1347,6 +1351,7 @@ mod tests {
             fairness: vec![],
             assumes: vec![],
             liveness_properties: vec![],
+            quantified_temporal: vec![],
             constants: vec![],
         };
 

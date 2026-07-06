@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.5] - 2026-07-05
+
+### Fixed
+
+- Liveness checking now enforces `WF_vars`/`SF_vars` fairness against the actual recurring cycle instead of reporting it as a violation. Previously a fair action that was continuously enabled but never taken produced a spurious `liveness_violation`, and a fairness check applied to the whole SCC missed unfair sub-cycles nested inside a larger SCC, so a `~>` property that holds under weak fairness could still be reported as violated.
+- Quantified fairness `\A s \in S : WF_vars(A(s))` (and the strong-fairness form) is now expanded into per-element constraints using the resolved constants, rather than leaking `WF_vars` into the initial-state predicate and aborting evaluation.
+- A universally quantified leads-to property such as `\A s \in S : P(s) ~> Q(s)` now parses with the quantifier body extending across `~>` and is expanded into per-element properties, instead of failing with `undefined variable`.
+
 ## [0.6.4] - 2026-06-03
 
 ### Changed

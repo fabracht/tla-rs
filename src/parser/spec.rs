@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::ast::{Expr, FairnessConstraint, Spec};
+use crate::ast::{Expr, Spec};
 use crate::lexer::Token;
 
 use super::error::{ParseError, Result};
@@ -247,58 +247,24 @@ impl Parser {
             invariant_names,
             fairness: self.fairness.clone(),
             liveness_properties: self.liveness_properties.clone(),
+            quantified_temporal: self.quantified_temporal.clone(),
         })
     }
 
     fn extract_fairness_and_liveness(&mut self, expr: &Expr) {
-        match expr {
-            Expr::WeakFairness(var, action) => {
-                self.fairness.push(FairnessConstraint::Weak(
-                    Expr::Var(var.clone()),
-                    (**action).clone(),
-                ));
-            }
-            Expr::StrongFairness(var, action) => {
-                self.fairness.push(FairnessConstraint::Strong(
-                    Expr::Var(var.clone()),
-                    (**action).clone(),
-                ));
-            }
-            Expr::Eventually(inner) => {
-                if matches!(inner.as_ref(), Expr::Always(_)) {
-                    self.warnings.push(crate::span::Spanned::new(
-                        "temporal pattern <>[]P (stable-eventually) is not supported by the liveness checker — dropping its inner expression".to_string(),
-                        crate::span::Span::default(),
-                    ));
-                } else {
-                    self.liveness_properties.push((**inner).clone());
-                }
-            }
-            Expr::LeadsTo(p, q) => {
-                self.liveness_properties
-                    .push(Expr::LeadsTo(p.clone(), q.clone()));
-            }
-            Expr::And(l, r) | Expr::Or(l, r) => {
-                self.extract_fairness_and_liveness(l);
-                self.extract_fairness_and_liveness(r);
-            }
-            Expr::Always(inner) => {
-                if let Expr::Eventually(p) = inner.as_ref() {
-                    self.liveness_properties.push((**p).clone());
-                } else {
-                    self.extract_fairness_and_liveness(inner);
-                }
-            }
-            Expr::BoxAction(inner, _) => {
-                self.extract_fairness_and_liveness(inner);
-            }
-            Expr::DiamondAction(_, _) => {
-                self.warnings.push(crate::span::Spanned::new(
-                    "temporal operator <<A>>_v (diamond action) is not currently extracted into fairness or liveness — dropping".to_string(),
-                    crate::span::Span::default(),
-                ));
-            }
-            _ => {}
+        let mut warnings = Vec::new();
+        crate::ast::collect_temporal(
+            expr,
+            &mut self.fairness,
+            &mut self.liveness_properties,
+            &mut self.quantified_temporal,
+            &mut warnings,
+        );
+        for warning in warnings {
+            self.warnings.push(crate::span::Spanned::new(
+                warning,
+                crate::span::Span::default(),
+            ));
         }
     }
 
