@@ -962,14 +962,14 @@ fn check_liveness_properties(
                 continue;
             }
 
-            let violating_states = match property {
+            let violating_cycles = match property {
                 Expr::LeadsTo(p, q) => {
                     liveness::check_leads_to(&graph, scc, p, q, domains, defs, &spec.vars)?
                 }
                 _ => liveness::check_eventually(&graph, scc, property, domains, defs, &spec.vars)?,
             };
 
-            if let Some(cycle_indices) = violating_states {
+            for cycle_indices in violating_cycles {
                 let cycle_scc = crate::scc::SCC::new(cycle_indices.clone(), false);
                 if !fairness.is_empty()
                     && !liveness::check_fairness_in_scc(

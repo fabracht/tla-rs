@@ -159,9 +159,9 @@ pub fn check_eventually(
     constants: &Env,
     defs: &Definitions,
     vars: &[Arc<str>],
-) -> Result<Option<Vec<usize>>> {
+) -> Result<Vec<Vec<usize>>> {
     if scc.is_trivial {
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
     let mut not_p_states: HashSet<usize> = HashSet::new();
@@ -191,16 +191,15 @@ pub fn check_eventually(
     }
 
     if not_p_states.is_empty() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
     let sub_sccs = crate::scc::compute_sccs_in_subset(graph, &not_p_states);
-    for sub in sub_sccs {
-        if !sub.is_trivial {
-            return Ok(Some(sub.states));
-        }
-    }
-    Ok(None)
+    Ok(sub_sccs
+        .into_iter()
+        .filter(|sub| !sub.is_trivial)
+        .map(|sub| sub.states)
+        .collect())
 }
 
 pub fn check_leads_to(
@@ -211,9 +210,9 @@ pub fn check_leads_to(
     constants: &Env,
     defs: &Definitions,
     vars: &[Arc<str>],
-) -> Result<Option<Vec<usize>>> {
+) -> Result<Vec<Vec<usize>>> {
     if scc.is_trivial {
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
     let mut p_and_not_q_states: Vec<usize> = Vec::new();
@@ -263,70 +262,39 @@ pub fn check_leads_to(
     }
 
     if p_and_not_q_states.is_empty() || not_q_states.is_empty() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
     let sub_sccs = crate::scc::compute_sccs_in_subset(graph, &not_q_states);
-    let mut state_to_subscc: std::collections::HashMap<usize, usize> =
-        std::collections::HashMap::new();
-    let mut nontrivial_sccs: Vec<Vec<usize>> = Vec::new();
-    for sub in sub_sccs {
-        if !sub.is_trivial {
-            let scc_idx = nontrivial_sccs.len();
-            for &s in &sub.states {
-                state_to_subscc.insert(s, scc_idx);
-            }
-            nontrivial_sccs.push(sub.states);
-        }
-    }
+    let nontrivial_sccs: Vec<Vec<usize>> = sub_sccs
+        .into_iter()
+        .filter(|sub| !sub.is_trivial)
+        .map(|sub| sub.states)
+        .collect();
 
     if nontrivial_sccs.is_empty() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
-    let all_targets: HashSet<usize> = state_to_subscc.keys().copied().collect();
-
+    let mut reachable: HashSet<usize> = HashSet::new();
+    let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
     for &start in &p_and_not_q_states {
-        if let Some(reached) =
-            reaches_target_state_within_subset(graph, start, &all_targets, &not_q_states)
-        {
-            let scc_idx = state_to_subscc[&reached];
-            return Ok(Some(nontrivial_sccs[scc_idx].clone()));
+        if not_q_states.contains(&start) && reachable.insert(start) {
+            queue.push_back(start);
         }
     }
-
-    Ok(None)
-}
-
-fn reaches_target_state_within_subset(
-    graph: &StateGraph,
-    start: usize,
-    targets: &HashSet<usize>,
-    allowed: &HashSet<usize>,
-) -> Option<usize> {
-    if !allowed.contains(&start) {
-        return None;
-    }
-    if targets.contains(&start) {
-        return Some(start);
-    }
-    let mut visited: HashSet<usize> = HashSet::new();
-    let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
-    visited.insert(start);
-    queue.push_back(start);
     while let Some(node) = queue.pop_front() {
         for edge in graph.successors(node) {
-            let next = edge.target;
-            if !allowed.contains(&next) || !visited.insert(next) {
-                continue;
+            if not_q_states.contains(&edge.target) && reachable.insert(edge.target) {
+                queue.push_back(edge.target);
             }
-            if targets.contains(&next) {
-                return Some(next);
-            }
-            queue.push_back(next);
         }
     }
-    None
+
+    Ok(nontrivial_sccs
+        .into_iter()
+        .filter(|states| states.iter().any(|s| reachable.contains(s)))
+        .collect())
 }
 
 pub fn fairness_info_for_scc(

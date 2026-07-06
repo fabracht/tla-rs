@@ -872,6 +872,62 @@ fn check_spec_expands_quantified_fairness_and_leads_to_property() {
 }
 
 #[test]
+fn check_spec_reports_fair_sub_cycle_when_an_unfair_sub_cycle_shares_the_scc() {
+    let dir = std::env::temp_dir().join("tla_mcp_two_violating_sub_cycles");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("TwoCycle.tla");
+    let cfg_path = dir.join("TwoCycle.cfg");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE TwoCycle ----\n\
+         VARIABLES loc\n\
+         vars == << loc >>\n\
+         Init == loc = \"hub\"\n\
+         EnterA == loc = \"hub\" /\\ loc' = \"a1\"\n\
+         EnterB == loc = \"hub\" /\\ loc' = \"b1\"\n\
+         StepA  == (loc = \"a1\" /\\ loc' = \"a2\") \\/ (loc = \"a2\" /\\ loc' = \"a1\")\n\
+         StepB  == (loc = \"b1\" /\\ loc' = \"b2\") \\/ (loc = \"b2\" /\\ loc' = \"b1\")\n\
+         Escape == (loc = \"b1\" \\/ loc = \"b2\") /\\ loc' = \"hub\"\n\
+         LeaveA == loc = \"a2\" /\\ loc' = \"hub\"\n\
+         Next == EnterA \\/ EnterB \\/ StepA \\/ StepB \\/ Escape \\/ LeaveA\n\
+         Spec == Init /\\ [][Next]_vars /\\ WF_vars(Escape)\n\
+         P == (loc = \"a1\") \\/ (loc = \"b1\")\n\
+         Q == loc = \"hub\"\n\
+         Live == P ~> Q\n\
+         ====\n",
+    )
+    .unwrap();
+    std::fs::write(&cfg_path, "SPECIFICATION Spec\nPROPERTY Live\n").unwrap();
+
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 100,
+        max_depth: 50,
+        max_seconds: 30,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: Some(true),
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match out.outcome {
+        CheckOutcome::LivenessViolation { .. } => {}
+        other => panic!(
+            "the a1<->a2 cycle is a fair behavior where P holds but Q is never reached, so Live must be violated even though the unfair b cycle shares the SCC; got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
 fn validate_spec_surfaces_resolved_constants() {
     let input = ValidateSpecInput {
         spec_path: pass_spec("base_counter"),
