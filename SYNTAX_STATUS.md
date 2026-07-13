@@ -232,6 +232,18 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | `<<A>>_v` | | Diamond action | Parsed, errors if evaluated directly |
 | `\cdot` | | Action composition | Parsed, errors if evaluated directly |
 
+### Quantified Temporal Properties
+
+Temporal properties may be quantified over a constant set (requires `--check-liveness`; declared via a cfg `PROPERTY` or the `SPECIFICATION`).
+
+| Form | Handling |
+|------|----------|
+| `\A x \in S : <>P(x)` / `\A x \in S : P(x) ~> Q(x)` | Expanded to one liveness property per element of `S`; all must hold. |
+| `\E x \in S : <>Q(x)` | Normalized to `<>(\E x \in S : Q(x))` and checked as a single liveness property. |
+| `\E x \in S : P(x) ~> Q(x)` (existential, non-`<>` body) | Not supported — emits a warning and is dropped. |
+
+`S` must evaluate to a constant set. A property whose definition name ends in `Spec` is extracted by the parser, so it is not re-extracted when also named in a cfg `PROPERTY`.
+
 ---
 
 ## Not Implemented ✗
