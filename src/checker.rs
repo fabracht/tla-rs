@@ -445,7 +445,9 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
 
     let needs_liveness_check = config.check_liveness
-        && (!spec.fairness.is_empty() || !spec.liveness_properties.is_empty());
+        && (!spec.fairness.is_empty()
+            || !spec.liveness_properties.is_empty()
+            || !spec.quantified_temporal.is_empty());
 
     #[cfg(not(target_arch = "wasm32"))]
     let collect_edges =
