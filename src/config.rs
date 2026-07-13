@@ -686,7 +686,9 @@ pub fn apply_config(
                 Some((params, expr)) if params.is_empty() => {
                     let expr = expr.clone();
                     if crate::ast::expr_contains_temporal(&expr) {
-                        warnings.extend(spec.extract_fairness_and_liveness(&expr));
+                        if !parser_pre_extracts_temporal(prop_name) {
+                            warnings.extend(spec.extract_fairness_and_liveness(&expr));
+                        }
                     } else {
                         spec.liveness_properties.push(expr);
                     }
@@ -791,6 +793,10 @@ fn collect_init(expr: &Expr) -> Option<Expr> {
     }
 }
 
+fn parser_pre_extracts_temporal(name: &str) -> bool {
+    name == "Spec" || name.ends_with("Spec")
+}
+
 fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<Vec<String>, String> {
     let expr_clone = match spec.definitions.get(spec_name.as_ref()) {
         Some((params, expr)) if params.is_empty() => expr.clone(),
@@ -810,7 +816,7 @@ fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<Vec<St
     if let Some(next_expr) = find_box_action(&expr_clone) {
         spec.init = Some(collect_init(&expr_clone).unwrap_or(Expr::Lit(Value::Bool(true))));
         spec.next = Some(next_expr);
-        let parser_already_extracted = spec_name.as_ref() == "Spec" || spec_name.ends_with("Spec");
+        let parser_already_extracted = parser_pre_extracts_temporal(spec_name);
         let warnings = if parser_already_extracted {
             Vec::new()
         } else {

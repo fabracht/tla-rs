@@ -52,7 +52,7 @@ pub fn prepare(
             .and_then(|s| (!s.is_empty()).then(|| SourceSpan::from_span(s, &source)));
         StructuredError::parse(err.message.clone(), span)
     })?;
-    let warnings: Vec<ParseWarning> = parser_warnings
+    let mut warnings: Vec<ParseWarning> = parser_warnings
         .iter()
         .map(|w| ParseWarning::from_spanned(w, &source))
         .collect();
@@ -90,7 +90,7 @@ pub fn prepare(
         })?;
         let cfg_parsed = parse_cfg(&cfg_contents)
             .map_err(|e| StructuredError::config(format!("cfg parse error: {}", e)))?;
-        apply_config(
+        let cfg_warnings = apply_config(
             &cfg_parsed,
             &mut spec,
             &mut domains,
@@ -100,6 +100,10 @@ pub fn prepare(
             false,
         )
         .map_err(|e| StructuredError::config(format!("cfg apply error: {}", e)))?;
+        warnings.extend(cfg_warnings.into_iter().map(|message| ParseWarning {
+            message,
+            span: None,
+        }));
     }
 
     for (name, value) in cli_constants {
