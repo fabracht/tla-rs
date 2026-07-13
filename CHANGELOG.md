@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.7] - 2026-07-13
+
+### Fixed
+
+- A temporal `PROPERTY` referenced from a cfg file (e.g. `Eventually1 == <>(x = 1)`) is now routed to the liveness checker instead of being evaluated as a state predicate. Previously the cfg loader pushed the raw property body into the liveness property list without unwrapping its temporal operator, so the checker handed a live `<>`/`~>`/`[]<>` node to the evaluator and aborted with "temporal operator `<>` (eventually) reached eval" — making liveness checking unreachable through a cfg `PROPERTY` (and the `check_spec` MCP tool) even with liveness enabled. cfg properties now pass through the same temporal normalization as the `SPECIFICATION` and parser paths, and quantified temporal properties (`\A s \in S : P(s) ~> Q(s)`) alone are enough to trigger the liveness pass.
+
 ## [0.6.6] - 2026-07-06
 
 ### Added
