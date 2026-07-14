@@ -684,7 +684,14 @@ pub fn apply_config(
         for prop_name in &cfg.properties {
             match spec.definitions.get(prop_name.as_ref()) {
                 Some((params, expr)) if params.is_empty() => {
-                    spec.liveness_properties.push(expr.clone());
+                    let expr = expr.clone();
+                    if crate::ast::expr_contains_temporal(&expr) {
+                        if !parser_pre_extracts_temporal(prop_name) {
+                            warnings.extend(spec.extract_fairness_and_liveness(&expr));
+                        }
+                    } else {
+                        spec.liveness_properties.push(expr);
+                    }
                 }
                 Some(_) => {
                     return Err(format!(
@@ -786,6 +793,10 @@ fn collect_init(expr: &Expr) -> Option<Expr> {
     }
 }
 
+fn parser_pre_extracts_temporal(name: &str) -> bool {
+    name == "Spec" || name.ends_with("Spec")
+}
+
 fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<Vec<String>, String> {
     let expr_clone = match spec.definitions.get(spec_name.as_ref()) {
         Some((params, expr)) if params.is_empty() => expr.clone(),
@@ -805,7 +816,7 @@ fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<Vec<St
     if let Some(next_expr) = find_box_action(&expr_clone) {
         spec.init = Some(collect_init(&expr_clone).unwrap_or(Expr::Lit(Value::Bool(true))));
         spec.next = Some(next_expr);
-        let parser_already_extracted = spec_name.as_ref() == "Spec" || spec_name.ends_with("Spec");
+        let parser_already_extracted = parser_pre_extracts_temporal(spec_name);
         let warnings = if parser_already_extracted {
             Vec::new()
         } else {
@@ -1223,6 +1234,106 @@ mod tests {
         .unwrap();
 
         assert_eq!(checker_config.symmetric_constants, vec![Arc::from("RM")]);
+    }
+
+    #[test]
+    fn apply_config_temporal_property_unwrapped_into_liveness() {
+        let mut spec = Spec {
+            vars: vec![Arc::from("x")],
+            init: None,
+            next: None,
+            invariants: vec![],
+            invariant_names: vec![],
+            definitions: std::collections::BTreeMap::new(),
+            instances: vec![],
+            extends: vec![],
+            fairness: vec![],
+            assumes: vec![],
+            liveness_properties: vec![],
+            quantified_temporal: vec![],
+            constants: vec![],
+        };
+
+        let inner = Expr::Eq(
+            Box::new(Expr::Var(Arc::from("x"))),
+            Box::new(Expr::Lit(Value::Int(1))),
+        );
+        spec.definitions.insert(
+            Arc::from("Eventually1"),
+            (vec![], Expr::Eventually(Box::new(inner.clone()))),
+        );
+
+        let cfg = parse_cfg("PROPERTY Eventually1").unwrap();
+        let mut domains = Env::new();
+        let mut checker_config = CheckerConfig::default();
+
+        apply_config(
+            &cfg,
+            &mut spec,
+            &mut domains,
+            &mut checker_config,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
+
+        assert!(checker_config.check_liveness);
+        assert_eq!(spec.liveness_properties.len(), 1);
+        assert_eq!(
+            format!("{:?}", spec.liveness_properties[0]),
+            format!("{inner:?}")
+        );
+    }
+
+    #[test]
+    fn apply_config_leads_to_property_preserved() {
+        let mut spec = Spec {
+            vars: vec![Arc::from("x")],
+            init: None,
+            next: None,
+            invariants: vec![],
+            invariant_names: vec![],
+            definitions: std::collections::BTreeMap::new(),
+            instances: vec![],
+            extends: vec![],
+            fairness: vec![],
+            assumes: vec![],
+            liveness_properties: vec![],
+            quantified_temporal: vec![],
+            constants: vec![],
+        };
+
+        let p = Box::new(Expr::Eq(
+            Box::new(Expr::Var(Arc::from("x"))),
+            Box::new(Expr::Lit(Value::Int(0))),
+        ));
+        let q = Box::new(Expr::Eq(
+            Box::new(Expr::Var(Arc::from("x"))),
+            Box::new(Expr::Lit(Value::Int(1))),
+        ));
+        spec.definitions.insert(
+            Arc::from("Leads"),
+            (vec![], Expr::LeadsTo(p.clone(), q.clone())),
+        );
+
+        let cfg = parse_cfg("PROPERTY Leads").unwrap();
+        let mut domains = Env::new();
+        let mut checker_config = CheckerConfig::default();
+
+        apply_config(
+            &cfg,
+            &mut spec,
+            &mut domains,
+            &mut checker_config,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(spec.liveness_properties.len(), 1);
+        assert!(matches!(spec.liveness_properties[0], Expr::LeadsTo(_, _)));
     }
 
     #[test]

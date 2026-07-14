@@ -45,7 +45,7 @@ pub fn prepare_from_path(
         .map_err(|e| PrepareError::Io(format!("failed to read {}: {}", spec_path.display(), e)))?;
     let source = Source::new(spec_path.display().to_string(), contents.clone());
 
-    let (mut spec, warnings) =
+    let (mut spec, mut warnings) =
         parse_with_warnings(&contents).map_err(|err| PrepareError::Parse {
             message: err.message.clone(),
             span: err.span,
@@ -71,7 +71,7 @@ pub fn prepare_from_path(
         })?;
         let cfg_parsed = parse_cfg(&cfg_contents)
             .map_err(|e| PrepareError::Config(format!("cfg parse error: {}", e)))?;
-        apply_config(
+        let cfg_warnings = apply_config(
             &cfg_parsed,
             &mut spec,
             &mut domains,
@@ -81,6 +81,11 @@ pub fn prepare_from_path(
             false,
         )
         .map_err(|e| PrepareError::Config(format!("cfg apply error: {}", e)))?;
+        warnings.extend(
+            cfg_warnings
+                .into_iter()
+                .map(|w| Spanned::new(w, Span::default())),
+        );
     }
 
     for (name, value) in constants {

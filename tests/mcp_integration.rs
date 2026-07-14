@@ -872,6 +872,82 @@ fn check_spec_expands_quantified_fairness_and_leads_to_property() {
 }
 
 #[test]
+fn check_spec_routes_cfg_temporal_property_to_liveness_checker() {
+    let dir = std::env::temp_dir().join("tla_mcp_cfg_temporal_property");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("LivenessRepro.tla");
+    let cfg_path = dir.join("LivenessRepro.cfg");
+
+    let module = "---- MODULE LivenessRepro ----\n\
+         EXTENDS Naturals\n\
+         VARIABLE x\n\
+         vars == <<x>>\n\
+         Init == x = 0\n\
+         Step == x = 0 /\\ x' = 1\n\
+         Next == Step \\/ UNCHANGED x\n\
+         FAIR_SPEC\n\
+         TypeOK == x \\in 0..1\n\
+         Eventually1 == <>(x = 1)\n\
+         ====\n";
+
+    let run = |fair: bool| {
+        let spec_line = if fair {
+            "Spec == Init /\\ [][Next]_vars /\\ WF_vars(Step)"
+        } else {
+            "Spec == Init /\\ [][Next]_vars"
+        };
+        std::fs::write(&spec_path, module.replace("FAIR_SPEC", spec_line)).unwrap();
+        std::fs::write(
+            &cfg_path,
+            "SPECIFICATION Spec\nINVARIANTS\n    TypeOK\nPROPERTY\n    Eventually1\n",
+        )
+        .unwrap();
+        let input = CheckSpecInput {
+            spec_path: spec_path.to_string_lossy().into_owned(),
+            max_states: 100,
+            max_depth: 20,
+            max_seconds: 15,
+            constants: BTreeMap::new(),
+            symmetry: None,
+            allow_deadlock: None,
+            check_liveness: Some(true),
+            count_satisfying: vec![],
+            continue_on_violation: false,
+            state_constraint: None,
+            config_path: None,
+        };
+        runner::check_spec(&input).outcome
+    };
+
+    let with_fairness = run(true);
+    let without_fairness = run(false);
+    let _ = std::fs::remove_file(&spec_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let _ = std::fs::remove_dir(&dir);
+
+    match with_fairness {
+        CheckOutcome::Ok { .. } => {}
+        other => panic!(
+            "WF_vars(Step) forces x to reach 1, so <>(x=1) must hold; got {:?}",
+            other
+        ),
+    }
+    match without_fairness {
+        CheckOutcome::LivenessViolation { property, .. } => {
+            assert!(
+                property.contains("Eq"),
+                "expected the eventually property expanded to a state predicate, got {}",
+                property
+            );
+        }
+        other => panic!(
+            "without fairness x can stall at 0 forever, so <>(x=1) must be violated; got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
 fn check_spec_reports_fair_sub_cycle_when_an_unfair_sub_cycle_shares_the_scc() {
     let dir = std::env::temp_dir().join("tla_mcp_two_violating_sub_cycles");
     std::fs::create_dir_all(&dir).unwrap();

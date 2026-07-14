@@ -201,10 +201,8 @@ pub(crate) fn fn_as_tuple(f: &BTreeMap<Value, Value>) -> Option<Vec<Value>> {
     let n = f.len();
     let mut result = Vec::with_capacity(n);
     for i in 1..=n {
-        match f.get(&Value::Int(i as i64)) {
-            Some(v) => result.push(v.clone()),
-            None => return None,
-        }
+        let v = f.get(&Value::Int(i as i64))?;
+        result.push(v.clone());
     }
     Some(result)
 }

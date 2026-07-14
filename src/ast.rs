@@ -391,6 +391,16 @@ pub fn collect_temporal(
         Expr::Forall(var, domain, body) if expr_contains_temporal(body) => {
             quantified.push((var.clone(), (**domain).clone(), (**body).clone()));
         }
+        Expr::Exists(var, domain, body) if expr_contains_temporal(body) => {
+            match body.as_ref() {
+                Expr::Eventually(inner) if !matches!(inner.as_ref(), Expr::Always(_)) => {
+                    liveness.push(Expr::Exists(var.clone(), domain.clone(), inner.clone()));
+                }
+                _ => warnings.push(
+                    "existential temporal property \\E x \\in S : P is only supported when P is <>Q — dropping".to_string(),
+                ),
+            }
+        }
         Expr::DiamondAction(_, _) => {
             warnings.push(
                 "temporal operator <<A>>_v (diamond action) is not currently extracted into fairness or liveness — dropping".to_string(),
