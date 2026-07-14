@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.10] - 2026-07-14
+
+### Fixed
+
+- Liveness counterexamples now report a real cycle whose steps are actual transitions, instead of the recurrent SCC's state-set rendered in an arbitrary order with fabricated `-->` arrows. The checker extracts an ordered cycle by following genuine edges back to a witnessing state (preferring real progress over the always-present stutter self-loop, and falling back to the minimal single-state cycle when stuttering is the only recurrence). The fairness check still runs over the full recurrent set, so detection is unchanged — only the displayed trace is now faithful. Fixes #64.
+
 ## [0.6.9] - 2026-07-14
 
 ### Fixed

@@ -1,7 +1,15 @@
 use std::path::{Path, PathBuf};
 
+use tla_checker::ast::{State, Value};
 use tla_checker::checker::{CheckResult, check};
 use tla_checker::load::prepare_from_path;
+
+fn x_of(state: &State) -> i64 {
+    match state.values.first() {
+        Some(Value::Int(n)) => *n,
+        other => panic!("expected an Int-valued x, got {other:?}"),
+    }
+}
 
 fn manifest_path(rel: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)
@@ -297,5 +305,66 @@ fn vacuous_strong_fairness_on_pure_stutter_action_does_not_rescue_liveness() {
             "<<Stay>>_vars is never enabled (Stay only stutters), so SF_vars(Stay) is vacuous \
              and cannot force Move; <>(x=1) must be violated; got {other:?}"
         ),
+    }
+}
+
+// --- #64: the reported counterexample cycle must be a real cycle whose edges are
+// actual transitions, not the SCC state-set rendered with fabricated arrows. ---
+
+#[test]
+fn violation_cycle_uses_only_real_edges() {
+    let module = "---- MODULE CycleShape ----\n\
+        EXTENDS Naturals\n\
+        VARIABLE x\n\
+        vars == <<x>>\n\
+        Init == x = 0\n\
+        Next == (x = 0 /\\ x' = 1) \\/ (x = 1 /\\ x' = 2) \\/ (x = 2 /\\ x' = 0) \\/ (x = 0 /\\ x' = 0)\n\
+        TypeOK == x \\in 0..2\n\
+        Spec == Init /\\ [][Next]_vars /\\ <>[](x # 0)\n\
+        ====\n";
+    let is_edge = |a: i64, b: i64| matches!((a, b), (0, 1) | (1, 2) | (2, 0) | (0, 0));
+    match run_inline("CycleShape", module) {
+        CheckResult::LivenessViolation(v, _) => {
+            let xs: Vec<i64> = v.cycle.iter().map(x_of).collect();
+            assert!(!xs.is_empty(), "cycle must be non-empty");
+            assert!(
+                xs.contains(&0),
+                "cycle must pass through the not-P witness x=0, got {xs:?}"
+            );
+            for i in 0..xs.len() {
+                let a = xs[i];
+                let b = xs[(i + 1) % xs.len()];
+                assert!(
+                    is_edge(a, b),
+                    "cycle step {a} -> {b} is not a real transition; cycle was {xs:?}"
+                );
+            }
+        }
+        other => panic!("<>[](x # 0) must be violated; got {other:?}"),
+    }
+}
+
+#[test]
+fn stutter_only_recurrence_is_a_single_state_cycle() {
+    let module = "---- MODULE StutterWitness ----\n\
+        EXTENDS Naturals\n\
+        VARIABLE x\n\
+        vars == <<x>>\n\
+        Init == x = 0\n\
+        Rescue == x = 0 /\\ x' = 1\n\
+        Next == Rescue \\/ (x = 1 /\\ UNCHANGED x)\n\
+        TypeOK == x \\in 0..1\n\
+        Spec == Init /\\ [][Next]_vars /\\ <>(x = 1)\n\
+        ====\n";
+    match run_inline("StutterWitness", module) {
+        CheckResult::LivenessViolation(v, _) => {
+            let xs: Vec<i64> = v.cycle.iter().map(x_of).collect();
+            assert_eq!(
+                xs,
+                vec![0],
+                "the only recurrence is stuttering at x=0, so the cycle is that single state; got {xs:?}"
+            );
+        }
+        other => panic!("no fairness forces Rescue, so <>(x=1) must be violated; got {other:?}"),
     }
 }
