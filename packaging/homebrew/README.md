@@ -32,28 +32,28 @@ Both `tla` and `tla-mcp` end up on the user's PATH.
 
 ## Updating the formula on each release
 
-After tagging `vX.Y.Z` and verifying the release pipeline produced all eight assets:
+This is automated. The `update-homebrew-tap` job in `.github/workflows/release.yml`
+runs after every `vX.Y.Z` tag: it downloads the release's `SHA256SUMS`, rewrites
+`Formula/tla-mcp.rb` in the tap repo via `scripts/update-homebrew-formula.sh`
+(version, URLs, and all six checksums), then commits and pushes to the tap.
 
-1. Update `version` in the formula
-2. Update each `url` to point at the new tag
-3. Update each `sha256` with the corresponding asset's checksum
+**Prerequisite:** the tla-rs repo must have a `HOMEBREW_TAP_TOKEN` secret — a PAT
+(or fine-grained token) with `contents: write` on `fabracht/homebrew-tla`. The
+default `GITHUB_TOKEN` cannot push to a different repo, so without this secret the
+job fails and the tap stays stale.
 
-Compute the checksums with:
+### Manual bump (fallback)
+
+If the automation is disabled or you need to bump out of band, run the same script
+against a checkout of the tap:
 
 ```bash
-VERSION=v0.4.3  # replace with new tag
-for asset in tla-macos-arm64 tla-macos-amd64 tla-linux-amd64 \
-             tla-mcp-macos-arm64 tla-mcp-macos-amd64 tla-mcp-linux-amd64; do
-    sha=$(curl -fsSL "https://github.com/fabracht/tla-rs/releases/download/$VERSION/$asset" \
-        | shasum -a 256 | cut -d' ' -f1)
-    printf "%s  %s\n" "$sha" "$asset"
-done
+VERSION=0.6.7  # replace with new version (no leading v)
+curl -fsSL "https://github.com/fabracht/tla-rs/releases/download/v${VERSION}/SHA256SUMS" -o /tmp/SHA256SUMS
+bash scripts/update-homebrew-formula.sh "$VERSION" path/to/homebrew-tla/Formula/tla-mcp.rb /tmp/SHA256SUMS
 ```
 
-Then commit the formula update to the tap repo and push. Long-term automation:
-
-- `brew bump-formula-pr` can prepare the formula update PR
-- `goreleaser` / `release-plz` style automation can keep the tap in sync with each release
+Then commit the formula update to the tap repo and push.
 
 ## Why a tap and not homebrew-core?
 

@@ -150,3 +150,44 @@ jobs:
           artifacts: "release/*"
           token: ${{ secrets.GITHUB_TOKEN }}
           allowUpdates: true
+
+  update-homebrew-tap:
+    name: Update Homebrew tap
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tla-rs
+        uses: actions/checkout@v4
+
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: fabracht/homebrew-tla
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Download release checksums
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          curl --fail --silent --show-error --location \
+            --output SHA256SUMS \
+            "https://github.com/fabracht/tla-rs/releases/download/v${VERSION}/SHA256SUMS"
+
+      - name: Update formula
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          bash scripts/update-homebrew-formula.sh "$VERSION" tap/Formula/tla-mcp.rb SHA256SUMS
+
+      - name: Commit and push
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "formula already up to date for v${VERSION}"
+            exit 0
+          fi
+          git add Formula/tla-mcp.rb
+          git commit -m "tla-mcp ${VERSION}"
+          git push
