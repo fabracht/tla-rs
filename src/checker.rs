@@ -1003,9 +1003,10 @@ fn check_liveness_properties(
                     _ => format!("<>{:?}", property),
                 };
                 let cycle_entry = cycle_indices.first().copied().unwrap_or(scc.states[0]);
+                let display_cycle = liveness::extract_display_cycle(&graph, &cycle_indices);
                 let violation = LivenessViolation {
                     prefix: graph.reconstruct_trace(cycle_entry),
-                    cycle: cycle_indices
+                    cycle: display_cycle
                         .iter()
                         .filter_map(|&idx| graph.get_state(idx).cloned())
                         .collect(),

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use crate::ast::{Env, Expr, FairnessConstraint, State, Value};
@@ -199,6 +199,50 @@ fn eval_bool_at(
     }
 }
 
+pub fn extract_display_cycle(graph: &StateGraph, cycle_indices: &[usize]) -> Vec<usize> {
+    let Some(&entry) = cycle_indices.first() else {
+        return Vec::new();
+    };
+    let set: HashSet<usize> = cycle_indices.iter().copied().collect();
+
+    let mut pred: HashMap<usize, usize> = HashMap::new();
+    let mut visited: HashSet<usize> = HashSet::new();
+    let mut queue: VecDeque<usize> = VecDeque::new();
+    visited.insert(entry);
+    queue.push_back(entry);
+
+    let mut closing: Option<usize> = None;
+    'bfs: while let Some(u) = queue.pop_front() {
+        for edge in graph.successors(u) {
+            let v = edge.target;
+            if v == u || !set.contains(&v) {
+                continue;
+            }
+            if v == entry {
+                closing = Some(u);
+                break 'bfs;
+            }
+            if visited.insert(v) {
+                pred.insert(v, u);
+                queue.push_back(v);
+            }
+        }
+    }
+
+    match closing {
+        Some(mut cur) => {
+            let mut path = vec![cur];
+            while cur != entry {
+                cur = pred[&cur];
+                path.push(cur);
+            }
+            path.reverse();
+            path
+        }
+        None => vec![entry],
+    }
+}
+
 pub fn check_eventually(
     graph: &StateGraph,
     scc: &SCC,
@@ -251,10 +295,10 @@ pub fn check_stable_eventually(
         return Ok(Vec::new());
     }
 
-    for &state_idx in &scc.states {
+    for &witness in &scc.states {
         if eval_bool_at(
             graph,
-            state_idx,
+            witness,
             property,
             constants,
             defs,
@@ -262,7 +306,9 @@ pub fn check_stable_eventually(
             "liveness property",
         )? == Some(false)
         {
-            return Ok(vec![scc.states.clone()]);
+            let mut ordered = vec![witness];
+            ordered.extend(scc.states.iter().copied().filter(|&s| s != witness));
+            return Ok(vec![ordered]);
         }
     }
 
