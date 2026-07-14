@@ -210,3 +210,92 @@ fn stable_eventually_violated_when_property_flips_forever() {
         ),
     }
 }
+
+// --- #63: weak/strong fairness is defined on <<A>>_v = A /\ vars' # vars, so a
+// stuttering step must never count as taking or enabling a fair action. ---
+
+#[test]
+fn weak_fairness_on_stutter_permitting_action_holds() {
+    let module = "---- MODULE StutterFair ----\n\
+        EXTENDS Naturals\n\
+        VARIABLE x\n\
+        vars == <<x>>\n\
+        Init == x = 0\n\
+        Grow == x < 3 /\\ x' \\in {x, x + 1}\n\
+        Next == Grow \\/ (x = 3 /\\ UNCHANGED x)\n\
+        TypeOK == x \\in 0..3\n\
+        Spec == Init /\\ [][Next]_vars /\\ WF_vars(Grow) /\\ <>(x = 3)\n\
+        ====\n";
+    match run_inline("StutterFair", module) {
+        CheckResult::Ok(_) => {}
+        other => panic!(
+            "WF on <<Grow>>_vars (the x+1 step) forces x -> 3; the x'=x stutter must not be \
+             counted as taking Grow, so <>(x=3) holds; got {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn vacuous_fairness_on_pure_stutter_action_does_not_rescue_liveness() {
+    let module = "---- MODULE PureStutterFair ----\n\
+        EXTENDS Naturals\n\
+        VARIABLE x\n\
+        vars == <<x>>\n\
+        Init == x = 0\n\
+        Stay == x' = x\n\
+        Move == x = 0 /\\ x' = 1\n\
+        Next == Stay \\/ Move\n\
+        TypeOK == x \\in 0..1\n\
+        Spec == Init /\\ [][Next]_vars /\\ WF_vars(Stay) /\\ <>(x = 1)\n\
+        ====\n";
+    match run_inline("PureStutterFair", module) {
+        CheckResult::LivenessViolation(_, _) => {}
+        other => panic!(
+            "<<Stay>>_vars is never enabled (Stay only stutters), so WF_vars(Stay) is vacuous \
+             and cannot force Move; <>(x=1) must be violated; got {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn strong_fairness_on_stutter_permitting_action_holds() {
+    let module = "---- MODULE StutterStrongFair ----\n\
+        EXTENDS Naturals\n\
+        VARIABLE x\n\
+        vars == <<x>>\n\
+        Init == x = 0\n\
+        Grow == x < 3 /\\ x' \\in {x, x + 1}\n\
+        Next == Grow \\/ (x = 3 /\\ UNCHANGED x)\n\
+        TypeOK == x \\in 0..3\n\
+        Spec == Init /\\ [][Next]_vars /\\ SF_vars(Grow) /\\ <>(x = 3)\n\
+        ====\n";
+    match run_inline("StutterStrongFair", module) {
+        CheckResult::Ok(_) => {}
+        other => panic!(
+            "SF on <<Grow>>_vars (the x+1 step) is enabled infinitely often and forces x -> 3; \
+             the x'=x stutter must not be counted as taking Grow, so <>(x=3) holds; got {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn vacuous_strong_fairness_on_pure_stutter_action_does_not_rescue_liveness() {
+    let module = "---- MODULE PureStutterStrongFair ----\n\
+        EXTENDS Naturals\n\
+        VARIABLE x\n\
+        vars == <<x>>\n\
+        Init == x = 0\n\
+        Stay == x' = x\n\
+        Move == x = 0 /\\ x' = 1\n\
+        Next == Stay \\/ Move\n\
+        TypeOK == x \\in 0..1\n\
+        Spec == Init /\\ [][Next]_vars /\\ SF_vars(Stay) /\\ <>(x = 1)\n\
+        ====\n";
+    match run_inline("PureStutterStrongFair", module) {
+        CheckResult::LivenessViolation(_, _) => {}
+        other => panic!(
+            "<<Stay>>_vars is never enabled (Stay only stutters), so SF_vars(Stay) is vacuous \
+             and cannot force Move; <>(x=1) must be violated; got {other:?}"
+        ),
+    }
+}
