@@ -364,9 +364,7 @@ pub fn collect_temporal(
         }
         Expr::Eventually(inner) => {
             if matches!(inner.as_ref(), Expr::Always(_)) {
-                warnings.push(
-                    "temporal pattern <>[]P (stable-eventually) is not supported by the liveness checker — dropping its inner expression".to_string(),
-                );
+                liveness.push(Expr::Eventually(inner.clone()));
             } else {
                 liveness.push((**inner).clone());
             }

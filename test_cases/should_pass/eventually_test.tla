@@ -11,6 +11,6 @@ Next == Inc \/ (x = 5 /\ UNCHANGED x)
 
 TypeOK == x \in 0..5
 
-Spec == Init /\ [][Next]_x /\ <>(x = 5)
+Spec == Init /\ [][Next]_x /\ WF_x(Inc) /\ <>(x = 5)
 
 ====

@@ -11,6 +11,6 @@ Next == Toggle
 
 TypeOK == x \in 0..1
 
-Spec == Init /\ [][Next]_x /\ []<>(x = 0)
+Spec == Init /\ [][Next]_x /\ WF_x(Toggle) /\ []<>(x = 0)
 
 ====

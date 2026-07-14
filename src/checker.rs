@@ -939,6 +939,13 @@ fn check_liveness_properties(
         return Ok(LivenessCheckOutcome::TimeExceeded);
     }
 
+    let stutter_targets: Vec<usize> = (0..graph.state_count())
+        .filter(|&idx| !graph.successors(idx).iter().any(|e| e.target == idx))
+        .collect();
+    for idx in stutter_targets {
+        graph.add_edge(idx, idx, None);
+    }
+
     if !config.quiet {
         eprintln!("  Computing strongly connected components...");
     }
@@ -968,6 +975,12 @@ fn check_liveness_properties(
                 Expr::LeadsTo(p, q) => {
                     liveness::check_leads_to(&graph, scc, p, q, domains, defs, &spec.vars)?
                 }
+                Expr::Eventually(inner) => match inner.as_ref() {
+                    Expr::Always(p) => liveness::check_stable_eventually(
+                        &graph, scc, p, domains, defs, &spec.vars,
+                    )?,
+                    _ => liveness::check_eventually(&graph, scc, inner, domains, defs, &spec.vars)?,
+                },
                 _ => liveness::check_eventually(&graph, scc, property, domains, defs, &spec.vars)?,
             };
 
@@ -983,6 +996,10 @@ fn check_liveness_properties(
 
                 let prop_desc = match property {
                     Expr::LeadsTo(_, _) => format!("{:?}", property),
+                    Expr::Eventually(inner) => match inner.as_ref() {
+                        Expr::Always(p) => format!("<>[]{:?}", p),
+                        _ => format!("<>{:?}", inner),
+                    },
                     _ => format!("<>{:?}", property),
                 };
                 let cycle_entry = cycle_indices.first().copied().unwrap_or(scc.states[0]);

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.8] - 2026-07-14
+
+### Added
+
+- `<>[]P` (stable-eventually, "eventually always") is now checked instead of being silently dropped. Previously the temporal-property extractor emitted a warning and discarded the inner expression, so a `SPECIFICATION`/cfg `PROPERTY` of the form `<>[]P` made `check_spec` return a vacuous `ok` without checking anything. The property is now dispatched to a dedicated analysis: `<>[]P` is violated exactly when a reachable fair cycle revisits a `¬P` state, and holds when every fair behavior eventually reaches `P` and stays there.
+
+### Fixed
+
+- Liveness checking now models the implicit stuttering that `[][Next]_vars` always permits, matching TLC. Previously the SCC analysis walked only explicit transitions, so a state whose sole successor was an *unfair* action was wrongly treated as forced to take it, and infinite stuttering at a non-deadlock state was never considered a behavior. A liveness property whose satisfaction depends on progress being forced — `<>P` with no fairness, or a consumer that can stall forever while only an unfair action is enabled — could therefore return a false `ok`. The liveness graph now adds an implicit stutter self-loop to every state; the existing weak/strong fairness filtering discharges the spurious cycles (a stutter-only cycle is rejected wherever a fair action is enabled), so only genuinely stuck states survive as violations. Modeling a stalling agent no longer requires an explicit `\/ UNCHANGED vars` disjunct.
+
 ## [0.6.7] - 2026-07-13
 
 ### Fixed
