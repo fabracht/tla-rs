@@ -152,6 +152,34 @@ fn action_matches(
     }
 }
 
+fn eval_bool_at(
+    graph: &StateGraph,
+    state_idx: usize,
+    expr: &Expr,
+    constants: &Env,
+    defs: &Definitions,
+    vars: &[Arc<str>],
+    context: &'static str,
+) -> Result<Option<bool>> {
+    let Some(state) = graph.get_state(state_idx) else {
+        return Ok(None);
+    };
+    let mut env = crate::eval::state_to_env(state, vars);
+    for (k, v) in constants {
+        env.insert(k.clone(), v.clone());
+    }
+    match eval(expr, &mut env, defs) {
+        Ok(Value::Bool(b)) => Ok(Some(b)),
+        Ok(_) => Err(EvalError::TypeMismatch {
+            expected: "Bool",
+            got: Value::Bool(false),
+            context: Some(context),
+            span: None,
+        }),
+        Err(e) => Err(e),
+    }
+}
+
 pub fn check_eventually(
     graph: &StateGraph,
     scc: &SCC,
@@ -166,27 +194,17 @@ pub fn check_eventually(
 
     let mut not_p_states: HashSet<usize> = HashSet::new();
     for &state_idx in &scc.states {
-        let Some(state) = graph.get_state(state_idx) else {
-            continue;
-        };
-        let mut env = crate::eval::state_to_env(state, vars);
-        for (k, v) in constants {
-            env.insert(k.clone(), v.clone());
-        }
-        match eval(property, &mut env, defs) {
-            Ok(Value::Bool(true)) => continue,
-            Ok(Value::Bool(false)) => {
-                not_p_states.insert(state_idx);
-            }
-            Ok(_) => {
-                return Err(EvalError::TypeMismatch {
-                    expected: "Bool",
-                    got: Value::Bool(false),
-                    context: Some("liveness property"),
-                    span: None,
-                });
-            }
-            Err(e) => return Err(e),
+        if eval_bool_at(
+            graph,
+            state_idx,
+            property,
+            constants,
+            defs,
+            vars,
+            "liveness property",
+        )? == Some(false)
+        {
+            not_p_states.insert(state_idx);
         }
     }
 
@@ -215,27 +233,17 @@ pub fn check_stable_eventually(
     }
 
     for &state_idx in &scc.states {
-        let Some(state) = graph.get_state(state_idx) else {
-            continue;
-        };
-        let mut env = crate::eval::state_to_env(state, vars);
-        for (k, v) in constants {
-            env.insert(k.clone(), v.clone());
-        }
-        match eval(property, &mut env, defs) {
-            Ok(Value::Bool(true)) => continue,
-            Ok(Value::Bool(false)) => {
-                return Ok(vec![scc.states.clone()]);
-            }
-            Ok(_) => {
-                return Err(EvalError::TypeMismatch {
-                    expected: "Bool",
-                    got: Value::Bool(false),
-                    context: Some("liveness property"),
-                    span: None,
-                });
-            }
-            Err(e) => return Err(e),
+        if eval_bool_at(
+            graph,
+            state_idx,
+            property,
+            constants,
+            defs,
+            vars,
+            "liveness property",
+        )? == Some(false)
+        {
+            return Ok(vec![scc.states.clone()]);
         }
     }
 
@@ -259,38 +267,29 @@ pub fn check_leads_to(
     let mut not_q_states: HashSet<usize> = HashSet::new();
 
     for &state_idx in &scc.states {
-        let Some(state) = graph.get_state(state_idx) else {
+        let Some(p_holds) = eval_bool_at(
+            graph,
+            state_idx,
+            p,
+            constants,
+            defs,
+            vars,
+            "leads-to antecedent",
+        )?
+        else {
             continue;
         };
-        let mut env = crate::eval::state_to_env(state, vars);
-        for (k, v) in constants {
-            env.insert(k.clone(), v.clone());
-        }
-
-        let p_holds = match eval(p, &mut env, defs) {
-            Ok(Value::Bool(b)) => b,
-            Ok(_) => {
-                return Err(EvalError::TypeMismatch {
-                    expected: "Bool",
-                    got: Value::Bool(false),
-                    context: Some("leads-to antecedent"),
-                    span: None,
-                });
-            }
-            Err(e) => return Err(e),
-        };
-
-        let q_holds = match eval(q, &mut env, defs) {
-            Ok(Value::Bool(b)) => b,
-            Ok(_) => {
-                return Err(EvalError::TypeMismatch {
-                    expected: "Bool",
-                    got: Value::Bool(false),
-                    context: Some("leads-to consequent"),
-                    span: None,
-                });
-            }
-            Err(e) => return Err(e),
+        let Some(q_holds) = eval_bool_at(
+            graph,
+            state_idx,
+            q,
+            constants,
+            defs,
+            vars,
+            "leads-to consequent",
+        )?
+        else {
+            continue;
         };
 
         if !q_holds {

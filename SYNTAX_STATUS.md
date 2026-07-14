@@ -218,7 +218,7 @@ Stdlib modules (Naturals, Sequences, TLC, etc.) can be used with `LOCAL INSTANCE
 ## Parsed But Not Evaluated ⚠️
 
 ### Temporal Operators
-These operators are parsed into the AST but error at evaluation time. They can appear in skipped definitions (like `Spec`) without causing errors. Fairness operators are handled by the liveness checker (`--check-liveness`).
+These operators are parsed into the AST but error at evaluation time. They can appear in skipped definitions (like `Spec`) without causing errors. Fairness operators are handled by the liveness checker (`--check-liveness`); see **Liveness Property Forms** below for how `<>`, `[]<>`, `<>[]`, and `~>` are checked as top-level properties.
 
 | ASCII | Unicode | Description | Status |
 |-------|---------|-------------|--------|
