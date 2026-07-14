@@ -202,6 +202,46 @@ pub fn check_eventually(
         .collect())
 }
 
+pub fn check_stable_eventually(
+    graph: &StateGraph,
+    scc: &SCC,
+    property: &Expr,
+    constants: &Env,
+    defs: &Definitions,
+    vars: &[Arc<str>],
+) -> Result<Vec<Vec<usize>>> {
+    if scc.is_trivial {
+        return Ok(Vec::new());
+    }
+
+    for &state_idx in &scc.states {
+        let Some(state) = graph.get_state(state_idx) else {
+            continue;
+        };
+        let mut env = crate::eval::state_to_env(state, vars);
+        for (k, v) in constants {
+            env.insert(k.clone(), v.clone());
+        }
+        match eval(property, &mut env, defs) {
+            Ok(Value::Bool(true)) => continue,
+            Ok(Value::Bool(false)) => {
+                return Ok(vec![scc.states.clone()]);
+            }
+            Ok(_) => {
+                return Err(EvalError::TypeMismatch {
+                    expected: "Bool",
+                    got: Value::Bool(false),
+                    context: Some("liveness property"),
+                    span: None,
+                });
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok(Vec::new())
+}
+
 pub fn check_leads_to(
     graph: &StateGraph,
     scc: &SCC,
@@ -332,6 +372,60 @@ mod tests {
         State {
             values: vec![Value::Int(n)],
         }
+    }
+
+    fn eq_x(n: i64) -> Expr {
+        Expr::Eq(
+            Box::new(Expr::Var(Arc::from("x"))),
+            Box::new(Expr::Lit(Value::Int(n))),
+        )
+    }
+
+    #[test]
+    fn stable_eventually_flags_cycle_touching_not_p() {
+        let mut graph = StateGraph::new();
+        graph.add_state(state_with_x(0), None);
+        graph.add_state(state_with_x(1), Some(0));
+        graph.add_edge(0, 1, Some("Toggle".into()));
+        graph.add_edge(1, 0, Some("Toggle".into()));
+
+        let sccs = compute_sccs(&graph);
+        let scc = &sccs[0];
+        assert!(!scc.is_trivial);
+
+        let vars = vec![Arc::from("x")];
+        let constants = Env::new();
+        let defs = Definitions::new();
+
+        let cycles =
+            check_stable_eventually(&graph, scc, &eq_x(1), &constants, &defs, &vars).unwrap();
+        assert_eq!(
+            cycles.len(),
+            1,
+            "the cycle revisits x=0 (not-P) forever, so <>[](x=1) is violated"
+        );
+    }
+
+    #[test]
+    fn stable_eventually_ok_when_all_states_satisfy_p() {
+        let mut graph = StateGraph::new();
+        graph.add_state(state_with_x(1), None);
+        graph.add_edge(0, 0, Some("Stay".into()));
+
+        let sccs = compute_sccs(&graph);
+        let scc = &sccs[0];
+        assert!(!scc.is_trivial);
+
+        let vars = vec![Arc::from("x")];
+        let constants = Env::new();
+        let defs = Definitions::new();
+
+        let cycles =
+            check_stable_eventually(&graph, scc, &eq_x(1), &constants, &defs, &vars).unwrap();
+        assert!(
+            cycles.is_empty(),
+            "every state in the cycle satisfies x=1, so <>[](x=1) holds"
+        );
     }
 
     #[test]

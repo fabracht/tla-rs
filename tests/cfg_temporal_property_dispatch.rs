@@ -94,6 +94,35 @@ fn cfg_unsupported_existential_temporal_warns_instead_of_silently_dropping() {
 }
 
 #[test]
+fn cfg_stable_eventually_property_is_captured_not_dropped() {
+    let spec_src = "---- MODULE M ----\n\
+        EXTENDS Naturals\n\
+        VARIABLE x\n\
+        Init == x = 0\n\
+        Next == x' = x\n\
+        StableEventually == <>[](x = 1)\n\
+        ====\n";
+    let cfg_src = "INIT Init\nNEXT Next\nPROPERTY StableEventually\n";
+    let (spec, warnings) = apply(spec_src, cfg_src);
+    assert_eq!(
+        spec.liveness_properties.len(),
+        1,
+        "<>[]P must be captured for checking, not silently dropped"
+    );
+    assert!(
+        matches!(
+            &spec.liveness_properties[0],
+            Expr::Eventually(inner) if matches!(inner.as_ref(), Expr::Always(_))
+        ),
+        "<>[]P must retain its Eventually(Always(..)) shape so the checker dispatches stable-eventually"
+    );
+    assert!(
+        !warnings.iter().any(|w| w.contains("dropping")),
+        "<>[]P must no longer warn about dropping its inner expression, got {warnings:?}"
+    );
+}
+
+#[test]
 fn cfg_universal_temporal_property_is_captured() {
     let spec_src = "---- MODULE M ----\n\
         EXTENDS Naturals\n\
