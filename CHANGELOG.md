@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.9] - 2026-07-14
+
+### Fixed
+
+- Weak/strong fairness (`WF_v(A)` / `SF_v(A)`) now treats fairness as being about `⟨A⟩_v ≡ A ∧ (vars' ≠ vars)` rather than about `A` merely admitting a stuttering step. Previously, when a fair action allowed a stutter (e.g. `A == x' \in {x, x+1}`), the checker counted the `x'=x` self-loop as "A taken" and treated a stutter-forever cycle as fair, reporting a spurious `liveness_violation` for a property that actually holds under weak fairness. Both sides of the fairness check now ignore stuttering steps: an action is "taken" only on a state-changing edge, and "enabled" for fairness only when a state-changing successor satisfies it (so weak fairness on a pure-stutter action is correctly vacuous rather than spuriously forcing progress). Fixes #63.
+
 ## [0.6.8] - 2026-07-14
 
 ### Added

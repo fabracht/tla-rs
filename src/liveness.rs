@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::ast::{Env, Expr, FairnessConstraint, State, Value};
-use crate::eval::{Definitions, EvalError, eval, is_action_enabled};
+use crate::eval::{Definitions, EvalError, eval};
 use crate::graph::StateGraph;
 use crate::scc::SCC;
 
@@ -56,6 +56,28 @@ pub fn check_fairness_in_scc(
     Ok(true)
 }
 
+fn enables_nonstutter_step(
+    graph: &StateGraph,
+    state_idx: usize,
+    action: &Expr,
+    vars: &[Arc<str>],
+    constants: &Env,
+    defs: &Definitions,
+) -> Result<bool> {
+    let Some(state) = graph.get_state(state_idx) else {
+        return Ok(false);
+    };
+    for edge in graph.successors(state_idx) {
+        if edge.target != state_idx
+            && let Some(next) = graph.get_state(edge.target)
+            && action_matches(action, state, next, vars, constants, defs)?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn scc_all_enabled(
     graph: &StateGraph,
     scc: &SCC,
@@ -65,9 +87,7 @@ fn scc_all_enabled(
     defs: &Definitions,
 ) -> Result<bool> {
     for &state_idx in &scc.states {
-        if let Some(state) = graph.get_state(state_idx)
-            && !is_action_enabled(action, state, vars, constants, defs)?
-        {
+        if !enables_nonstutter_step(graph, state_idx, action, vars, constants, defs)? {
             return Ok(false);
         }
     }
@@ -83,9 +103,7 @@ fn scc_any_enabled(
     defs: &Definitions,
 ) -> Result<bool> {
     for &state_idx in &scc.states {
-        if let Some(state) = graph.get_state(state_idx)
-            && is_action_enabled(action, state, vars, constants, defs)?
-        {
+        if enables_nonstutter_step(graph, state_idx, action, vars, constants, defs)? {
             return Ok(true);
         }
     }
@@ -107,7 +125,8 @@ fn scc_has_action_edge(
             continue;
         };
         for edge in graph.successors(state_idx) {
-            if scc_states.contains(&edge.target)
+            if edge.target != state_idx
+                && scc_states.contains(&edge.target)
                 && let Some(target_state) = graph.get_state(edge.target)
                 && action_matches(action, state, target_state, vars, constants, defs)?
             {
