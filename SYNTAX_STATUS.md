@@ -232,6 +232,19 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | `<<A>>_v` | | Diamond action | Parsed, errors if evaluated directly |
 | `\cdot` | | Action composition | Parsed, errors if evaluated directly |
 
+### Liveness Property Forms
+
+With `--check-liveness`, a top-level property (from a cfg `PROPERTY`, a `SPECIFICATION`, or a `*Spec`-named definition) is checked against fair behaviors via SCC analysis. Supported forms and the cycle that witnesses a violation:
+
+| Form | Checked as | Violated by |
+|------|-----------|-------------|
+| `<>P` | Eventually | a reachable fair cycle whose states are all `¬P` |
+| `[]<>P` | Infinitely often | a reachable fair cycle whose states are all `¬P` |
+| `<>[]P` | Stable-eventually | a reachable fair cycle containing any `¬P` state |
+| `P ~> Q` | Leads-to | a reachable fair `¬Q` cycle reachable from a `P ∧ ¬Q` state |
+
+The liveness graph models the implicit stuttering that `[][Next]_vars` always permits — every state gets a stutter self-loop, and weak/strong fairness rules out the cycles it would otherwise create. An agent that may stall forever therefore needs no explicit `\/ UNCHANGED vars` disjunct to be considered.
+
 ### Quantified Temporal Properties
 
 Temporal properties may be quantified over a constant set (requires `--check-liveness`; declared via a cfg `PROPERTY` or the `SPECIFICATION`).
