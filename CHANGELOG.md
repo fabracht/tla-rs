@@ -2,24 +2,14 @@
 
 ## [0.6.10] - 2026-07-14
 
-### Fixed
-
-- Liveness counterexamples now report a real cycle whose steps are actual transitions, instead of the recurrent SCC's state-set rendered in an arbitrary order with fabricated `-->` arrows. The checker extracts an ordered cycle by following genuine edges back to a witnessing state (preferring real progress over the always-present stutter self-loop, and falling back to the minimal single-state cycle when stuttering is the only recurrence). The fairness check still runs over the full recurrent set, so detection is unchanged — only the displayed trace is now faithful. Fixes #64.
-
-## [0.6.9] - 2026-07-14
-
-### Fixed
-
-- Weak/strong fairness (`WF_v(A)` / `SF_v(A)`) now treats fairness as being about `⟨A⟩_v ≡ A ∧ (vars' ≠ vars)` rather than about `A` merely admitting a stuttering step. Previously, when a fair action allowed a stutter (e.g. `A == x' \in {x, x+1}`), the checker counted the `x'=x` self-loop as "A taken" and treated a stutter-forever cycle as fair, reporting a spurious `liveness_violation` for a property that actually holds under weak fairness. Both sides of the fairness check now ignore stuttering steps: an action is "taken" only on a state-changing edge, and "enabled" for fairness only when a state-changing successor satisfies it (so weak fairness on a pure-stutter action is correctly vacuous rather than spuriously forcing progress). Fixes #63.
-
-## [0.6.8] - 2026-07-14
-
 ### Added
 
 - `<>[]P` (stable-eventually, "eventually always") is now checked instead of being silently dropped. Previously the temporal-property extractor emitted a warning and discarded the inner expression, so a `SPECIFICATION`/cfg `PROPERTY` of the form `<>[]P` made `check_spec` return a vacuous `ok` without checking anything. The property is now dispatched to a dedicated analysis: `<>[]P` is violated exactly when a reachable fair cycle revisits a `¬P` state, and holds when every fair behavior eventually reaches `P` and stays there.
 
 ### Fixed
 
+- Liveness counterexamples now report a real cycle whose steps are actual transitions, instead of the recurrent SCC's state-set rendered in an arbitrary order with fabricated `-->` arrows. The checker extracts an ordered cycle by following genuine edges back to a witnessing state (preferring real progress over the always-present stutter self-loop, and falling back to the minimal single-state cycle when stuttering is the only recurrence). The fairness check still runs over the full recurrent set, so detection is unchanged — only the displayed trace is now faithful. Fixes #64.
+- Weak/strong fairness (`WF_v(A)` / `SF_v(A)`) now treats fairness as being about `⟨A⟩_v ≡ A ∧ (vars' ≠ vars)` rather than about `A` merely admitting a stuttering step. Previously, when a fair action allowed a stutter (e.g. `A == x' \in {x, x+1}`), the checker counted the `x'=x` self-loop as "A taken" and treated a stutter-forever cycle as fair, reporting a spurious `liveness_violation` for a property that actually holds under weak fairness. Both sides of the fairness check now ignore stuttering steps: an action is "taken" only on a state-changing edge, and "enabled" for fairness only when a state-changing successor satisfies it (so weak fairness on a pure-stutter action is correctly vacuous rather than spuriously forcing progress). Fixes #63.
 - Liveness checking now models the implicit stuttering that `[][Next]_vars` always permits, matching TLC. Previously the SCC analysis walked only explicit transitions, so a state whose sole successor was an *unfair* action was wrongly treated as forced to take it, and infinite stuttering at a non-deadlock state was never considered a behavior. A liveness property whose satisfaction depends on progress being forced — `<>P` with no fairness, or a consumer that can stall forever while only an unfair action is enabled — could therefore return a false `ok`. The liveness graph now adds an implicit stutter self-loop to every state; the existing weak/strong fairness filtering discharges the spurious cycles (a stutter-only cycle is rejected wherever a fair action is enabled), so only genuinely stuck states survive as violations. Modeling a stalling agent no longer requires an explicit `\/ UNCHANGED vars` disjunct.
 
 ## [0.6.7] - 2026-07-13
