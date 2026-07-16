@@ -282,6 +282,10 @@ fn run_sweep(
     }
 }
 
+fn missing_value(args: &[String], i: usize) -> bool {
+    args.get(i).is_none_or(|arg| arg.starts_with('-'))
+}
+
 fn main() -> ExitCode {
     #[cfg(feature = "dhat")]
     let _profiler = dhat::Profiler::new_heap();
@@ -325,7 +329,7 @@ fn main() -> ExitCode {
         match args[i].as_str() {
             "--constant" | "-c" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--constant requires NAME=VALUE");
                     return ExitCode::FAILURE;
                 }
@@ -357,7 +361,7 @@ fn main() -> ExitCode {
             }
             "--max-states" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--max-states requires a value");
                     return ExitCode::FAILURE;
                 }
@@ -368,7 +372,7 @@ fn main() -> ExitCode {
             }
             "--max-depth" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--max-depth requires a value");
                     return ExitCode::FAILURE;
                 }
@@ -379,7 +383,7 @@ fn main() -> ExitCode {
             }
             "--symmetry" | "-s" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--symmetry requires a constant name");
                     return ExitCode::FAILURE;
                 }
@@ -389,7 +393,7 @@ fn main() -> ExitCode {
             #[cfg(not(target_arch = "wasm32"))]
             "--export-dot" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--export-dot requires a filename");
                     return ExitCode::FAILURE;
                 }
@@ -397,7 +401,7 @@ fn main() -> ExitCode {
             }
             "--dot-mode" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--dot-mode requires a mode (full, trace, clean, choices)");
                     return ExitCode::FAILURE;
                 }
@@ -434,7 +438,7 @@ fn main() -> ExitCode {
             }
             "--count-satisfying" | "--count" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--count-satisfying requires a definition name");
                     return ExitCode::FAILURE;
                 }
@@ -442,7 +446,7 @@ fn main() -> ExitCode {
             }
             "--config" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--config requires a path");
                     return ExitCode::FAILURE;
                 }
@@ -457,7 +461,7 @@ fn main() -> ExitCode {
             #[cfg(not(target_arch = "wasm32"))]
             "--trace-json" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--trace-json requires a filename");
                     return ExitCode::FAILURE;
                 }
@@ -465,7 +469,7 @@ fn main() -> ExitCode {
             }
             "--scenario" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--scenario requires a scenario string or @filename");
                     return ExitCode::FAILURE;
                 }
@@ -485,7 +489,7 @@ fn main() -> ExitCode {
             #[cfg(not(target_arch = "wasm32"))]
             "--present" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--present requires a manifest file");
                     return ExitCode::FAILURE;
                 }
@@ -494,7 +498,7 @@ fn main() -> ExitCode {
             #[cfg(not(target_arch = "wasm32"))]
             "--export-md" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--export-md requires an output file");
                     return ExitCode::FAILURE;
                 }
@@ -503,7 +507,7 @@ fn main() -> ExitCode {
             #[cfg(not(target_arch = "wasm32"))]
             "--export-html" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--export-html requires an output file");
                     return ExitCode::FAILURE;
                 }
@@ -520,7 +524,7 @@ fn main() -> ExitCode {
             #[cfg(not(target_arch = "wasm32"))]
             "--save-counterexample" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--save-counterexample requires a filename");
                     return ExitCode::FAILURE;
                 }
@@ -529,7 +533,7 @@ fn main() -> ExitCode {
             #[cfg(not(target_arch = "wasm32"))]
             "--replay" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--replay requires a counterexample JSON file");
                     return ExitCode::FAILURE;
                 }
@@ -537,7 +541,7 @@ fn main() -> ExitCode {
             }
             "--sweep" => {
                 i += 1;
-                if i >= args.len() {
+                if missing_value(&args, i) {
                     eprintln!("--sweep requires NAME=VAL1;VAL2;VAL3");
                     return ExitCode::FAILURE;
                 }
@@ -565,6 +569,10 @@ fn main() -> ExitCode {
                     eprintln!("--sweep requires NAME=VAL1;VAL2;VAL3 format");
                     return ExitCode::FAILURE;
                 }
+            }
+            "--version" | "-V" => {
+                println!("tla {}", env!("CARGO_PKG_VERSION"));
+                return ExitCode::SUCCESS;
             }
             "--help" | "-h" => {
                 println!("tla - TLA+ model checker");
@@ -623,6 +631,7 @@ fn main() -> ExitCode {
                     "  --explorable               With --export-html: embed the wasm engine for ad-hoc state exploration"
                 );
                 println!("  --interactive, -i          Interactive TUI exploration mode");
+                println!("  --version, -V              Show version information");
                 println!("  --help, -h                 Show this help");
                 println!();
                 println!("Scenario format:");

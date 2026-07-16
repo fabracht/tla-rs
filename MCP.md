@@ -57,6 +57,8 @@ cargo install --path . --bin tla-mcp
 }
 ```
 
+To check which build is registered, run `tla-mcp --version` (or `-V`) — it prints the version and exits instead of starting the server. Note this is a different flag from the install script's `--version` above, which pins the release to download.
+
 ## Tools
 
 All tools return a `schema_version: "1"` field — the contract is frozen at version 1 and will be bumped explicitly on breaking changes.

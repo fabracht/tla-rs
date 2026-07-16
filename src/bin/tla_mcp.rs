@@ -206,6 +206,20 @@ async fn wait_for_shutdown_signal() -> bool {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("--version" | "-V") => {
+            println!("tla-mcp {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        Some(arg) if arg.starts_with('-') => {
+            eprintln!("unknown option: {arg}");
+            eprintln!("Use --version to show version information");
+            std::process::exit(1);
+        }
+        _ => {}
+    }
+
     request_parent_death_signal();
 
     tokio::spawn(async {

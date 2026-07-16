@@ -50,6 +50,7 @@ Constants accept integers (`42`), booleans (`TRUE`), strings (`"hello"`), sets (
 | `--explorable` | With `--export-html`: embed the wasm engine for in-browser state exploration |
 | `--json` | JSON output |
 | `-v` | Verbose output (depth breakdowns, etc.) |
+| `--version`, `-V` | Show version information |
 
 ## Documentation
 
