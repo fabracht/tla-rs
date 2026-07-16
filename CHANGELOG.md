@@ -6,6 +6,11 @@
 
 - `tla` and `tla-mcp` now support `--version` (and `-V`), printing the package version and exiting 0. Previously neither binary could report its own version — `tla --version` failed with `unknown option: --version`, so verifying which build was installed (e.g. after a Homebrew upgrade) meant comparing the binary's SHA256 against the release asset. `tla --help` now lists the flag, and `tla-mcp` handles it before starting the stdio server. Fixes #67.
 
+### Changed
+
+- `tla-mcp` now rejects an unrecognized option instead of ignoring it and starting the stdio server. Previously every argument except `--version`/`-V` fell through to the MCP handshake, so a typo like `tla-mcp --verison` produced no output and appeared to hang when run from a terminal (the server was waiting on stdin), while the same typo on `tla` exits 1 with `unknown option`. Both binaries now report an unknown option the same way. The version check is also anchored to the first argument, so a `--version` occurring elsewhere in the command line — including after a `--` separator — no longer suppresses the server. Positional arguments are still ignored.
+- `tla` no longer consumes an option as the value of a preceding value-taking flag. Previously `tla --symmetry --version` silently registered `--version` as a symmetry constant name and then failed with an unrelated `no spec file provided`, never printing the version; `--max-states`, `--max-depth`, `--count-satisfying`, `--config`, and every other flag taking a value accepted the following token just as blindly. A token starting with `-` is now always treated as an option, so the flag reports its own missing value (`--symmetry requires a constant name`) instead. Values that merely contain a leading minus, such as `-c start_val=-5`, are unaffected.
+
 ## [0.6.10] - 2026-07-14
 
 ### Added
