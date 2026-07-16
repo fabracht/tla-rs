@@ -206,6 +206,11 @@ async fn wait_for_shutdown_signal() -> bool {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().any(|arg| arg == "--version" || arg == "-V") {
+        println!("tla-mcp {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     request_parent_death_signal();
 
     tokio::spawn(async {

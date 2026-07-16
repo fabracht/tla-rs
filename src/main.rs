@@ -566,6 +566,10 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             }
+            "--version" | "-V" => {
+                println!("tla {}", env!("CARGO_PKG_VERSION"));
+                return ExitCode::SUCCESS;
+            }
             "--help" | "-h" => {
                 println!("tla - TLA+ model checker");
                 println!();
@@ -623,6 +627,7 @@ fn main() -> ExitCode {
                     "  --explorable               With --export-html: embed the wasm engine for ad-hoc state exploration"
                 );
                 println!("  --interactive, -i          Interactive TUI exploration mode");
+                println!("  --version, -V              Show version information");
                 println!("  --help, -h                 Show this help");
                 println!();
                 println!("Scenario format:");

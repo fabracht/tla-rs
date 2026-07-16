@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.11] - 2026-07-15
+
+### Added
+
+- `tla` and `tla-mcp` now support `--version` (and `-V`), printing the package version and exiting 0. Previously neither binary could report its own version — `tla --version` failed with `unknown option: --version`, so verifying which build was installed (e.g. after a Homebrew upgrade) meant comparing the binary's SHA256 against the release asset. `tla --help` now lists the flag, and `tla-mcp` handles it before starting the stdio server. Fixes #67.
+
 ## [0.6.10] - 2026-07-14
 
 ### Added
