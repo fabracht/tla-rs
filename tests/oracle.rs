@@ -118,6 +118,22 @@ fn test_should_violate_counter_overflow() {
 }
 
 #[test]
+fn test_should_violate_tuple_indexed_prime() {
+    let path = Path::new("test_cases/should_violate/tuple_indexed_prime.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    match result {
+        CheckResult::InvariantViolation(cex, _) => {
+            assert_eq!(cex.violated_invariant, 0);
+        }
+        other => panic!(
+            "x'[1] = 5 must infer the successor <<5, 2>> and violate Inv; \
+             a 0-based tuple index here yields no transitions and a false pass, got: {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
 fn test_should_violate_two_bit_overflow() {
     let path = Path::new("test_cases/should_violate/two_bit_overflow.tla");
     let result = check_spec_file(path);

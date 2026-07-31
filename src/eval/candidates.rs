@@ -70,7 +70,7 @@ fn extract_indexed_prime(expr: &Expr) -> Option<(Arc<str>, Vec<Expr>)> {
         }
         Expr::TupleAccess(t, idx) => {
             let (name, mut path) = extract_indexed_prime(t)?;
-            path.push(Expr::Lit(Value::Int(*idx as i64)));
+            path.push(Expr::Lit(Value::Int(*idx as i64 + 1)));
             Some((name, path))
         }
         _ => None,
