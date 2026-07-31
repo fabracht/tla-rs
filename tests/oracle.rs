@@ -91,6 +91,32 @@ fn test_should_pass_traffic_light() {
 }
 
 #[test]
+fn test_model_value_conformance() {
+    let path = Path::new("test_cases/should_pass/model_value_conformance.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "model-value semantics pinned to an actual TLC 2.19 run: a model value is never \
+         equal to a same-named string, and a function over model values is not a record, \
+         got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_tlc_conformance_functions() {
+    let path = Path::new("test_cases/should_pass/tlc_conformance_functions.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "every invariant here is one probe from a differential corpus whose expected \
+         answer was taken from an actual TLC 2.19 run; 31 of the 55 were wrong before \
+         records, sequences and functions were unified, got: {:?}",
+        result
+    );
+}
+
+#[test]
 fn test_function_identity_matches_tlc() {
     let path = Path::new("test_cases/should_pass/function_identity.tla");
     let result = check_spec_file(path);

@@ -22,6 +22,12 @@
 
 - Bag operators now accept a bag in any layout. `IsABag`, `BagUnion` and everything routed through `eval_fn` pattern-matched `Value::Fn`, so a bag over a `1..n` or all-string domain — including `EmptyBag` — was rejected.
 
+### Added
+
+- `test_cases/should_pass/tlc_conformance_functions.tla` pins 55 function/record/sequence identity questions whose expected answers were taken from an actual TLC 2.19 run rather than from reasoning about the spec. 31 of the 55 were answered incorrectly before this release.
+
+- `test_cases/should_pass/model_value_conformance.tla` does the same for 25 model-value questions, likewise answered by a real TLC run.
+
 ### Changed
 
 - The recursive-function evaluator no longer carries its own copy of the function-application logic; it now calls the shared `apply_fn_value` helper, so applying a record inside a recursive function definition (`f[s \in SUBSET (DOMAIN r)] == ... r[k] ...`) behaves the same as everywhere else.
