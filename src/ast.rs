@@ -6,6 +6,7 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Str(Arc<str>),
+    Model(Arc<str>),
     Set(Arc<BTreeSet<Value>>),
     Fn(Arc<BTreeMap<Value, Value>>),
     Record(Arc<BTreeMap<Arc<str>, Value>>),
@@ -18,16 +19,78 @@ impl Value {
     }
 
     pub fn func(m: BTreeMap<Value, Value>) -> Self {
+        if is_seq_domain(&m) {
+            return Value::Tuple(Arc::new(m.into_values().collect()));
+        }
+        if is_rec_domain(&m) {
+            let fields = m
+                .into_iter()
+                .map(|(k, v)| match k {
+                    Value::Str(s) => (s, v),
+                    _ => unreachable!("is_rec_domain guarantees every key is Str"),
+                })
+                .collect();
+            return Value::Record(Arc::new(fields));
+        }
         Value::Fn(Arc::new(m))
     }
 
     pub fn record(m: BTreeMap<Arc<str>, Value>) -> Self {
+        if m.is_empty() {
+            return Value::Tuple(Arc::new(Vec::new()));
+        }
         Value::Record(Arc::new(m))
     }
 
     pub fn tuple(v: Vec<Value>) -> Self {
         Value::Tuple(Arc::new(v))
     }
+
+    pub fn is_function(&self) -> bool {
+        matches!(self, Value::Fn(_) | Value::Record(_) | Value::Tuple(_))
+    }
+
+    pub fn as_function_map(&self) -> Option<BTreeMap<Value, Value>> {
+        match self {
+            Value::Fn(f) => Some((**f).clone()),
+            Value::Record(r) => Some(
+                r.iter()
+                    .map(|(k, v)| (Value::Str(k.clone()), v.clone()))
+                    .collect(),
+            ),
+            Value::Tuple(t) => Some(
+                t.iter()
+                    .enumerate()
+                    .map(|(i, v)| (Value::Int(i as i64 + 1), v.clone()))
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+
+    pub fn function_domain(&self) -> Option<BTreeSet<Value>> {
+        match self {
+            Value::Fn(f) => Some(f.keys().cloned().collect()),
+            Value::Record(r) => Some(r.keys().map(|k| Value::Str(k.clone())).collect()),
+            Value::Tuple(t) => Some((1..=t.len()).map(|i| Value::Int(i as i64)).collect()),
+            _ => None,
+        }
+    }
+}
+
+fn is_seq_domain(m: &BTreeMap<Value, Value>) -> bool {
+    let n = m.len();
+    if n == 0 {
+        return true;
+    }
+    matches!(m.keys().next(), Some(Value::Int(1)))
+        && matches!(m.keys().next_back(), Some(Value::Int(k)) if *k == n as i64)
+}
+
+fn is_rec_domain(m: &BTreeMap<Value, Value>) -> bool {
+    !m.is_empty()
+        && matches!(m.keys().next(), Some(Value::Str(_)))
+        && matches!(m.keys().next_back(), Some(Value::Str(_)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

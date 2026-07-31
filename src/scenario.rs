@@ -302,6 +302,7 @@ fn format_value_compact(v: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Int(n) => n.to_string(),
         Value::Str(s) => format!("\"{}\"", s),
+        Value::Model(m) => m.to_string(),
         Value::Set(s) if s.is_empty() => "{}".to_string(),
         Value::Set(s) => {
             let items: Vec<String> = s.iter().take(3).map(format_value_compact).collect();

@@ -11,7 +11,8 @@ use super::global_state::{
 };
 use super::helpers::{
     apply_fn_value, cartesian_product_records, eval_bool, eval_fn, eval_int, eval_record, eval_set,
-    eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_structural_set_expr, update_nested,
+    eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_structural_set_expr,
+    update_nested_value, value_in_function_set,
 };
 use super::recursive::eval_fn_def_recursive;
 use crate::ast::{Env, Expr, Value};
@@ -125,20 +126,13 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             }
             if let Expr::FunctionSet(domain_expr, codomain_expr) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
-                if let Value::Fn(f) = ev {
-                    let domain = eval_set(domain_expr, env, defs)?;
-                    let fn_domain: BTreeSet<Value> = f.keys().cloned().collect();
-                    if fn_domain != domain {
-                        return Ok(Value::Bool(false));
-                    }
-                    for val in f.values() {
-                        if !in_set_symbolic(val, codomain_expr, env, defs)? {
-                            return Ok(Value::Bool(false));
-                        }
-                    }
-                    return Ok(Value::Bool(true));
-                }
-                return Ok(Value::Bool(false));
+                return Ok(Value::Bool(value_in_function_set(
+                    &ev,
+                    domain_expr,
+                    codomain_expr,
+                    env,
+                    defs,
+                )?));
             }
             if let Expr::Powerset(inner) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
@@ -185,20 +179,13 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             }
             if let Expr::FunctionSet(domain_expr, codomain_expr) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
-                if let Value::Fn(f) = ev {
-                    let domain = eval_set(domain_expr, env, defs)?;
-                    let fn_domain: BTreeSet<Value> = f.keys().cloned().collect();
-                    if fn_domain != domain {
-                        return Ok(Value::Bool(true));
-                    }
-                    for val in f.values() {
-                        if !in_set_symbolic(val, codomain_expr, env, defs)? {
-                            return Ok(Value::Bool(true));
-                        }
-                    }
-                    return Ok(Value::Bool(false));
-                }
-                return Ok(Value::Bool(true));
+                return Ok(Value::Bool(!value_in_function_set(
+                    &ev,
+                    domain_expr,
+                    codomain_expr,
+                    env,
+                    defs,
+                )?));
             }
             if let Expr::Powerset(inner) = set.as_ref() {
                 let ev = eval(elem, env, defs)?;
@@ -790,17 +777,16 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         Expr::FnMerge(left, right) => {
             let lv = eval(left, env, defs)?;
             let rv = eval(right, env, defs)?;
-            match (lv, rv) {
-                (Value::Fn(lf), Value::Fn(rf)) => {
-                    let mut lf = Arc::unwrap_or_clone(lf);
-                    for (k, v) in Arc::unwrap_or_clone(rf) {
+            match (lv.as_function_map(), rv.as_function_map()) {
+                (Some(mut lf), Some(rf)) => {
+                    for (k, v) in rf {
                         lf.entry(k).or_insert(v);
                     }
                     Ok(Value::func(lf))
                 }
-                (l, r) => Err(EvalError::TypeMismatch {
+                _ => Err(EvalError::TypeMismatch {
                     expected: "Fn @@ Fn",
-                    got: Value::tuple(vec![l, r]),
+                    got: Value::tuple(vec![lv, rv]),
                     context: Some("function merge"),
                     span: None,
                 }),
@@ -843,23 +829,12 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     }
                 }
 
-                match &mut result {
-                    Value::Record(rec) => {
-                        if let [Value::Str(field)] = key_vals.as_slice() {
-                            Arc::make_mut(rec).insert(field.clone(), v);
-                        } else {
-                            return Err(EvalError::domain_error("invalid record update path"));
-                        }
-                    }
-                    Value::Fn(fv) => {
-                        update_nested(Arc::make_mut(fv), &key_vals, v)?;
-                    }
-                    _ => {
-                        return Err(EvalError::domain_error(
-                            "EXCEPT requires record or function",
-                        ));
-                    }
+                if !matches!(result, Value::Record(_) | Value::Fn(_) | Value::Tuple(_)) {
+                    return Err(EvalError::domain_error(
+                        "EXCEPT requires a record, function or sequence",
+                    ));
                 }
+                update_nested_value(&mut result, &key_vals, v)?;
             }
             Ok(result)
         }
@@ -883,8 +858,12 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                         (1..=seq.len()).map(|i| Value::Int(i as i64)).collect();
                     Ok(Value::set(dom))
                 }
+                Value::Record(rec) => {
+                    let dom: BTreeSet<Value> = rec.keys().map(|f| Value::Str(f.clone())).collect();
+                    Ok(Value::set(dom))
+                }
                 other => Err(EvalError::type_mismatch_ctx(
-                    "Fn or Sequence",
+                    "Fn, Sequence or Record",
                     other,
                     "DOMAIN",
                 )),
@@ -1224,7 +1203,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
 
         Expr::IsABag(bag_expr) => {
             let v = eval(bag_expr, env, defs)?;
-            if let Value::Fn(f) = v {
+            if let Some(f) = v.as_function_map() {
                 for count in f.values() {
                     if let Value::Int(n) = count {
                         if *n < 1 {
@@ -1316,8 +1295,8 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             let bags_set = eval_set(bags_expr, env, defs)?;
             let mut result: BTreeMap<Value, Value> = BTreeMap::new();
             for bag_val in bags_set {
-                if let Value::Fn(bag) = bag_val {
-                    for (elem, count) in Arc::unwrap_or_clone(bag) {
+                if let Some(bag) = bag_val.as_function_map() {
+                    for (elem, count) in bag {
                         let c_new = if let Value::Int(n) = count { n } else { 0 };
                         let c_old = result
                             .get(&elem)

@@ -8,6 +8,7 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Int(n) => serde_json::Value::Number((*n).into()),
         Value::Str(s) => serde_json::Value::String(s.to_string()),
+        Value::Model(m) => serde_json::json!({ "__model": m.to_string() }),
         Value::Set(set) => serde_json::Value::Array(set.iter().map(value_to_json).collect()),
         Value::Fn(map) => {
             let entries: Vec<serde_json::Value> = map
@@ -40,6 +41,9 @@ pub fn json_to_value(j: &serde_json::Value) -> Option<Value> {
             Some(Value::set(set))
         }
         serde_json::Value::Object(obj) => {
+            if let Some(m) = obj.get("__model") {
+                return Some(Value::Model(Arc::from(m.as_str()?)));
+            }
             if let Some(fn_arr) = obj.get("__fn") {
                 let entries = fn_arr.as_array()?;
                 let map: BTreeMap<Value, Value> = entries

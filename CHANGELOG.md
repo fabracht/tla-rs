@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Model values are now a distinct kind of value instead of being stored as strings, matching TLC. Previously a `CONSTANT Node = {n1, n2}` produced the same values as the strings `{"n1", "n2"}`, so `Cardinality(Node \cup {"n1","n2"})` was 2 where TLC gives 4, and `[n \in Node |-> "idle"]` compared equal to `[n \in {"n1","n2"} |-> "idle"]`. Because conflating two distinct values merges two distinct states, the BFS silently skipped reachable states: a spec whose successors range over `{n1, "n1", n2, "n2"}` explored 4 states instead of 16 and still reported `No errors found` — a false pass. Model values now render bare (`(n1 :> "idle" @@ n2 :> "idle")`) rather than quoted, and carry a `__model` tag through trace JSON so they round-trip.
+
+- A next-state relation that constrains a sequence element by literal index — `x'[1] = 5 /\ x'[2] = x[2]` — no longer silently yields zero transitions and reports `No errors found`. `Expr::TupleAccess` stores a 0-based index and evaluation compensates with `idx + 1`, but candidate inference pushed the raw 0-based value as a function key, so the inferred successor never matched and the action appeared disabled. The record form (`x'.a = 5`) was unaffected, which is why this went unnoticed. This was a false pass: the violation the spec reaches was never reported.
+
+- `EXCEPT` now works on sequences. `[<<10,20>> EXCEPT ![1] = 9]` previously failed with `cannot access into this value`; it now returns `<<9, 20>>`, including `@` in the replacement expression, multiple updates in one `EXCEPT`, and nested paths in both directions (`[s EXCEPT ![1].a = 4]`, `[r EXCEPT !.s[2] = 9]`). Nested record updates through a multi-step path also work now — the top-level record case previously rejected any path longer than one field with `invalid record update path`.
+
+- `:>` and `@@` now have the correct relative precedence. Both were parsed at one shared level alongside `+` and `\cup`, so `1 :> 10 @@ 2 :> 20` associated as `((1 :> 10) @@ 2) :> 20` and failed to evaluate. TLA+ puts `@@` at level 6 and `:>` at 7, so `:>` binds tighter than `@@` and both bind looser than `..`, `+` and `\cup`; `@@` is left-associative. Writing the expression with redundant parentheses is no longer necessary.
+
+- A record, a sequence, and the same function written with `:>` are now one value, as they are in TLA+. Previously `Value` derived structural equality over three separate variants, so `[a |-> 1, b |-> 2]`, `("a" :> 1 @@ "b" :> 2)` and `[i \in {"a","b"} |-> ...]` were three different values: `Cardinality({rec, frec})` was 2 where TLC gives 1, and a spec reaching the same function three ways explored 3 states where TLC finds 1. Functions are now canonicalised on construction from their domain — domain `1..n` (including empty) is laid out as a sequence, a non-empty all-string domain as a record, anything else as a map — so the derived `Eq`/`Hash` that the BFS uses for state dedup are correct by construction. Records and sequences are consequently accepted in `[S -> T]` and `[f: T]`, found by witness search (`\E f \in [S -> T] : f = rec`) and `CHOOSE`, and interchangeable across field access, `DOMAIN`, application, `EXCEPT` and the `Sequences` operators. Fixes #69.
+
+  Display follows suit and now matches TLC: `("a" :> 1 @@ "b" :> 2)` prints as `[a |-> 1, b |-> 2]`, `(1 :> 10 @@ 2 :> 20)` as `<<10, 20>>`, and the empty function as `<<>>` rather than the unparseable `()`. Presentation is decided separately from identity, so a function whose keys are strings but not TLA+ identifiers still prints in `:>` form (`("a b" :> 1 @@ "x-y" :> 2)`) instead of the unparseable `[a b |-> 1, ...]`.
+
+- Symmetry reduction no longer permutes only part of a value. `collect_elements_in_order` visited function keys and values but record values only, and `apply_mapping_to_value` permuted function keys but not record keys — so for record-shaped state the permutation was applied to a proper subset of the value. That is not a group action and could merge states that are not symmetric images of each other. Records are now traversed and permuted as the functions they are, and a permuted function is re-canonicalised because permuting a key can change the domain shape.
+
+- `--symmetry` / cfg `SYMMETRY` now rejects a set whose members are not all model values, matching TLC ("Symmetry function must have model values as domain and range"). Symmetry reduction is sound only over uninterpreted, pairwise-distinct elements; a set of strings has neither property guaranteed, and tla-rs previously reduced such a set silently. This precondition was not expressible before model values became a distinct kind.
+
+- Bag operators now accept a bag in any layout. `IsABag`, `BagUnion` and everything routed through `eval_fn` pattern-matched `Value::Fn`, so a bag over a `1..n` or all-string domain — including `EmptyBag` — was rejected.
+
+### Changed
+
+- The recursive-function evaluator no longer carries its own copy of the function-application logic; it now calls the shared `apply_fn_value` helper, so applying a record inside a recursive function definition (`f[s \in SUBSET (DOMAIN r)] == ... r[k] ...`) behaves the same as everywhere else.
+
 ## [0.6.11] - 2026-07-15
 
 ### Added

@@ -91,6 +91,80 @@ fn test_should_pass_traffic_light() {
 }
 
 #[test]
+fn test_function_identity_matches_tlc() {
+    let path = Path::new("test_cases/should_pass/function_identity.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "a record, a sequence and the same function written with `:>` denote ONE value: \
+         they must compare equal, dedup to one set element, and be interchangeable in \
+         `[S -> T]`, `[f: T]`, witness search, field access and sequence operators, \
+         got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_model_values_are_distinct_from_strings() {
+    let path = Path::new("test_cases/should_pass/model_values_distinct.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "a model value must never equal a same-named string, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_model_values_do_not_collapse_state_space() {
+    let path = Path::new("test_cases/should_pass/model_value_state_space.tla");
+    let result = check_spec_file(path);
+    match result {
+        CheckResult::Ok(stats) => assert_eq!(
+            stats.states_explored, 16,
+            "{{n1, \"n1\", n2, \"n2\"}} has 4 distinct members, so the powerset reached \
+             is 16 states; conflating model values with strings collapses it to 4 and \
+             silently skips reachable states"
+        ),
+        other => panic!("model_value_state_space.tla should pass, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_should_pass_except_sequence() {
+    let path = Path::new("test_cases/should_pass/except_sequence.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "EXCEPT must work on sequences, including nested paths through \
+         records and sequences in both directions, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_pass_fn_merge_precedence() {
+    let path = Path::new("test_cases/should_pass/fn_merge_precedence.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "`:>` binds tighter than `@@` but looser than `+` and `..`, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_pass_record_as_function() {
+    let path = Path::new("test_cases/should_pass/record_as_function.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "record_as_function.tla should pass (records are functions from field names), got: {:?}",
+        result
+    );
+}
+
+#[test]
 fn test_negation_in_precedence() {
     let path = Path::new("test_cases/should_pass/negation_in.tla");
     let result = check_spec_file(path);
@@ -416,7 +490,7 @@ fn test_record_set_membership() {
 }
 
 #[test]
-fn test_symmetry_reduces_states() {
+fn test_symmetry_rejects_non_model_values() {
     let path = Path::new("test_cases/benchmark/symmetric_procs.tla");
     let input = fs::read_to_string(path).expect("failed to read spec file");
     let spec = parse(&input).expect("failed to parse spec");
@@ -424,6 +498,39 @@ fn test_symmetry_reduces_states() {
     let proc_set: BTreeSet<Value> = ["p1", "p2", "p3"]
         .iter()
         .map(|s| Value::Str(Arc::from(*s)))
+        .collect();
+
+    let mut domains = Env::new();
+    domains.insert(Arc::from("Proc"), Value::set(proc_set));
+
+    let config = CheckerConfig {
+        symmetric_constants: vec![Arc::from("Proc")],
+        allow_deadlock: true,
+        ..Default::default()
+    };
+
+    match check(&spec, &domains, &config) {
+        CheckResult::PrepareError(PrepareSpecError::NonModelValueSymmetry(name, members)) => {
+            assert_eq!(name.as_ref(), "Proc");
+            assert_eq!(members.len(), 3);
+        }
+        other => panic!(
+            "symmetry over a set of strings is unsound — it requires uninterpreted, \
+             pairwise-distinct elements — and must be rejected, got: {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_symmetry_reduces_states() {
+    let path = Path::new("test_cases/benchmark/symmetric_procs.tla");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let spec = parse(&input).expect("failed to parse spec");
+
+    let proc_set: BTreeSet<Value> = ["p1", "p2", "p3"]
+        .iter()
+        .map(|s| Value::Model(Arc::from(*s)))
         .collect();
 
     let mut domains = Env::new();
@@ -1139,14 +1246,4 @@ fn test_should_pass_fr_list_lin() {
             "FRListLin.tla should pass linearizability + structural invariants, got: {result:?}"
         );
     });
-}
-#[test]
-fn test_should_pass_fn_merge_precedence() {
-    let path = Path::new("test_cases/should_pass/fn_merge_precedence.tla");
-    let result = check_spec_file(path);
-    assert!(
-        matches!(result, CheckResult::Ok(_)),
-        "`:>` binds tighter than `@@` but looser than `+` and `..`, got: {:?}",
-        result
-    );
 }

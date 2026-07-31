@@ -1,11 +1,10 @@
 use super::core::eval;
 use super::error::{EvalError, Result};
 use super::global_state::EvalContext;
-use super::helpers::{apply_fn_value, eval_set, in_set_symbolic};
+use super::helpers::{apply_fn_value, eval_set, in_set_symbolic, value_in_function_set};
 use super::state::is_action_enabled;
 use super::{Definitions, ResolvedInstances};
 use crate::ast::{Env, Expr, Value};
-use std::collections::BTreeSet;
 
 pub fn eval_with_instances(
     expr: &Expr,
@@ -211,20 +210,13 @@ pub fn eval_with_context(
             }
             if let Expr::FunctionSet(domain_expr, codomain_expr) = set.as_ref() {
                 let ev = eval_with_context(elem, env, defs, ctx)?;
-                if let Value::Fn(f) = ev {
-                    let domain = eval_set(domain_expr, env, defs)?;
-                    let fn_domain: BTreeSet<Value> = f.keys().cloned().collect();
-                    if fn_domain != domain {
-                        return Ok(Value::Bool(false));
-                    }
-                    for val in f.values() {
-                        if !in_set_symbolic(val, codomain_expr, env, defs)? {
-                            return Ok(Value::Bool(false));
-                        }
-                    }
-                    return Ok(Value::Bool(true));
-                }
-                return Ok(Value::Bool(false));
+                return Ok(Value::Bool(value_in_function_set(
+                    &ev,
+                    domain_expr,
+                    codomain_expr,
+                    env,
+                    defs,
+                )?));
             }
             if let Expr::Powerset(inner) = set.as_ref() {
                 let ev = eval_with_context(elem, env, defs, ctx)?;
@@ -261,20 +253,13 @@ pub fn eval_with_context(
             }
             if let Expr::FunctionSet(domain_expr, codomain_expr) = set.as_ref() {
                 let ev = eval_with_context(elem, env, defs, ctx)?;
-                if let Value::Fn(f) = ev {
-                    let domain = eval_set(domain_expr, env, defs)?;
-                    let fn_domain: BTreeSet<Value> = f.keys().cloned().collect();
-                    if fn_domain != domain {
-                        return Ok(Value::Bool(true));
-                    }
-                    for val in f.values() {
-                        if !in_set_symbolic(val, codomain_expr, env, defs)? {
-                            return Ok(Value::Bool(true));
-                        }
-                    }
-                    return Ok(Value::Bool(false));
-                }
-                return Ok(Value::Bool(true));
+                return Ok(Value::Bool(!value_in_function_set(
+                    &ev,
+                    domain_expr,
+                    codomain_expr,
+                    env,
+                    defs,
+                )?));
             }
             if let Expr::Powerset(inner) = set.as_ref() {
                 let ev = eval_with_context(elem, env, defs, ctx)?;

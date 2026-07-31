@@ -3,11 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::ast::{Env, Expr, Value};
-use crate::checker::format_value;
 
 use super::Definitions;
 use super::core::eval;
 use super::error::{EvalError, Result, value_type_name};
+use super::helpers::apply_fn_value;
 
 pub(crate) fn eval_fn_def_recursive(
     fn_name: &Arc<str>,
@@ -80,40 +80,7 @@ pub(crate) fn eval_with_memo(
             }
             let fval = eval_with_memo(f, env, defs, fn_name, fn_param, fn_domain, memo)?;
             let av = eval_with_memo(arg, env, defs, fn_name, fn_param, fn_domain, memo)?;
-            match fval {
-                Value::Fn(fv) => fv.get(&av).cloned().ok_or_else(|| {
-                    EvalError::domain_error(format!(
-                        "key {} not in function domain",
-                        format_value(&av)
-                    ))
-                }),
-                Value::Tuple(tv) => {
-                    if let Value::Int(idx) = av {
-                        let i = idx as usize;
-                        if i >= 1 && i <= tv.len() {
-                            Ok(tv[i - 1].clone())
-                        } else {
-                            Err(EvalError::domain_error(format!(
-                                "sequence index {} out of bounds (sequence has {} elements)",
-                                idx,
-                                tv.len()
-                            )))
-                        }
-                    } else {
-                        Err(EvalError::TypeMismatch {
-                            expected: "Int",
-                            got: av,
-                            context: Some("sequence index"),
-                            span: None,
-                        })
-                    }
-                }
-                other => Err(EvalError::type_mismatch_ctx(
-                    "Fn or Sequence",
-                    other,
-                    "function application",
-                )),
-            }
+            apply_fn_value(fval, av)
         }
 
         Expr::Let(var, binding, body) => {

@@ -153,6 +153,7 @@ pub(crate) fn value_type_name(val: &Value) -> &'static str {
         Value::Bool(_) => "Bool",
         Value::Int(_) => "Int",
         Value::Str(_) => "Str",
+        Value::Model(_) => "ModelValue",
         Value::Set(_) => "Set",
         Value::Fn(_) => "Function",
         Value::Record(_) => "Record",

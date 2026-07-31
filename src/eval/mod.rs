@@ -427,12 +427,15 @@ mod tests {
             Box::new(add(var_expr("x"), lit_int(10))),
         );
         let result = eval(&expr, &mut env, &d).unwrap();
-        if let Value::Fn(f) = result {
-            assert_eq!(f.get(&Value::Int(1)), Some(&Value::Int(11)));
-            assert_eq!(f.get(&Value::Int(2)), Some(&Value::Int(12)));
-        } else {
-            panic!("expected Fn");
-        }
+        let mut expected = std::collections::BTreeMap::new();
+        expected.insert(Value::Int(1), Value::Int(11));
+        expected.insert(Value::Int(2), Value::Int(12));
+        assert_eq!(result, Value::func(expected));
+        assert_eq!(
+            result,
+            Value::tuple(vec![Value::Int(11), Value::Int(12)]),
+            "a function with domain 1..n is the sequence <<11, 12>>"
+        );
     }
 
     #[test]

@@ -95,8 +95,12 @@ impl SymmetryConfig {
                 }
             }
             Value::Record(r) => {
-                for v in r.values() {
+                let mut entries: Vec<(Value, &Value)> =
+                    r.iter().map(|(k, v)| (Value::Str(k.clone()), v)).collect();
+                entries.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(&b.0)));
+                for (k, v) in entries {
                     self.collect_elements_in_order(v, sym_set, seen, ordering);
+                    self.collect_elements_in_order(&k, sym_set, seen, ordering);
                 }
             }
             Value::Tuple(t) => {
@@ -104,7 +108,7 @@ impl SymmetryConfig {
                     self.collect_elements_in_order(elem, sym_set, seen, ordering);
                 }
             }
-            Value::Bool(_) | Value::Int(_) | Value::Str(_) => {}
+            Value::Bool(_) | Value::Int(_) | Value::Str(_) | Value::Model(_) => {}
         }
     }
 
@@ -123,7 +127,7 @@ impl SymmetryConfig {
         }
 
         match value {
-            Value::Bool(_) | Value::Int(_) | Value::Str(_) => value.clone(),
+            Value::Bool(_) | Value::Int(_) | Value::Str(_) | Value::Model(_) => value.clone(),
             Value::Set(s) => {
                 let mapped: BTreeSet<_> = s
                     .iter()
@@ -144,11 +148,16 @@ impl SymmetryConfig {
                 Value::func(mapped)
             }
             Value::Record(r) => {
-                let mapped: BTreeMap<_, _> = r
+                let mapped: BTreeMap<Value, Value> = r
                     .iter()
-                    .map(|(k, v)| (k.clone(), self.apply_mapping_to_value(v, mapping)))
+                    .map(|(k, v)| {
+                        (
+                            self.apply_mapping_to_value(&Value::Str(k.clone()), mapping),
+                            self.apply_mapping_to_value(v, mapping),
+                        )
+                    })
                     .collect();
-                Value::record(mapped)
+                Value::func(mapped)
             }
             Value::Tuple(t) => {
                 let mapped: Vec<_> = t
@@ -220,13 +229,17 @@ mod tests {
 
         let canonical = config.canonicalize(&state);
 
-        if let Some(Value::Fn(cvotes)) = canonical.values.first() {
-            assert_eq!(cvotes.get(&str_val("p1")), Some(&Value::Int(1)));
-            assert_eq!(cvotes.get(&str_val("p2")), Some(&Value::Int(0)));
-            assert_eq!(cvotes.get(&str_val("p3")), Some(&Value::Int(0)));
-        } else {
-            panic!("expected Fn value");
-        }
+        let mut expected = BTreeMap::new();
+        expected.insert(str_val("p1"), Value::Int(1));
+        expected.insert(str_val("p2"), Value::Int(0));
+        expected.insert(str_val("p3"), Value::Int(0));
+        assert_eq!(
+            canonical.values.first(),
+            Some(&Value::func(expected)),
+            "the symmetric elements appear as function KEYS here, so the permutation \
+             must be built from and applied to them regardless of whether the function \
+             is laid out as a record or a map"
+        );
     }
 
     #[test]
