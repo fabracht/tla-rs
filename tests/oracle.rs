@@ -1140,3 +1140,13 @@ fn test_should_pass_fr_list_lin() {
         );
     });
 }
+#[test]
+fn test_should_pass_fn_merge_precedence() {
+    let path = Path::new("test_cases/should_pass/fn_merge_precedence.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "`:>` binds tighter than `@@` but looser than `+` and `..`, got: {:?}",
+        result
+    );
+}

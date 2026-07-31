@@ -335,74 +335,95 @@ impl Parser {
             let expr = self.parse_comparison()?;
             return Ok(Expr::Not(Box::new(expr)));
         }
-        let left = self.parse_range()?;
+        let left = self.parse_fn_merge()?;
         match self.peek() {
             Token::Eq => {
                 self.advance();
-                let right = self.parse_range()?;
+                let right = self.parse_fn_merge()?;
                 Ok(Expr::Eq(Box::new(left), Box::new(right)))
             }
             Token::Neq => {
                 self.advance();
-                let right = self.parse_range()?;
+                let right = self.parse_fn_merge()?;
                 Ok(Expr::Neq(Box::new(left), Box::new(right)))
             }
             Token::Lt => {
                 self.advance();
-                let right = self.parse_range()?;
+                let right = self.parse_fn_merge()?;
                 Ok(Expr::Lt(Box::new(left), Box::new(right)))
             }
             Token::Le => {
                 self.advance();
-                let right = self.parse_range()?;
+                let right = self.parse_fn_merge()?;
                 Ok(Expr::Le(Box::new(left), Box::new(right)))
             }
             Token::Gt => {
                 self.advance();
-                let right = self.parse_range()?;
+                let right = self.parse_fn_merge()?;
                 Ok(Expr::Gt(Box::new(left), Box::new(right)))
             }
             Token::Ge => {
                 self.advance();
-                let right = self.parse_range()?;
+                let right = self.parse_fn_merge()?;
                 Ok(Expr::Ge(Box::new(left), Box::new(right)))
             }
             Token::In => {
                 self.advance();
-                let right = self.parse_range()?;
+                let right = self.parse_fn_merge()?;
                 Ok(Expr::In(Box::new(left), Box::new(right)))
             }
             Token::NotIn => {
                 self.advance();
-                let right = self.parse_range()?;
+                let right = self.parse_fn_merge()?;
                 Ok(Expr::NotIn(Box::new(left), Box::new(right)))
             }
             Token::Subseteq => {
                 self.advance();
-                let right = self.parse_range()?;
+                let right = self.parse_fn_merge()?;
                 Ok(Expr::Subset(Box::new(left), Box::new(right)))
             }
             Token::ProperSubset => {
                 self.advance();
-                let right = self.parse_range()?;
+                let right = self.parse_fn_merge()?;
                 Ok(Expr::ProperSubset(Box::new(left), Box::new(right)))
             }
             Token::Supseteq => {
                 self.advance();
-                let right = self.parse_range()?;
+                let right = self.parse_fn_merge()?;
                 Ok(Expr::Subset(Box::new(right), Box::new(left)))
             }
             Token::ProperSupset => {
                 self.advance();
-                let right = self.parse_range()?;
+                let right = self.parse_fn_merge()?;
                 Ok(Expr::ProperSubset(Box::new(right), Box::new(left)))
             }
             Token::SqSubseteq => {
                 self.advance();
-                let right = self.parse_range()?;
+                let right = self.parse_fn_merge()?;
                 Ok(Expr::SqSubseteq(Box::new(left), Box::new(right)))
             }
             _ => Ok(left),
+        }
+    }
+
+    pub(super) fn parse_fn_merge(&mut self) -> Result<Expr> {
+        let mut left = self.parse_maps_to()?;
+        while *self.peek() == Token::AtAt {
+            self.advance();
+            let right = self.parse_maps_to()?;
+            left = Expr::FnMerge(Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_maps_to(&mut self) -> Result<Expr> {
+        let left = self.parse_range()?;
+        if *self.peek() == Token::ColonGt {
+            self.advance();
+            let right = self.parse_range()?;
+            Ok(Expr::SingleFn(Box::new(left), Box::new(right)))
+        } else {
+            Ok(left)
         }
     }
 
@@ -455,16 +476,6 @@ impl Parser {
                     self.advance();
                     let right = self.parse_multiplicative()?;
                     left = Expr::Concat(Box::new(left), Box::new(right));
-                }
-                Token::AtAt => {
-                    self.advance();
-                    let right = self.parse_multiplicative()?;
-                    left = Expr::FnMerge(Box::new(left), Box::new(right));
-                }
-                Token::ColonGt => {
-                    self.advance();
-                    let right = self.parse_multiplicative()?;
-                    left = Expr::SingleFn(Box::new(left), Box::new(right));
                 }
                 Token::CustomOp(op_name) => {
                     let op_name = op_name.clone();
