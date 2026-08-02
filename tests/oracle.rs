@@ -91,6 +91,31 @@ fn test_should_pass_traffic_light() {
 }
 
 #[test]
+fn test_function_canonicality() {
+    let path = Path::new("test_cases/should_pass/function_canonicality.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "every construct that builds a function must yield the canonical layout for its \
+         domain: `f = [i \\in DOMAIN f |-> f[i]]` must hold for all of them, and equal \
+         functions must collapse to one set element, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_multi_update_except_threads_accumulated_result() {
+    let path = Path::new("test_cases/should_pass/except_sequence.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "[f EXCEPT ![a] = e1, ![b] = e2] means [[f EXCEPT ![a] = e1] EXCEPT ![b] = e2], \
+         so `@` in a later update sees the earlier updates, got: {:?}",
+        result
+    );
+}
+
+#[test]
 fn test_model_value_conformance() {
     let path = Path::new("test_cases/should_pass/model_value_conformance.tla");
     let result = check_spec_file(path);

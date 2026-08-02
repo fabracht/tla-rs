@@ -256,27 +256,28 @@ fn parse_constant_value_from_tokens(tokens: &[Token], pos: &mut usize) -> Result
     if !matches!(tokens.get(*pos), Some(Token::AtAt)) {
         return Ok(first);
     }
-    let mut merged = match first {
-        Value::Fn(m) => (*m).clone(),
-        other => {
+    let mut merged = match first.as_function_map() {
+        Some(m) => m,
+        None => {
             return Err(format!(
-                "'@@' requires function operands built with ':>', got {:?}",
-                other
+                "'@@' requires function operands built with ':>', got {}",
+                crate::checker::format_value(&first)
             ));
         }
     };
     while matches!(tokens.get(*pos), Some(Token::AtAt)) {
         *pos += 1;
-        match parse_constant_maps_to(tokens, pos)? {
-            Value::Fn(m) => {
-                for (k, v) in m.iter() {
-                    merged.entry(k.clone()).or_insert_with(|| v.clone());
+        let operand = parse_constant_maps_to(tokens, pos)?;
+        match operand.as_function_map() {
+            Some(m) => {
+                for (k, v) in m {
+                    merged.entry(k).or_insert(v);
                 }
             }
-            other => {
+            None => {
                 return Err(format!(
-                    "'@@' requires function operands built with ':>', got {:?}",
-                    other
+                    "'@@' requires function operands built with ':>', got {}",
+                    crate::checker::format_value(&operand)
                 ));
             }
         }

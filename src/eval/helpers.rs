@@ -312,73 +312,67 @@ fn tuple_element(t: &[Value], idx: i64) -> Result<&Value> {
     Ok(&t[tuple_index(t.len(), idx)?])
 }
 
-pub(crate) fn update_nested(
-    f: &mut BTreeMap<Value, Value>,
-    keys: &[Value],
-    val: Value,
-) -> Result<()> {
+pub(crate) fn update_nested_value(base: &Value, keys: &[Value], val: Value) -> Result<Value> {
     if keys.is_empty() {
-        return Ok(());
+        return Ok(val);
     }
-    if keys.len() == 1 {
-        f.insert(keys[0].clone(), val);
-        return Ok(());
-    }
-    let inner = f.get_mut(&keys[0]).ok_or_else(|| {
-        EvalError::domain_error(format!(
-            "key {} not in function domain",
-            format_value(&keys[0])
-        ))
-    })?;
-    update_nested_value(inner, &keys[1..], val)
-}
-
-pub(crate) fn update_nested_value(inner: &mut Value, keys: &[Value], val: Value) -> Result<()> {
-    match inner {
-        Value::Fn(inner_fn) => update_nested(Arc::make_mut(inner_fn), keys, val),
-        Value::Record(rec) => update_nested_record(Arc::make_mut(rec), keys, val),
-        Value::Tuple(t) => update_nested_tuple(Arc::make_mut(t).as_mut_slice(), keys, val),
+    match base {
+        Value::Fn(f) => {
+            let mut m = (**f).clone();
+            let inner = if keys.len() == 1 {
+                val
+            } else {
+                let prev = m.get(&keys[0]).ok_or_else(|| {
+                    EvalError::domain_error(format!(
+                        "key {} not in function domain",
+                        format_value(&keys[0])
+                    ))
+                })?;
+                update_nested_value(prev, &keys[1..], val)?
+            };
+            m.insert(keys[0].clone(), inner);
+            Ok(Value::func(m))
+        }
+        Value::Record(rec) => {
+            let Value::Str(field) = &keys[0] else {
+                return Err(EvalError::domain_error(format!(
+                    "expected string key for record field, got {}",
+                    format_value(&keys[0])
+                )));
+            };
+            let mut m = (**rec).clone();
+            let inner = if keys.len() == 1 {
+                val
+            } else {
+                let prev = m.get(field).ok_or_else(|| {
+                    EvalError::domain_error(format!("field '{}' not found in record", field))
+                })?;
+                update_nested_value(prev, &keys[1..], val)?
+            };
+            m.insert(field.clone(), inner);
+            Ok(Value::record(m))
+        }
+        Value::Tuple(t) => {
+            let Value::Int(idx) = &keys[0] else {
+                return Err(EvalError::domain_error(format!(
+                    "expected integer index for sequence, got {}",
+                    format_value(&keys[0])
+                )));
+            };
+            let mut v = (**t).clone();
+            let pos = tuple_index(v.len(), *idx)?;
+            v[pos] = if keys.len() == 1 {
+                val
+            } else {
+                update_nested_value(&v[pos], &keys[1..], val)?
+            };
+            Ok(Value::tuple(v))
+        }
         _ => Err(EvalError::TypeMismatch {
             expected: "Fn, Record or Tuple",
-            got: inner.clone(),
+            got: base.clone(),
             context: Some("nested EXCEPT update"),
             span: None,
         }),
     }
-}
-
-fn update_nested_tuple(t: &mut [Value], keys: &[Value], val: Value) -> Result<()> {
-    let Value::Int(idx) = &keys[0] else {
-        return Err(EvalError::domain_error(format!(
-            "expected integer index for sequence, got {}",
-            format_value(&keys[0])
-        )));
-    };
-    let pos = tuple_index(t.len(), *idx)?;
-    if keys.len() == 1 {
-        t[pos] = val;
-        return Ok(());
-    }
-    update_nested_value(&mut t[pos], &keys[1..], val)
-}
-
-fn update_nested_record(
-    rec: &mut BTreeMap<Arc<str>, Value>,
-    keys: &[Value],
-    val: Value,
-) -> Result<()> {
-    let Value::Str(field) = &keys[0] else {
-        return Err(EvalError::domain_error(format!(
-            "expected string key for record field, got {}",
-            format_value(&keys[0])
-        )));
-    };
-    if keys.len() == 1 {
-        rec.insert(field.clone(), val);
-        return Ok(());
-    }
-    let inner = rec
-        .get_mut(field)
-        .ok_or_else(|| EvalError::domain_error(format!("field '{}' not found in record", field)))?;
-    update_nested_value(inner, &keys[1..], val)
 }

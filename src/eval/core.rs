@@ -816,7 +816,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     key_vals.push(eval(k, env, defs)?);
                 }
 
-                let old_val = get_nested(&base, &key_vals)?;
+                let old_val = get_nested(&result, &key_vals)?;
                 let at_key: Arc<str> = "@".into();
                 let prev_at = env.insert(at_key.clone(), old_val);
                 let v = eval(val, env, defs)?;
@@ -829,12 +829,12 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     }
                 }
 
-                if !matches!(result, Value::Record(_) | Value::Fn(_) | Value::Tuple(_)) {
+                if !result.is_function() {
                     return Err(EvalError::domain_error(
                         "EXCEPT requires a record, function or sequence",
                     ));
                 }
-                update_nested_value(&mut result, &key_vals, v)?;
+                result = update_nested_value(&result, &key_vals, v)?;
             }
             Ok(result)
         }

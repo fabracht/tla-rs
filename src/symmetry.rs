@@ -95,12 +95,9 @@ impl SymmetryConfig {
                 }
             }
             Value::Record(r) => {
-                let mut entries: Vec<(Value, &Value)> =
-                    r.iter().map(|(k, v)| (Value::Str(k.clone()), v)).collect();
-                entries.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(&b.0)));
-                for (k, v) in entries {
+                for (k, v) in r.iter() {
                     self.collect_elements_in_order(v, sym_set, seen, ordering);
-                    self.collect_elements_in_order(&k, sym_set, seen, ordering);
+                    self.collect_elements_in_order(&Value::Str(k.clone()), sym_set, seen, ordering);
                 }
             }
             Value::Tuple(t) => {
@@ -186,6 +183,10 @@ mod tests {
         Value::Str(Arc::from(s))
     }
 
+    fn mv(s: &str) -> Value {
+        Value::Model(Arc::from(s))
+    }
+
     #[test]
     fn empty_symmetry_returns_same_state() {
         let config = SymmetryConfig::new();
@@ -213,16 +214,12 @@ mod tests {
     #[test]
     fn canonicalize_swaps_elements_based_on_first_occurrence() {
         let mut config = SymmetryConfig::new();
-        config.add_symmetric_set(BTreeSet::from([
-            str_val("p1"),
-            str_val("p2"),
-            str_val("p3"),
-        ]));
+        config.add_symmetric_set(BTreeSet::from([mv("p1"), mv("p2"), mv("p3")]));
 
         let mut votes = BTreeMap::new();
-        votes.insert(str_val("p2"), Value::Int(1));
-        votes.insert(str_val("p1"), Value::Int(0));
-        votes.insert(str_val("p3"), Value::Int(0));
+        votes.insert(mv("p2"), Value::Int(1));
+        votes.insert(mv("p1"), Value::Int(0));
+        votes.insert(mv("p3"), Value::Int(0));
         let state = State {
             values: vec![Value::func(votes)],
         };
@@ -230,15 +227,42 @@ mod tests {
         let canonical = config.canonicalize(&state);
 
         let mut expected = BTreeMap::new();
-        expected.insert(str_val("p1"), Value::Int(1));
-        expected.insert(str_val("p2"), Value::Int(0));
-        expected.insert(str_val("p3"), Value::Int(0));
+        expected.insert(mv("p1"), Value::Int(1));
+        expected.insert(mv("p2"), Value::Int(0));
+        expected.insert(mv("p3"), Value::Int(0));
         assert_eq!(
             canonical.values.first(),
             Some(&Value::func(expected)),
-            "the symmetric elements appear as function KEYS here, so the permutation \
-             must be built from and applied to them regardless of whether the function \
-             is laid out as a record or a map"
+            "when the symmetric elements are function KEYS, the traversal order must come \
+             from the values — visiting keys in key order would give the same order for \
+             every state and reduce nothing"
+        );
+    }
+
+    #[test]
+    fn canonicalize_merges_records_holding_symmetric_values() {
+        let mut config = SymmetryConfig::new();
+        config.add_symmetric_set(BTreeSet::from([mv("p1"), mv("p2")]));
+
+        let rec = |first: &str, second: &str| {
+            let mut m = BTreeMap::new();
+            m.insert(Arc::from("a"), mv(first));
+            m.insert(Arc::from("b"), mv(second));
+            State {
+                values: vec![Value::record(m)],
+            }
+        };
+
+        assert_eq!(
+            *config.canonicalize(&rec("p1", "p2")),
+            *config.canonicalize(&rec("p2", "p1")),
+            "these two records are images of each other under the permutation, so they \
+             must share a canonical form; ordering the traversal by value rather than by \
+             field name loses this"
+        );
+        assert_eq!(
+            *config.canonicalize(&rec("p1", "p1")),
+            *config.canonicalize(&rec("p2", "p2"))
         );
     }
 
