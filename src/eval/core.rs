@@ -12,7 +12,7 @@ use super::global_state::{
 use super::helpers::{
     apply_fn_value, cartesian_product_records, eval_bool, eval_fn, eval_int, eval_record, eval_set,
     eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_structural_set_expr,
-    update_nested_value, value_in_function_set,
+    update_nested_value,
 };
 use super::recursive::eval_fn_def_recursive;
 use crate::ast::{Env, Expr, Value};
@@ -121,109 +121,13 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::In(elem, set) => {
-            if matches!(set.as_ref(), Expr::Any) {
-                return Ok(Value::Bool(true));
-            }
-            if let Expr::FunctionSet(domain_expr, codomain_expr) = set.as_ref() {
-                let ev = eval(elem, env, defs)?;
-                return Ok(Value::Bool(value_in_function_set(
-                    &ev,
-                    domain_expr,
-                    codomain_expr,
-                    env,
-                    defs,
-                )?));
-            }
-            if let Expr::Powerset(inner) = set.as_ref() {
-                let ev = eval(elem, env, defs)?;
-                if let Value::Set(s) = ev {
-                    for member in s.iter() {
-                        if !in_set_symbolic(member, inner, env, defs)? {
-                            return Ok(Value::Bool(false));
-                        }
-                    }
-                    return Ok(Value::Bool(true));
-                }
-                return Ok(Value::Bool(false));
-            }
-            if let Expr::SeqSet(domain_expr) = set.as_ref() {
-                let ev = eval(elem, env, defs)?;
-                let seq = match &ev {
-                    Value::Tuple(t) => Some(t.as_ref().clone()),
-                    Value::Fn(f) => fn_as_tuple(f),
-                    _ => None,
-                };
-                if let Some(seq) = seq {
-                    let domain = eval_set(domain_expr, env, defs)?;
-                    for e in &seq {
-                        if !domain.contains(e) {
-                            return Ok(Value::Bool(false));
-                        }
-                    }
-                    return Ok(Value::Bool(true));
-                }
-                return Ok(Value::Bool(false));
-            }
-            if matches!(set.as_ref(), Expr::RecordSet(_)) {
-                let ev = eval(elem, env, defs)?;
-                return Ok(Value::Bool(in_set_symbolic(&ev, set, env, defs)?));
-            }
             let ev = eval(elem, env, defs)?;
-            let sv = eval_set(set, env, defs)?;
-            Ok(Value::Bool(sv.contains(&ev)))
+            Ok(Value::Bool(in_set_symbolic(&ev, set, env, defs)?))
         }
 
         Expr::NotIn(elem, set) => {
-            if matches!(set.as_ref(), Expr::Any) {
-                return Ok(Value::Bool(false));
-            }
-            if let Expr::FunctionSet(domain_expr, codomain_expr) = set.as_ref() {
-                let ev = eval(elem, env, defs)?;
-                return Ok(Value::Bool(!value_in_function_set(
-                    &ev,
-                    domain_expr,
-                    codomain_expr,
-                    env,
-                    defs,
-                )?));
-            }
-            if let Expr::Powerset(inner) = set.as_ref() {
-                let ev = eval(elem, env, defs)?;
-                if let Value::Set(s) = ev {
-                    for member in s.iter() {
-                        if !in_set_symbolic(member, inner, env, defs)? {
-                            return Ok(Value::Bool(true));
-                        }
-                    }
-                    return Ok(Value::Bool(false));
-                }
-                return Ok(Value::Bool(true));
-            }
-            if let Expr::SeqSet(domain_expr) = set.as_ref() {
-                let ev = eval(elem, env, defs)?;
-                let seq = match &ev {
-                    Value::Tuple(t) => Some(t.as_ref().clone()),
-                    Value::Fn(f) => fn_as_tuple(f),
-                    _ => None,
-                };
-                if let Some(seq) = seq {
-                    let domain = eval_set(domain_expr, env, defs)?;
-                    for e in &seq {
-                        if !domain.contains(e) {
-                            return Ok(Value::Bool(true));
-                        }
-                    }
-                    return Ok(Value::Bool(false));
-                }
-                return Ok(Value::Bool(true));
-            }
-            if matches!(set.as_ref(), Expr::RecordSet(_)) {
-                let ev = eval(elem, env, defs)?;
-                return Ok(Value::Bool(!in_set_symbolic(&ev, set, env, defs)?));
-            }
             let ev = eval(elem, env, defs)?;
-            let sv = eval_set(set, env, defs)?;
-            Ok(Value::Bool(!sv.contains(&ev)))
+            Ok(Value::Bool(!in_set_symbolic(&ev, set, env, defs)?))
         }
 
         Expr::Add(l, r) => {

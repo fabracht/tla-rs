@@ -34,6 +34,8 @@
 
 ### Changed
 
+- Set membership is now decided in one place. `\in` and `\notin` were implemented four times over — twice in the main evaluator and twice in the context evaluator used by `ENABLED` and the liveness pass — and the two pairs did not agree: the context copy tested `SUBSET` by enumerating and comparing, and accepted only a sequence layout for `Seq(S)`. All four now delegate to the single recursive `in_set_symbolic`, so a membership test gives the same answer wherever it appears. `Seq(S)` also recurses into its element type instead of enumerating it, which is what makes `Seq` of a structural set work.
+
 - The recursive-function evaluator no longer carries its own copy of the function-application logic; it now calls the shared `apply_fn_value` helper, so applying a record inside a recursive function definition (`f[s \in SUBSET (DOMAIN r)] == ... r[k] ...`) behaves the same as everywhere else.
 
 ## [0.6.11] - 2026-07-15

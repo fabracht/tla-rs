@@ -121,6 +121,7 @@ pub(crate) fn in_set_symbolic(
     defs: &Definitions,
 ) -> Result<bool> {
     match set_expr {
+        Expr::Any => Ok(true),
         Expr::Powerset(inner) => {
             if let Value::Set(s) = val {
                 for member in s.iter() {
@@ -143,9 +144,8 @@ pub(crate) fn in_set_symbolic(
                 _ => None,
             };
             if let Some(seq) = seq {
-                let domain = eval_set(domain_expr, env, defs)?;
                 for e in &seq {
-                    if !domain.contains(e) {
+                    if !in_set_symbolic(e, domain_expr, env, defs)? {
                         return Ok(false);
                     }
                 }

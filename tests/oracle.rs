@@ -91,6 +91,19 @@ fn test_should_pass_traffic_light() {
 }
 
 #[test]
+fn test_membership_dispatch_is_shared() {
+    let path = Path::new("test_cases/should_pass/membership_dispatch.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "`\\in` under ENABLED must give the same answer as `\\in` in the next-state \
+         relation, including nested structural sets; these were two separate \
+         implementations and the ENABLED one was weaker, got: {:?}",
+        result
+    );
+}
+
+#[test]
 fn test_function_canonicality() {
     let path = Path::new("test_cases/should_pass/function_canonicality.tla");
     let result = check_spec_file(path);
