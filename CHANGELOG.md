@@ -30,7 +30,7 @@
 
 - `[f EXCEPT ![a] = e1, ![b] = e2]` now means `[[f EXCEPT ![a] = e1] EXCEPT ![b] = e2]`, as TLA+ defines it: `@` in a later update sees the earlier updates, and each update's key path is validated against the accumulated result. Previously both read from the original function, so `[<<1,2>> EXCEPT ![1] = 9, ![1] = @ + 1]` gave `<<2, 2>>` where TLC gives `<<10, 2>>`. Reading the stale value also let an earlier update replace a subterm with a function of a different domain while a later update still validated against the original, which could build a value whose layout did not match its domain and therefore compared unequal to its own equal — breaking state dedup.
 
-- A bare identifier from a cfg or `--constant` model-value set can now be named directly in spec and `--scenario` expressions (`step: st'[rm1] = "prepared"`). It previously resolved as an undefined variable, and the string form `"rm1"` no longer matches because a model value is not a string.
+- A bare identifier from a cfg or `--constant` model-value set can now be named directly in spec and `--scenario` expressions (`step: st'[rm1] = "prepared"`). It previously resolved as an undefined variable, and the string form `"rm1"` no longer matches because a model value is not a string. A model value is never bound over an existing name — an operator (including one from an `EXTENDS`ed module or defined later in the file), a variable, a constant, or a standard-library binding such as `Nat` keeps its meaning, since the environment is consulted before definitions and binding over one of these would silently change what a spec means.
 
 ### Changed
 

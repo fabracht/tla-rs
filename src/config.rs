@@ -265,13 +265,22 @@ fn collect_model_values(val: &Value, out: &mut Vec<Arc<str>>) {
     }
 }
 
-pub fn bind_model_value_names(domains: &mut Env) {
+pub fn bind_model_value_names(
+    domains: &mut Env,
+    spec: &Spec,
+    defs: &BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>,
+) {
     let mut names = Vec::new();
     for (_, val) in domains.iter() {
         collect_model_values(val, &mut names);
     }
     for name in names {
-        if !domains.contains_key(&name) {
+        let shadows_something = domains.contains_key(&name)
+            || defs.contains_key(&name)
+            || spec.definitions.contains_key(&name)
+            || spec.vars.contains(&name)
+            || spec.constants.contains(&name);
+        if !shadows_something {
             domains.insert(name.clone(), Value::Model(name));
         }
     }
@@ -640,7 +649,6 @@ pub fn apply_config(
         }
         domains.insert(name.clone(), val.clone());
     }
-    bind_model_value_names(domains);
 
     if let Some(ref init_name) = cfg.init {
         match spec.definitions.get(init_name.as_ref()) {

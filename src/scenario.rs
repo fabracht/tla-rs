@@ -112,6 +112,9 @@ pub fn execute_scenario_with(
     constants: &Env,
     defs: &Definitions,
 ) -> Result<ScenarioResult, EvalError> {
+    let mut bound_constants = constants.clone();
+    crate::config::bind_model_value_names(&mut bound_constants, spec, defs);
+    let constants = &bound_constants;
     let mut env = constants.clone();
 
     let init_expr = spec

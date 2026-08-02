@@ -258,6 +258,8 @@ pub fn prepare_spec(
     }
     let defs = extended_defs;
 
+    crate::config::bind_model_value_names(&mut domains, spec, &defs);
+
     for inst in &spec.instances {
         if stdlib::is_stdlib_module(&inst.module_name) {
             stdlib::load_module(&inst.module_name, &mut domains);

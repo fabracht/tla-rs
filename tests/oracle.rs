@@ -116,6 +116,20 @@ fn test_membership_in_invariant_uses_shared_dispatch() {
 }
 
 #[test]
+fn test_model_value_does_not_shadow_a_definition() {
+    let path = Path::new("test_cases/should_violate/model_value_shadowing.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::InvariantViolation(_, _)),
+        "a model value named the same as an operator must not be bound over it — the \
+         environment is consulted before definitions, so binding `Threshold` as a model \
+         value makes `x < Threshold` compare against an atom and the run stops early, \
+         got: {:?}",
+        result
+    );
+}
+
+#[test]
 fn test_undefined_name_in_set_domain_is_reported() {
     let path = Path::new("test_cases/should_error/undefined_in_seq_domain.tla");
     let result = check_spec_file_allow_deadlock(path);
