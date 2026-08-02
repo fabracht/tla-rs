@@ -251,6 +251,32 @@ fn is_keyword(tok: &Token) -> bool {
     matches!(tok, Token::Keyword(_))
 }
 
+fn collect_model_values(val: &Value, out: &mut Vec<Arc<str>>) {
+    match val {
+        Value::Model(name) => out.push(name.clone()),
+        Value::Set(s) => s.iter().for_each(|v| collect_model_values(v, out)),
+        Value::Tuple(t) => t.iter().for_each(|v| collect_model_values(v, out)),
+        Value::Record(r) => r.values().for_each(|v| collect_model_values(v, out)),
+        Value::Fn(f) => f.iter().for_each(|(k, v)| {
+            collect_model_values(k, out);
+            collect_model_values(v, out);
+        }),
+        _ => {}
+    }
+}
+
+pub fn bind_model_value_names(domains: &mut Env) {
+    let mut names = Vec::new();
+    for (_, val) in domains.iter() {
+        collect_model_values(val, &mut names);
+    }
+    for name in names {
+        if !domains.contains_key(&name) {
+            domains.insert(name.clone(), Value::Model(name));
+        }
+    }
+}
+
 fn parse_constant_value_from_tokens(tokens: &[Token], pos: &mut usize) -> Result<Value, String> {
     let first = parse_constant_maps_to(tokens, pos)?;
     if !matches!(tokens.get(*pos), Some(Token::AtAt)) {
@@ -614,6 +640,7 @@ pub fn apply_config(
         }
         domains.insert(name.clone(), val.clone());
     }
+    bind_model_value_names(domains);
 
     if let Some(ref init_name) = cfg.init {
         match spec.definitions.get(init_name.as_ref()) {

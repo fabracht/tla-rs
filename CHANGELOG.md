@@ -28,6 +28,10 @@
 
 - `test_cases/should_pass/model_value_conformance.tla` does the same for 25 model-value questions, likewise answered by a real TLC run.
 
+- `[f EXCEPT ![a] = e1, ![b] = e2]` now means `[[f EXCEPT ![a] = e1] EXCEPT ![b] = e2]`, as TLA+ defines it: `@` in a later update sees the earlier updates, and each update's key path is validated against the accumulated result. Previously both read from the original function, so `[<<1,2>> EXCEPT ![1] = 9, ![1] = @ + 1]` gave `<<2, 2>>` where TLC gives `<<10, 2>>`. Reading the stale value also let an earlier update replace a subterm with a function of a different domain while a later update still validated against the original, which could build a value whose layout did not match its domain and therefore compared unequal to its own equal — breaking state dedup.
+
+- A bare identifier from a cfg or `--constant` model-value set can now be named directly in spec and `--scenario` expressions (`step: st'[rm1] = "prepared"`). It previously resolved as an undefined variable, and the string form `"rm1"` no longer matches because a model value is not a string.
+
 ### Changed
 
 - The recursive-function evaluator no longer carries its own copy of the function-application logic; it now calls the shared `apply_fn_value` helper, so applying a record inside a recursive function definition (`f[s \in SUBSET (DOMAIN r)] == ... r[k] ...`) behaves the same as everywhere else.

@@ -793,6 +793,7 @@ fn main() -> ExitCode {
     for (name, val) in &constants {
         domains.insert(name.clone(), val.clone());
     }
+    tla_checker::config::bind_model_value_names(&mut domains);
 
     if list_invariants {
         println!("Invariants detected in {}:", spec_path);
