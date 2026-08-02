@@ -96,9 +96,34 @@ fn test_membership_dispatch_is_shared() {
     let result = check_spec_file_allow_deadlock(path);
     assert!(
         matches!(result, CheckResult::Ok(_)),
-        "`\\in` under ENABLED must give the same answer as `\\in` in the next-state \
-         relation, including nested structural sets; these were two separate \
-         implementations and the ENABLED one was weaker, got: {:?}",
+        "nested structural sets must be decided the same way wherever `\\in` appears, \
+         got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_membership_in_invariant_uses_shared_dispatch() {
+    let path = Path::new("test_cases/should_pass/membership_in_invariant.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "invariants are evaluated by the context evaluator, which had its own weaker \
+         copy of `\\in` — a bare invariant over SUBSET/Seq/[f: S]/[D -> R] is what \
+         exercises that path, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_undefined_name_in_set_domain_is_reported() {
+    let path = Path::new("test_cases/should_error/undefined_in_seq_domain.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::InvariantError(_, _, _)),
+        "an undefined name in a `Seq(..)` domain must be reported even when the sequence \
+         is empty; deferring the domain evaluation into the element loop makes the \
+         invariant silently vacuous, got: {:?}",
         result
     );
 }

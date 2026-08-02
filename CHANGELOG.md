@@ -34,6 +34,8 @@
 
 ### Changed
 
+- A membership test resolves its element type once rather than once per element. `q \in Seq(S)` and `s \in SUBSET S` evaluate `S` a single time when it is an ordinary set expression, and recurse into it only when it is itself structural (`SUBSET`, `Seq`, `[D -> R]`, `[f: T]`). Evaluating it per element made `q \in Seq(Msgs)` — the most common shape of TLA+ type invariant — cost time linear in the sequence length at every state, and it also meant an undefined name in the element type went unevaluated whenever the sequence or set was empty, so `q \in Seq(Msg)` with `Msg` misspelled and `q = <<>>` reported a clean run instead of an error.
+
 - Set membership is now decided in one place. `\in` and `\notin` were implemented four times over — twice in the main evaluator and twice in the context evaluator used by `ENABLED` and the liveness pass — and the two pairs did not agree: the context copy tested `SUBSET` by enumerating and comparing, and accepted only a sequence layout for `Seq(S)`. All four now delegate to the single recursive `in_set_symbolic`, so a membership test gives the same answer wherever it appears. `Seq(S)` also recurses into its element type instead of enumerating it, which is what makes `Seq` of a structural set work.
 
 - The recursive-function evaluator no longer carries its own copy of the function-application logic; it now calls the shared `apply_fn_value` helper, so applying a record inside a recursive function definition (`f[s \in SUBSET (DOMAIN r)] == ... r[k] ...`) behaves the same as everywhere else.

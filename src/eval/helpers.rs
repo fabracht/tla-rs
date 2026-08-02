@@ -114,6 +114,28 @@ pub(crate) fn is_structural_set_expr(expr: &Expr) -> bool {
     )
 }
 
+enum ResolvedDomain<'a> {
+    Concrete(BTreeSet<Value>),
+    Symbolic(&'a Expr),
+}
+
+impl<'a> ResolvedDomain<'a> {
+    fn resolve(expr: &'a Expr, env: &mut Env, defs: &Definitions) -> Result<Self> {
+        if matches!(expr, Expr::Any) || is_structural_set_expr(expr) {
+            Ok(ResolvedDomain::Symbolic(expr))
+        } else {
+            Ok(ResolvedDomain::Concrete(eval_set(expr, env, defs)?))
+        }
+    }
+
+    fn contains(&self, val: &Value, env: &mut Env, defs: &Definitions) -> Result<bool> {
+        match self {
+            ResolvedDomain::Concrete(s) => Ok(s.contains(val)),
+            ResolvedDomain::Symbolic(e) => in_set_symbolic(val, e, env, defs),
+        }
+    }
+}
+
 pub(crate) fn in_set_symbolic(
     val: &Value,
     set_expr: &Expr,
@@ -124,8 +146,9 @@ pub(crate) fn in_set_symbolic(
         Expr::Any => Ok(true),
         Expr::Powerset(inner) => {
             if let Value::Set(s) = val {
+                let inner_domain = ResolvedDomain::resolve(inner, env, defs)?;
                 for member in s.iter() {
-                    if !in_set_symbolic(member, inner, env, defs)? {
+                    if !inner_domain.contains(member, env, defs)? {
                         return Ok(false);
                     }
                 }
@@ -144,8 +167,9 @@ pub(crate) fn in_set_symbolic(
                 _ => None,
             };
             if let Some(seq) = seq {
+                let domain = ResolvedDomain::resolve(domain_expr, env, defs)?;
                 for e in &seq {
-                    if !in_set_symbolic(e, domain_expr, env, defs)? {
+                    if !domain.contains(e, env, defs)? {
                         return Ok(false);
                     }
                 }
