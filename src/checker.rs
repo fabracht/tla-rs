@@ -1208,6 +1208,10 @@ pub fn format_value(val: &Value) -> String {
 
 pub fn format_eval_error(err: &EvalError) -> String {
     match err {
+        EvalError::NotEnumerable { var, source, .. } => format!(
+            "cannot enumerate the values of `{}'`\n  note: the only source for it is {}\n               help: give `{}'` a value directly, or draw it from a set the checker can enumerate",
+            var, source, var
+        ),
         EvalError::UndefinedVar { name, suggestion, .. } => {
             let mut msg = format!("undefined variable `{}`", name);
             if let Some(s) = suggestion {
@@ -1247,6 +1251,14 @@ fn value_type_name(val: &Value) -> &'static str {
 pub fn eval_error_to_diagnostic(err: &EvalError) -> crate::diagnostic::Diagnostic {
     use crate::diagnostic::Diagnostic;
     let diag = match err {
+        EvalError::NotEnumerable { var, source, .. } => {
+            Diagnostic::error(format!("cannot enumerate the values of `{}`", var))
+                .with_note(format!("the only source for it is {}", source))
+                .with_help(format!(
+                    "bind `{}` directly, or draw it from a set the checker can enumerate",
+                    var
+                ))
+        }
         EvalError::UndefinedVar {
             name, suggestion, ..
         } => {

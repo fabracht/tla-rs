@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use super::Definitions;
 use super::core::eval;
-use super::error::Result;
+use super::error::{EvalError, Result};
 #[cfg(feature = "profiling")]
 use super::global_state::PROFILING_STATS;
 use super::helpers::eval_bool;
@@ -81,13 +81,16 @@ fn infer_init_candidates(
     defs: &Definitions,
 ) -> Result<Vec<Value>> {
     let mut candidates = BTreeSet::new();
+    let mut not_enumerable: Option<String> = None;
 
+    #[allow(clippy::too_many_arguments)]
     fn collect(
         expr: &Expr,
         env: &mut Env,
         var: &Arc<str>,
         defs: &Definitions,
         candidates: &mut BTreeSet<Value>,
+        not_enumerable: &mut Option<String>,
     ) -> Result<()> {
         match expr {
             Expr::Eq(l, r) => {
@@ -107,16 +110,33 @@ fn infer_init_candidates(
             Expr::In(elem, set) => {
                 if let Expr::Var(name) = elem.as_ref()
                     && name == var
-                    && let Ok(Value::Set(s)) = eval(set, env, defs)
                 {
-                    for val in s.iter() {
-                        candidates.insert(val.clone());
+                    match eval(set, env, defs) {
+                        Ok(Value::Set(s)) => {
+                            for val in s.iter() {
+                                candidates.insert(val.clone());
+                            }
+                        }
+                        Ok(other) => {
+                            not_enumerable.get_or_insert(format!(
+                                "{} \\in <set>: expected Set, got {}",
+                                name,
+                                super::error::value_type_name(&other)
+                            ));
+                        }
+                        Err(e) => {
+                            not_enumerable.get_or_insert(format!(
+                                "{} \\in <set>: {}",
+                                name,
+                                e.short_description()
+                            ));
+                        }
                     }
                 }
             }
             Expr::And(l, r) | Expr::Or(l, r) => {
-                collect(l, env, var, defs, candidates)?;
-                collect(r, env, var, defs, candidates)?;
+                collect(l, env, var, defs, candidates, not_enumerable)?;
+                collect(r, env, var, defs, candidates, not_enumerable)?;
             }
             Expr::QualifiedCall(instance_expr, op, args) => {
                 use super::global_state::{PARAMETERIZED_INSTANCES, RESOLVED_INSTANCES};
@@ -136,7 +156,14 @@ fn infer_init_candidates(
                                 }
                                 let params: Vec<Arc<str>> = params.clone();
                                 let saved = bind_params(&params, args, env, defs);
-                                err = collect(body, env, var, &merged_defs, candidates);
+                                err = collect(
+                                    body,
+                                    env,
+                                    var,
+                                    &merged_defs,
+                                    candidates,
+                                    not_enumerable,
+                                );
                                 restore_env(env, saved);
                             }
                         });
@@ -164,7 +191,14 @@ fn infer_init_candidates(
                                     let params: Vec<Arc<str>> = params.clone();
                                     let body = body.clone();
                                     let saved = bind_params(&params, args, env, defs);
-                                    err = collect(&body, env, var, &merged_defs, candidates);
+                                    err = collect(
+                                        &body,
+                                        env,
+                                        var,
+                                        &merged_defs,
+                                        candidates,
+                                        not_enumerable,
+                                    );
                                     restore_env(env, saved);
                                 }
                             }
@@ -179,6 +213,11 @@ fn infer_init_candidates(
         Ok(())
     }
 
-    collect(init, env, var, defs, &mut candidates)?;
+    collect(init, env, var, defs, &mut candidates, &mut not_enumerable)?;
+    if candidates.is_empty()
+        && let Some(source) = not_enumerable
+    {
+        return Err(EvalError::not_enumerable(var.clone(), source));
+    }
     Ok(candidates.into_iter().collect())
 }

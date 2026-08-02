@@ -1,7 +1,7 @@
 use super::Definitions;
 use super::contains_prime_ref;
 use super::core::eval;
-use super::error::Result;
+use super::error::{EvalError, Result};
 #[cfg(feature = "profiling")]
 use super::global_state::PROFILING_STATS;
 use super::helpers::eval_set;
@@ -15,11 +15,13 @@ trait CandidateTarget {
     fn match_var(&self, name: &Arc<str>) -> Option<usize>;
     fn insert(&mut self, idx: usize, val: Value);
     fn var_at(&self, idx: usize) -> &Arc<str>;
+    fn note_not_enumerable(&mut self, idx: usize, source: String);
 }
 
 struct SingleVarTarget<'a> {
     var: &'a Arc<str>,
     candidates: &'a mut BTreeSet<Value>,
+    not_enumerable: Option<String>,
 }
 
 impl CandidateTarget for SingleVarTarget<'_> {
@@ -34,11 +36,16 @@ impl CandidateTarget for SingleVarTarget<'_> {
     fn var_at(&self, _idx: usize) -> &Arc<str> {
         self.var
     }
+
+    fn note_not_enumerable(&mut self, _idx: usize, source: String) {
+        self.not_enumerable.get_or_insert(source);
+    }
 }
 
 struct AllVarsTarget<'a> {
     vars: &'a [Arc<str>],
     all_candidates: &'a mut [BTreeSet<Value>],
+    not_enumerable: &'a mut [Option<String>],
 }
 
 impl CandidateTarget for AllVarsTarget<'_> {
@@ -52,6 +59,10 @@ impl CandidateTarget for AllVarsTarget<'_> {
 
     fn var_at(&self, idx: usize) -> &Arc<str> {
         &self.vars[idx]
+    }
+
+    fn note_not_enumerable(&mut self, idx: usize, source: String) {
+        self.not_enumerable[idx].get_or_insert(source);
     }
 }
 
@@ -173,13 +184,18 @@ pub(crate) fn infer_candidates(
     let mut target = SingleVarTarget {
         var,
         candidates: &mut candidates,
+        not_enumerable: None,
     };
     collect_candidates_impl(next, env, defs, &mut target)?;
+    let not_enumerable = target.not_enumerable.take();
 
-    if candidates.is_empty()
-        && let Some(current) = env.get(var)
-    {
-        candidates.insert(current.clone());
+    if candidates.is_empty() {
+        if let Some(source) = not_enumerable {
+            return Err(EvalError::not_enumerable(var.clone(), source));
+        }
+        if let Some(current) = env.get(var) {
+            candidates.insert(current.clone());
+        }
     }
 
     let result = candidates.into_iter().collect();
@@ -204,16 +220,22 @@ pub(crate) fn infer_all_candidates(
     let _start = Instant::now();
 
     let mut all_candidates: Vec<BTreeSet<Value>> = vec![BTreeSet::new(); vars.len()];
+    let mut not_enumerable: Vec<Option<String>> = vec![None; vars.len()];
     let mut target = AllVarsTarget {
         vars,
         all_candidates: &mut all_candidates,
+        not_enumerable: &mut not_enumerable,
     };
     collect_candidates_impl(next, env, defs, &mut target)?;
 
     for (i, var) in vars.iter().enumerate() {
-        if all_candidates[i].is_empty()
-            && let Some(current) = env.get(var)
-        {
+        if !all_candidates[i].is_empty() {
+            continue;
+        }
+        if let Some(source) = not_enumerable[i].take() {
+            return Err(EvalError::not_enumerable(var.clone(), source));
+        }
+        if let Some(current) = env.get(var) {
             all_candidates[i].insert(current.clone());
         }
     }
@@ -330,10 +352,17 @@ fn collect_candidates_impl<T: CandidateTarget>(
         Expr::In(elem, set) => {
             if let Expr::Prime(name) = elem.as_ref()
                 && let Some(idx) = target.match_var(name)
-                && let Ok(s) = eval_set(set, env, defs)
             {
-                for val in s {
-                    target.insert(idx, val);
+                match eval_set(set, env, defs) {
+                    Ok(s) => {
+                        for val in s {
+                            target.insert(idx, val);
+                        }
+                    }
+                    Err(e) => {
+                        let source = format!("{}' \\in <set>: {}", name, e.short_description());
+                        target.note_not_enumerable(idx, source);
+                    }
                 }
             }
         }

@@ -524,7 +524,8 @@ impl StructuredError {
             | EvalError::TypeMismatch { span, .. }
             | EvalError::DivisionByZero { span }
             | EvalError::EmptyChoose { span }
-            | EvalError::DomainError { span, .. } => *span,
+            | EvalError::DomainError { span, .. }
+            | EvalError::NotEnumerable { span, .. } => *span,
         };
         let source_span = span
             .filter(|s| !s.is_empty())

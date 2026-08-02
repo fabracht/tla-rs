@@ -116,6 +116,43 @@ fn test_membership_in_invariant_uses_shared_dispatch() {
 }
 
 #[test]
+fn test_next_from_non_enumerable_set_is_an_error() {
+    let path = Path::new("test_cases/should_error/next_not_enumerable.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::NextError(_, _, _)),
+        "`x' \\in Seq({{1,2}})` cannot enumerate successors, so it must be reported; \
+         discarding the enumeration error leaves no candidates, the collector falls back \
+         to the current value, and the run reports a clean pass over one state, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_init_from_non_enumerable_set_is_an_error() {
+    let path = Path::new("test_cases/should_error/init_not_enumerable.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::InitError(_)),
+        "a non-enumerable Init source must name itself, not surface as the misleading \
+         `no initial states found`, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_membership_as_a_check_is_not_a_candidate_source() {
+    let path = Path::new("test_cases/should_pass/membership_check_not_source.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "when another conjunct already determines the variable, `\\in` over a \
+         non-enumerable set is only a membership test and must not be an error, got: {:?}",
+        result
+    );
+}
+
+#[test]
 fn test_model_value_does_not_shadow_a_definition() {
     let path = Path::new("test_cases/should_violate/model_value_shadowing.tla");
     let result = check_spec_file(path);
