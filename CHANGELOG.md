@@ -1,8 +1,14 @@
 # Changelog
 
-## [Unreleased]
+## [0.7.0] - 2026-08-03
 
 ### Fixed
+
+- A next-state or initial-state predicate that draws a variable from a set the checker cannot enumerate is now reported instead of passing vacuously. `Next == x' \in Seq({1,2}) /\ Len(x') = 1` reaches `<<1>>` and `<<2>>`, so a `Len(x) = 0` invariant is violated — but the enumeration error was discarded, no candidates were produced, the collector fell back to the variable's current value, and the run reported one state and no errors. The error now names both the variable and the source that could not be enumerated. Membership that is only a *check* is unaffected: in `x' = <<1>> /\ x' \in Seq({1,2})` the equality still supplies the successor and the `\in` is evaluated as a test. TLC rejects the first form too ("the right side of \in is not enumerable").
+
+- `[f EXCEPT ![a] = e1, ![b] = e2]` now means `[[f EXCEPT ![a] = e1] EXCEPT ![b] = e2]`, as TLA+ defines it: `@` in a later update sees the earlier updates, and each update's key path is validated against the accumulated result. Previously both read from the original function, so `[<<1,2>> EXCEPT ![1] = 9, ![1] = @ + 1]` gave `<<2, 2>>` where TLC gives `<<10, 2>>`. Reading the stale value also let an earlier update replace a subterm with a function of a different domain while a later update still validated against the original, which could build a value whose layout did not match its domain and therefore compared unequal to its own equal — breaking state dedup.
+
+- A bare identifier from a cfg or `--constant` model-value set can now be named directly in spec and `--scenario` expressions (`step: st'[rm1] = "prepared"`). It previously resolved as an undefined variable, and the string form `"rm1"` no longer matches because a model value is not a string. A model value is never bound over an existing name — an operator (including one from an `EXTENDS`ed module or defined later in the file), a variable, a constant, or a standard-library binding such as `Nat` keeps its meaning, since the environment is consulted before definitions and binding over one of these would silently change what a spec means.
 
 - Model values are now a distinct kind of value instead of being stored as strings, matching TLC. Previously a `CONSTANT Node = {n1, n2}` produced the same values as the strings `{"n1", "n2"}`, so `Cardinality(Node \cup {"n1","n2"})` was 2 where TLC gives 4, and `[n \in Node |-> "idle"]` compared equal to `[n \in {"n1","n2"} |-> "idle"]`. Because conflating two distinct values merges two distinct states, the BFS silently skipped reachable states: a spec whose successors range over `{n1, "n1", n2, "n2"}` explored 4 states instead of 16 and still reported `No errors found` — a false pass. Model values now render bare (`(n1 :> "idle" @@ n2 :> "idle")`) rather than quoted, and carry a `__model` tag through trace JSON so they round-trip.
 
@@ -28,13 +34,7 @@
 
 - `test_cases/should_pass/model_value_conformance.tla` does the same for 25 model-value questions, likewise answered by a real TLC run.
 
-- `[f EXCEPT ![a] = e1, ![b] = e2]` now means `[[f EXCEPT ![a] = e1] EXCEPT ![b] = e2]`, as TLA+ defines it: `@` in a later update sees the earlier updates, and each update's key path is validated against the accumulated result. Previously both read from the original function, so `[<<1,2>> EXCEPT ![1] = 9, ![1] = @ + 1]` gave `<<2, 2>>` where TLC gives `<<10, 2>>`. Reading the stale value also let an earlier update replace a subterm with a function of a different domain while a later update still validated against the original, which could build a value whose layout did not match its domain and therefore compared unequal to its own equal — breaking state dedup.
-
-- A bare identifier from a cfg or `--constant` model-value set can now be named directly in spec and `--scenario` expressions (`step: st'[rm1] = "prepared"`). It previously resolved as an undefined variable, and the string form `"rm1"` no longer matches because a model value is not a string. A model value is never bound over an existing name — an operator (including one from an `EXTENDS`ed module or defined later in the file), a variable, a constant, or a standard-library binding such as `Nat` keeps its meaning, since the environment is consulted before definitions and binding over one of these would silently change what a spec means.
-
 ### Changed
-
-- A next-state or initial-state predicate that draws a variable from a set the checker cannot enumerate is now reported instead of passing vacuously. `Next == x' \in Seq({1,2}) /\ Len(x') = 1` reaches `<<1>>` and `<<2>>`, so a `Len(x) = 0` invariant is violated — but the enumeration error was discarded, no candidates were produced, the collector fell back to the variable's current value, and the run reported one state and no errors. The error now names both the variable and the source that could not be enumerated. Membership that is only a *check* is unaffected: in `x' = <<1>> /\ x' \in Seq({1,2})` the equality still supplies the successor and the `\in` is evaluated as a test. TLC rejects the first form too ("the right side of \in is not enumerable").
 
 - A membership test resolves its element type once rather than once per element. `q \in Seq(S)` and `s \in SUBSET S` evaluate `S` a single time when it is an ordinary set expression, and recurse into it only when it is itself structural (`SUBSET`, `Seq`, `[D -> R]`, `[f: T]`). Evaluating it per element made `q \in Seq(Msgs)` — the most common shape of TLA+ type invariant — cost time linear in the sequence length at every state, and it also meant an undefined name in the element type went unevaluated whenever the sequence or set was empty, so `q \in Seq(Msg)` with `Msg` misspelled and `q = <<>>` reported a clean run instead of an error.
 
