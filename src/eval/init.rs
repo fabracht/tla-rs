@@ -83,7 +83,6 @@ fn infer_init_candidates(
     let mut candidates = BTreeSet::new();
     let mut not_enumerable: Option<String> = None;
 
-    #[allow(clippy::too_many_arguments)]
     fn collect(
         expr: &Expr,
         env: &mut Env,

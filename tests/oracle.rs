@@ -663,6 +663,24 @@ fn test_symmetry_rejects_non_model_values() {
 }
 
 #[test]
+fn test_symmetry_cfg_directive_reduces_states() {
+    // exercises the cfg `SYMMETRY Name` parse + apply path end to end, which the
+    // check()-level symmetry tests bypass. Three symmetric procs each counting 0..2
+    // give 27 states unreduced; symmetry collapses them to the 10 distinct multisets.
+    let path = Path::new("test_cases/should_pass/symmetry_cfg.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(
+            stats.states_explored, 10,
+            "cfg SYMMETRY must actually reduce the state space"
+        ),
+        other => panic!(
+            "symmetry_cfg.tla should pass with reduction, got: {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
 fn test_symmetry_reduces_states() {
     let path = Path::new("test_cases/benchmark/symmetric_procs.tla");
     let input = fs::read_to_string(path).expect("failed to read spec file");
