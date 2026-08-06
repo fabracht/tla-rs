@@ -42,6 +42,12 @@
 
 - The recursive-function evaluator no longer carries its own copy of the function-application logic; it now calls the shared `apply_fn_value` helper, so applying a record inside a recursive function definition (`f[s \in SUBSET (DOMAIN r)] == ... r[k] ...`) behaves the same as everywhere else.
 
+- **Machine-readable trace format changed for functions over a `1..n` domain.** Because such a function now canonicalises to a sequence, a variable like `[i \in 1..3 |-> 0]` serialises in `--trace-json`, `--save-counterexample` and the MCP `json` field as a bare array (`[0, 0, 0]`) rather than the tagged key/value list (`[{"key": 1, "value": 0}, ...]`) used before. A record (non-empty string domain) still serialises as a JSON object, and a general function as the tagged list, so the encoding now mirrors the canonical value kind. Consumers that parsed the old shape for indexed functions must be updated.
+
+### Known issues
+
+- Model checking is modestly slower than 0.6.x on function-heavy specs — about 13% on TwoPhase with 5 resource managers — because canonicalising every function on construction and unifying the membership path added per-state work. The cause has not been isolated to a single site; it is being addressed by the state-generation rewrite tracked for the next release, whose prototype is faster than 0.6.x on the same specs.
+
 ## [0.6.11] - 2026-07-15
 
 ### Added
