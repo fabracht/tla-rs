@@ -358,6 +358,42 @@ impl ExplorerState {
                     }
                 }
             }
+            (Value::Tuple(old_t), Value::Tuple(new_t)) => {
+                for (i, v) in new_t.iter().enumerate() {
+                    let new_path = format!("{}[{}]", path, i + 1);
+                    match old_t.get(i) {
+                        Some(old_v) if old_v != v => {
+                            self.record_value_changes(
+                                state_idx,
+                                new_path,
+                                old_v,
+                                v,
+                                action.clone(),
+                            );
+                        }
+                        Some(_) => {}
+                        None => {
+                            self.var_changes.push(VarChange {
+                                state_idx,
+                                path: new_path,
+                                old_value: Value::Bool(false),
+                                new_value: v.clone(),
+                                action: action.clone(),
+                            });
+                        }
+                    }
+                }
+                for (i, old_v) in old_t.iter().enumerate().skip(new_t.len()) {
+                    let new_path = format!("{}[{}]", path, i + 1);
+                    self.var_changes.push(VarChange {
+                        state_idx,
+                        path: new_path,
+                        old_value: old_v.clone(),
+                        new_value: Value::set(std::collections::BTreeSet::new()),
+                        action: action.clone(),
+                    });
+                }
+            }
             _ => {
                 self.var_changes.push(VarChange {
                     state_idx,

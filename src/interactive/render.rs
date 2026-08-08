@@ -239,6 +239,24 @@ fn format_nested_changes(
                 }
             }
         }
+        (Value::Tuple(old_t), Value::Tuple(new_t)) => {
+            for (i, new_v) in new_t.iter().enumerate() {
+                let new_path = format!("{}[{}]", path, i + 1);
+                match old_t.get(i) {
+                    Some(old_v) if old_v != new_v => {
+                        changes.extend(format_nested_changes(old_v, new_v, &new_path));
+                    }
+                    Some(_) => {}
+                    None => {
+                        changes.push((new_path, String::new(), format_value(new_v)));
+                    }
+                }
+            }
+            for (i, old_v) in old_t.iter().enumerate().skip(new_t.len()) {
+                let new_path = format!("{}[{}]", path, i + 1);
+                changes.push((new_path, format_value(old_v), String::new()));
+            }
+        }
         _ => {
             changes.push((
                 path.to_string(),
@@ -915,4 +933,39 @@ fn render_present_hints(f: &mut Frame, area: Rect, header: &super::present::Pres
     spans.push(Span::styled("q", Style::default().fg(Color::Cyan)));
     spans.push(Span::raw(" quit"));
     f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_nested_changes;
+    use crate::ast::Value;
+
+    fn tup(v: Vec<i64>) -> Value {
+        Value::tuple(v.into_iter().map(Value::Int).collect())
+    }
+
+    #[test]
+    fn tuple_diff_is_per_element_not_whole_value() {
+        // a 1..n-indexed variable canonicalises to Value::Tuple; the diff must still
+        // report the single changed element, not replace the whole sequence.
+        let changes = format_nested_changes(&tup(vec![1, 2, 3]), &tup(vec![1, 9, 3]), "pc");
+        assert_eq!(
+            changes,
+            vec![("pc[2]".to_string(), "2".to_string(), "9".to_string())]
+        );
+    }
+
+    #[test]
+    fn tuple_diff_reports_appended_and_removed_elements() {
+        let grown = format_nested_changes(&tup(vec![1, 2]), &tup(vec![1, 2, 3]), "q");
+        assert_eq!(
+            grown,
+            vec![("q[3]".to_string(), String::new(), "3".to_string())]
+        );
+        let shrunk = format_nested_changes(&tup(vec![1, 2, 3]), &tup(vec![1, 2]), "q");
+        assert_eq!(
+            shrunk,
+            vec![("q[3]".to_string(), "3".to_string(), String::new())]
+        );
+    }
 }

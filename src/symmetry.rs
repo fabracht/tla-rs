@@ -95,8 +95,9 @@ impl SymmetryConfig {
                 }
             }
             Value::Record(r) => {
-                for v in r.values() {
+                for (k, v) in r.iter() {
                     self.collect_elements_in_order(v, sym_set, seen, ordering);
+                    self.collect_elements_in_order(&Value::Str(k.clone()), sym_set, seen, ordering);
                 }
             }
             Value::Tuple(t) => {
@@ -104,7 +105,7 @@ impl SymmetryConfig {
                     self.collect_elements_in_order(elem, sym_set, seen, ordering);
                 }
             }
-            Value::Bool(_) | Value::Int(_) | Value::Str(_) => {}
+            Value::Bool(_) | Value::Int(_) | Value::Str(_) | Value::Model(_) => {}
         }
     }
 
@@ -123,7 +124,7 @@ impl SymmetryConfig {
         }
 
         match value {
-            Value::Bool(_) | Value::Int(_) | Value::Str(_) => value.clone(),
+            Value::Bool(_) | Value::Int(_) | Value::Str(_) | Value::Model(_) => value.clone(),
             Value::Set(s) => {
                 let mapped: BTreeSet<_> = s
                     .iter()
@@ -144,11 +145,16 @@ impl SymmetryConfig {
                 Value::func(mapped)
             }
             Value::Record(r) => {
-                let mapped: BTreeMap<_, _> = r
+                let mapped: BTreeMap<Value, Value> = r
                     .iter()
-                    .map(|(k, v)| (k.clone(), self.apply_mapping_to_value(v, mapping)))
+                    .map(|(k, v)| {
+                        (
+                            self.apply_mapping_to_value(&Value::Str(k.clone()), mapping),
+                            self.apply_mapping_to_value(v, mapping),
+                        )
+                    })
                     .collect();
-                Value::record(mapped)
+                Value::func(mapped)
             }
             Value::Tuple(t) => {
                 let mapped: Vec<_> = t
@@ -175,6 +181,10 @@ mod tests {
 
     fn str_val(s: &str) -> Value {
         Value::Str(Arc::from(s))
+    }
+
+    fn mv(s: &str) -> Value {
+        Value::Model(Arc::from(s))
     }
 
     #[test]
@@ -204,29 +214,56 @@ mod tests {
     #[test]
     fn canonicalize_swaps_elements_based_on_first_occurrence() {
         let mut config = SymmetryConfig::new();
-        config.add_symmetric_set(BTreeSet::from([
-            str_val("p1"),
-            str_val("p2"),
-            str_val("p3"),
-        ]));
+        config.add_symmetric_set(BTreeSet::from([mv("p1"), mv("p2"), mv("p3")]));
 
         let mut votes = BTreeMap::new();
-        votes.insert(str_val("p2"), Value::Int(1));
-        votes.insert(str_val("p1"), Value::Int(0));
-        votes.insert(str_val("p3"), Value::Int(0));
+        votes.insert(mv("p2"), Value::Int(1));
+        votes.insert(mv("p1"), Value::Int(0));
+        votes.insert(mv("p3"), Value::Int(0));
         let state = State {
             values: vec![Value::func(votes)],
         };
 
         let canonical = config.canonicalize(&state);
 
-        if let Some(Value::Fn(cvotes)) = canonical.values.first() {
-            assert_eq!(cvotes.get(&str_val("p1")), Some(&Value::Int(1)));
-            assert_eq!(cvotes.get(&str_val("p2")), Some(&Value::Int(0)));
-            assert_eq!(cvotes.get(&str_val("p3")), Some(&Value::Int(0)));
-        } else {
-            panic!("expected Fn value");
-        }
+        let mut expected = BTreeMap::new();
+        expected.insert(mv("p1"), Value::Int(1));
+        expected.insert(mv("p2"), Value::Int(0));
+        expected.insert(mv("p3"), Value::Int(0));
+        assert_eq!(
+            canonical.values.first(),
+            Some(&Value::func(expected)),
+            "when the symmetric elements are function KEYS, the traversal order must come \
+             from the values — visiting keys in key order would give the same order for \
+             every state and reduce nothing"
+        );
+    }
+
+    #[test]
+    fn canonicalize_merges_records_holding_symmetric_values() {
+        let mut config = SymmetryConfig::new();
+        config.add_symmetric_set(BTreeSet::from([mv("p1"), mv("p2")]));
+
+        let rec = |first: &str, second: &str| {
+            let mut m = BTreeMap::new();
+            m.insert(Arc::from("a"), mv(first));
+            m.insert(Arc::from("b"), mv(second));
+            State {
+                values: vec![Value::record(m)],
+            }
+        };
+
+        assert_eq!(
+            *config.canonicalize(&rec("p1", "p2")),
+            *config.canonicalize(&rec("p2", "p1")),
+            "these two records are images of each other under the permutation, so they \
+             must share a canonical form; ordering the traversal by value rather than by \
+             field name loses this"
+        );
+        assert_eq!(
+            *config.canonicalize(&rec("p1", "p1")),
+            *config.canonicalize(&rec("p2", "p2"))
+        );
     }
 
     #[test]

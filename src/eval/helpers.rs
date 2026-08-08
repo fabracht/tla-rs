@@ -32,8 +32,25 @@ pub(crate) fn apply_fn_value(fval: Value, key: Value) -> Result<Value> {
                 })
             }
         }
+        Value::Record(rec) => {
+            if let Value::Str(field) = &key {
+                rec.get(field).cloned().ok_or_else(|| {
+                    EvalError::domain_error(format!(
+                        "key {} not in function domain",
+                        format_value(&key)
+                    ))
+                })
+            } else {
+                Err(EvalError::TypeMismatch {
+                    expected: "Str",
+                    got: key,
+                    context: Some("record field"),
+                    span: None,
+                })
+            }
+        }
         other => Err(EvalError::TypeMismatch {
-            expected: "Fn or Tuple",
+            expected: "Fn, Tuple or Record",
             got: other,
             context: Some("function application"),
             span: None,
@@ -65,11 +82,58 @@ pub(crate) fn eval_int(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result
     }
 }
 
+pub(crate) fn value_in_function_set(
+    val: &Value,
+    domain_expr: &Expr,
+    codomain_expr: &Expr,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<bool> {
+    let Some(val_domain) = val.function_domain() else {
+        return Ok(false);
+    };
+    let domain = eval_set(domain_expr, env, defs)?;
+    if val_domain != domain {
+        return Ok(false);
+    }
+    let entries = val
+        .as_function_map()
+        .expect("function_domain succeeded, so the value is a function");
+    for v in entries.values() {
+        if !in_set_symbolic(v, codomain_expr, env, defs)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 pub(crate) fn is_structural_set_expr(expr: &Expr) -> bool {
     matches!(
         expr,
         Expr::Powerset(_) | Expr::FunctionSet(_, _) | Expr::SeqSet(_) | Expr::RecordSet(_)
     )
+}
+
+enum ResolvedDomain<'a> {
+    Concrete(BTreeSet<Value>),
+    Symbolic(&'a Expr),
+}
+
+impl<'a> ResolvedDomain<'a> {
+    fn resolve(expr: &'a Expr, env: &mut Env, defs: &Definitions) -> Result<Self> {
+        if matches!(expr, Expr::Any) || is_structural_set_expr(expr) {
+            Ok(ResolvedDomain::Symbolic(expr))
+        } else {
+            Ok(ResolvedDomain::Concrete(eval_set(expr, env, defs)?))
+        }
+    }
+
+    fn contains(&self, val: &Value, env: &mut Env, defs: &Definitions) -> Result<bool> {
+        match self {
+            ResolvedDomain::Concrete(s) => Ok(s.contains(val)),
+            ResolvedDomain::Symbolic(e) => in_set_symbolic(val, e, env, defs),
+        }
+    }
 }
 
 pub(crate) fn in_set_symbolic(
@@ -79,10 +143,12 @@ pub(crate) fn in_set_symbolic(
     defs: &Definitions,
 ) -> Result<bool> {
     match set_expr {
+        Expr::Any => Ok(true),
         Expr::Powerset(inner) => {
             if let Value::Set(s) = val {
+                let inner_domain = ResolvedDomain::resolve(inner, env, defs)?;
                 for member in s.iter() {
-                    if !in_set_symbolic(member, inner, env, defs)? {
+                    if !inner_domain.contains(member, env, defs)? {
                         return Ok(false);
                     }
                 }
@@ -92,21 +158,7 @@ pub(crate) fn in_set_symbolic(
             }
         }
         Expr::FunctionSet(domain_expr, codomain_expr) => {
-            if let Value::Fn(f) = val {
-                let domain = eval_set(domain_expr, env, defs)?;
-                let fn_domain: BTreeSet<Value> = f.keys().cloned().collect();
-                if fn_domain != domain {
-                    return Ok(false);
-                }
-                for v in f.values() {
-                    if !in_set_symbolic(v, codomain_expr, env, defs)? {
-                        return Ok(false);
-                    }
-                }
-                Ok(true)
-            } else {
-                Ok(false)
-            }
+            value_in_function_set(val, domain_expr, codomain_expr, env, defs)
         }
         Expr::SeqSet(domain_expr) => {
             let seq = match val {
@@ -115,9 +167,9 @@ pub(crate) fn in_set_symbolic(
                 _ => None,
             };
             if let Some(seq) = seq {
-                let domain = eval_set(domain_expr, env, defs)?;
+                let domain = ResolvedDomain::resolve(domain_expr, env, defs)?;
                 for e in &seq {
-                    if !domain.contains(e) {
+                    if !domain.contains(e, env, defs)? {
                         return Ok(false);
                     }
                 }
@@ -170,11 +222,12 @@ pub(crate) fn eval_fn(
     env: &mut Env,
     defs: &Definitions,
 ) -> Result<BTreeMap<Value, Value>> {
-    match eval(expr, env, defs)? {
-        Value::Fn(f) => Ok(Arc::unwrap_or_clone(f)),
-        other => Err(EvalError::TypeMismatch {
+    let v = eval(expr, env, defs)?;
+    match v.as_function_map() {
+        Some(m) => Ok(m),
+        None => Err(EvalError::TypeMismatch {
             expected: "Fn",
-            got: other,
+            got: v,
             context: None,
             span: None,
         }),
@@ -261,64 +314,87 @@ pub(crate) fn get_nested(base: &Value, keys: &[Value]) -> Result<Value> {
             })?;
             get_nested(v, &keys[1..])
         }
+        (Value::Tuple(t), Value::Int(idx)) => {
+            let v = tuple_element(t, *idx)?;
+            get_nested(v, &keys[1..])
+        }
         _ => Err(EvalError::domain_error("cannot access into this value")),
     }
 }
 
-pub(crate) fn update_nested(
-    f: &mut BTreeMap<Value, Value>,
-    keys: &[Value],
-    val: Value,
-) -> Result<()> {
-    if keys.is_empty() {
-        return Ok(());
+fn tuple_index(len: usize, idx: i64) -> Result<usize> {
+    if idx < 1 || idx as usize > len {
+        return Err(EvalError::domain_error(format!(
+            "sequence index {} out of bounds (sequence has {} elements)",
+            idx, len
+        )));
     }
-    if keys.len() == 1 {
-        f.insert(keys[0].clone(), val);
-        return Ok(());
-    }
-    let inner = f.get_mut(&keys[0]).ok_or_else(|| {
-        EvalError::domain_error(format!(
-            "key {} not in function domain",
-            format_value(&keys[0])
-        ))
-    })?;
-    match inner {
-        Value::Fn(inner_fn) => update_nested(Arc::make_mut(inner_fn), &keys[1..], val),
-        Value::Record(rec) => update_nested_record(Arc::make_mut(rec), &keys[1..], val),
-        _ => Err(EvalError::TypeMismatch {
-            expected: "Fn or Record",
-            got: inner.clone(),
-            context: Some("nested EXCEPT update"),
-            span: None,
-        }),
-    }
+    Ok((idx - 1) as usize)
 }
 
-fn update_nested_record(
-    rec: &mut BTreeMap<Arc<str>, Value>,
-    keys: &[Value],
-    val: Value,
-) -> Result<()> {
-    let Value::Str(field) = &keys[0] else {
-        return Err(EvalError::domain_error(format!(
-            "expected string key for record field, got {}",
-            format_value(&keys[0])
-        )));
-    };
-    if keys.len() == 1 {
-        rec.insert(field.clone(), val);
-        return Ok(());
+fn tuple_element(t: &[Value], idx: i64) -> Result<&Value> {
+    Ok(&t[tuple_index(t.len(), idx)?])
+}
+
+pub(crate) fn update_nested_value(base: &Value, keys: &[Value], val: Value) -> Result<Value> {
+    if keys.is_empty() {
+        return Ok(val);
     }
-    let inner = rec
-        .get_mut(field)
-        .ok_or_else(|| EvalError::domain_error(format!("field '{}' not found in record", field)))?;
-    match inner {
-        Value::Fn(inner_fn) => update_nested(Arc::make_mut(inner_fn), &keys[1..], val),
-        Value::Record(inner_rec) => update_nested_record(Arc::make_mut(inner_rec), &keys[1..], val),
+    match base {
+        Value::Fn(f) => {
+            let mut m = (**f).clone();
+            let inner = if keys.len() == 1 {
+                val
+            } else {
+                let prev = m.get(&keys[0]).ok_or_else(|| {
+                    EvalError::domain_error(format!(
+                        "key {} not in function domain",
+                        format_value(&keys[0])
+                    ))
+                })?;
+                update_nested_value(prev, &keys[1..], val)?
+            };
+            m.insert(keys[0].clone(), inner);
+            Ok(Value::func(m))
+        }
+        Value::Record(rec) => {
+            let Value::Str(field) = &keys[0] else {
+                return Err(EvalError::domain_error(format!(
+                    "expected string key for record field, got {}",
+                    format_value(&keys[0])
+                )));
+            };
+            let mut m = (**rec).clone();
+            let inner = if keys.len() == 1 {
+                val
+            } else {
+                let prev = m.get(field).ok_or_else(|| {
+                    EvalError::domain_error(format!("field '{}' not found in record", field))
+                })?;
+                update_nested_value(prev, &keys[1..], val)?
+            };
+            m.insert(field.clone(), inner);
+            Ok(Value::record(m))
+        }
+        Value::Tuple(t) => {
+            let Value::Int(idx) = &keys[0] else {
+                return Err(EvalError::domain_error(format!(
+                    "expected integer index for sequence, got {}",
+                    format_value(&keys[0])
+                )));
+            };
+            let mut v = (**t).clone();
+            let pos = tuple_index(v.len(), *idx)?;
+            v[pos] = if keys.len() == 1 {
+                val
+            } else {
+                update_nested_value(&v[pos], &keys[1..], val)?
+            };
+            Ok(Value::tuple(v))
+        }
         _ => Err(EvalError::TypeMismatch {
-            expected: "Fn or Record",
-            got: inner.clone(),
+            expected: "Fn, Record or Tuple",
+            got: base.clone(),
             context: Some("nested EXCEPT update"),
             span: None,
         }),

@@ -407,6 +407,18 @@ fn map_prepare_error(err: PrepareSpecError, source: &Source) -> CheckOutcome {
             err.message = format!("ASSUME #{}: {}", idx, err.message);
             (ErrorPhase::Init, err)
         }
+        PrepareSpecError::NonModelValueSymmetry(name, members) => (
+            ErrorPhase::Init,
+            StructuredError::internal(format!(
+                "symmetry set '{}' must contain only model values, but has {}; \
+                 symmetry reduction is sound only over uninterpreted, pairwise-distinct \
+                 elements — declare them as bare identifiers (CONSTANT {} = {{a, b}}) \
+                 rather than strings",
+                name,
+                members.join(", "),
+                name
+            )),
+        ),
     };
     CheckOutcome::Error {
         phase: outcome.0,

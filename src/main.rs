@@ -149,6 +149,7 @@ fn format_value_short(val: &Value) -> String {
         Value::Int(n) => n.to_string(),
         Value::Bool(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
         Value::Str(s) => format!("\"{}\"", s),
+        Value::Model(m) => m.to_string(),
         other => format!("{:?}", other),
     }
 }
@@ -1317,6 +1318,21 @@ fn main() -> ExitCode {
         CheckResult::PrepareError(PrepareSpecError::AssumeError(idx, e)) => {
             let diag = eval_error_to_diagnostic(&e)
                 .with_note(format!("error occurred while evaluating ASSUME {}", idx));
+            eprintln!("{}", diag.render_colored(&source, &colors));
+            ExitCode::FAILURE
+        }
+        CheckResult::PrepareError(PrepareSpecError::NonModelValueSymmetry(name, members)) => {
+            let diag = Diagnostic::error(format!(
+                "symmetry set '{}' contains values that are not model values",
+                name
+            ))
+            .with_note(format!("not model values: {}", members.join(", ")))
+            .with_help(format!(
+                "symmetry reduction is sound only over uninterpreted, pairwise-distinct \
+                 elements; declare them as bare identifiers (CONSTANT {} = {{a, b}}) \
+                 rather than strings",
+                name
+            ));
             eprintln!("{}", diag.render_colored(&source, &colors));
             ExitCode::FAILURE
         }

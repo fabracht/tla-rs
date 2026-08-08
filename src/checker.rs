@@ -136,6 +136,7 @@ pub enum PrepareSpecError {
     MissingConstants(Vec<Arc<str>>),
     AssumeViolation(usize),
     AssumeError(usize, EvalError),
+    NonModelValueSymmetry(Arc<str>, Vec<String>),
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -257,6 +258,8 @@ pub fn prepare_spec(
     }
     let defs = extended_defs;
 
+    crate::config::bind_model_value_names(&mut domains, spec, &defs);
+
     for inst in &spec.instances {
         if stdlib::is_stdlib_module(&inst.module_name) {
             stdlib::load_module(&inst.module_name, &mut domains);
@@ -346,6 +349,17 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     let mut symmetry = SymmetryConfig::new();
     for sym_const in &config.symmetric_constants {
         if let Some(Value::Set(elements)) = domains.get(sym_const) {
+            let non_model: Vec<String> = elements
+                .iter()
+                .filter(|e| !matches!(e, Value::Model(_)))
+                .map(format_value)
+                .collect();
+            if !non_model.is_empty() {
+                return CheckResult::PrepareError(PrepareSpecError::NonModelValueSymmetry(
+                    sym_const.clone(),
+                    non_model,
+                ));
+            }
             symmetry.add_symmetric_set(elements.as_ref().clone());
         } else if !config.quiet {
             let available: Vec<_> = spec.constants.iter().map(|c| c.as_ref()).collect();
@@ -1144,11 +1158,21 @@ pub fn format_trace_with_actions(
     out
 }
 
+fn is_tla_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 pub fn format_value(val: &Value) -> String {
     match val {
         Value::Bool(b) => b.to_string(),
         Value::Int(i) => i.to_string(),
         Value::Str(s) => format!("\"{}\"", s),
+        Value::Model(m) => m.to_string(),
         Value::Set(s) => {
             let elems: Vec<_> = s.iter().map(format_value).collect();
             format!("{{{}}}", elems.join(", "))
@@ -1161,11 +1185,19 @@ pub fn format_value(val: &Value) -> String {
             format!("({})", pairs.join(" @@ "))
         }
         Value::Record(r) => {
-            let fields: Vec<_> = r
-                .iter()
-                .map(|(k, v)| format!("{} |-> {}", k, format_value(v)))
-                .collect();
-            format!("[{}]", fields.join(", "))
+            if r.keys().all(|k| is_tla_identifier(k)) {
+                let fields: Vec<_> = r
+                    .iter()
+                    .map(|(k, v)| format!("{} |-> {}", k, format_value(v)))
+                    .collect();
+                format!("[{}]", fields.join(", "))
+            } else {
+                let pairs: Vec<_> = r
+                    .iter()
+                    .map(|(k, v)| format!("\"{}\" :> {}", k, format_value(v)))
+                    .collect();
+                format!("({})", pairs.join(" @@ "))
+            }
         }
         Value::Tuple(t) => {
             let elems: Vec<_> = t.iter().map(format_value).collect();
@@ -1176,6 +1208,10 @@ pub fn format_value(val: &Value) -> String {
 
 pub fn format_eval_error(err: &EvalError) -> String {
     match err {
+        EvalError::NotEnumerable { var, source, .. } => format!(
+            "cannot enumerate the values of `{}'`\n  note: the only source for it is {}\n               help: give `{}'` a value directly, or draw it from a set the checker can enumerate",
+            var, source, var
+        ),
         EvalError::UndefinedVar { name, suggestion, .. } => {
             let mut msg = format!("undefined variable `{}`", name);
             if let Some(s) = suggestion {
@@ -1204,6 +1240,7 @@ fn value_type_name(val: &Value) -> &'static str {
         Value::Bool(_) => "Bool",
         Value::Int(_) => "Int",
         Value::Str(_) => "Str",
+        Value::Model(_) => "ModelValue",
         Value::Set(_) => "Set",
         Value::Fn(_) => "Function",
         Value::Record(_) => "Record",
@@ -1214,6 +1251,14 @@ fn value_type_name(val: &Value) -> &'static str {
 pub fn eval_error_to_diagnostic(err: &EvalError) -> crate::diagnostic::Diagnostic {
     use crate::diagnostic::Diagnostic;
     let diag = match err {
+        EvalError::NotEnumerable { var, source, .. } => {
+            Diagnostic::error(format!("cannot enumerate the values of `{}`", var))
+                .with_note(format!("the only source for it is {}", source))
+                .with_help(format!(
+                    "bind `{}` directly, or draw it from a set the checker can enumerate",
+                    var
+                ))
+        }
         EvalError::UndefinedVar {
             name, suggestion, ..
         } => {
@@ -1257,6 +1302,10 @@ pub fn value_to_json(val: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Int(i) => i.to_string(),
         Value::Str(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+        Value::Model(m) => format!(
+            "{{\"model_value\": \"{}\"}}",
+            m.replace('\\', "\\\\").replace('"', "\\\"")
+        ),
         Value::Set(s) => {
             let elems: Vec<_> = s.iter().map(value_to_json).collect();
             format!("[{}]", elems.join(", "))
@@ -1497,6 +1546,17 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                 r#"{{"status": "assume_error", "assume_index": {}, "error": "{}"}}"#,
                 idx,
                 format_eval_error(e).replace('"', "\\\"")
+            )
+        }
+        CheckResult::PrepareError(PrepareSpecError::NonModelValueSymmetry(name, members)) => {
+            let quoted: Vec<_> = members
+                .iter()
+                .map(|m| format!("\"{}\"", m.replace('"', "\\\"")))
+                .collect();
+            format!(
+                r#"{{"status": "non_model_value_symmetry", "constant": "{}", "members": [{}]}}"#,
+                name,
+                quoted.join(", ")
             )
         }
         CheckResult::LivenessViolation(violation, stats) => {

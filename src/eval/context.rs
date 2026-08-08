@@ -5,7 +5,6 @@ use super::helpers::{apply_fn_value, eval_set, in_set_symbolic};
 use super::state::is_action_enabled;
 use super::{Definitions, ResolvedInstances};
 use crate::ast::{Env, Expr, Value};
-use std::collections::BTreeSet;
 
 pub fn eval_with_instances(
     expr: &Expr,
@@ -206,104 +205,12 @@ pub fn eval_with_context(
             Ok(Value::Bool(found))
         }
         Expr::In(elem, set) => {
-            if matches!(set.as_ref(), Expr::Any) {
-                return Ok(Value::Bool(true));
-            }
-            if let Expr::FunctionSet(domain_expr, codomain_expr) = set.as_ref() {
-                let ev = eval_with_context(elem, env, defs, ctx)?;
-                if let Value::Fn(f) = ev {
-                    let domain = eval_set(domain_expr, env, defs)?;
-                    let fn_domain: BTreeSet<Value> = f.keys().cloned().collect();
-                    if fn_domain != domain {
-                        return Ok(Value::Bool(false));
-                    }
-                    for val in f.values() {
-                        if !in_set_symbolic(val, codomain_expr, env, defs)? {
-                            return Ok(Value::Bool(false));
-                        }
-                    }
-                    return Ok(Value::Bool(true));
-                }
-                return Ok(Value::Bool(false));
-            }
-            if let Expr::Powerset(inner) = set.as_ref() {
-                let ev = eval_with_context(elem, env, defs, ctx)?;
-                if let Value::Set(s) = ev {
-                    let base = eval_set(inner, env, defs)?;
-                    return Ok(Value::Bool(s.is_subset(&base)));
-                }
-                return Ok(Value::Bool(false));
-            }
-            if let Expr::SeqSet(domain_expr) = set.as_ref() {
-                let ev = eval_with_context(elem, env, defs, ctx)?;
-                if let Value::Tuple(seq) = ev {
-                    let domain = eval_set(domain_expr, env, defs)?;
-                    for e in seq.iter() {
-                        if !domain.contains(e) {
-                            return Ok(Value::Bool(false));
-                        }
-                    }
-                    return Ok(Value::Bool(true));
-                }
-                return Ok(Value::Bool(false));
-            }
-            if matches!(set.as_ref(), Expr::RecordSet(_)) {
-                let ev = eval_with_context(elem, env, defs, ctx)?;
-                return Ok(Value::Bool(in_set_symbolic(&ev, set, env, defs)?));
-            }
             let ev = eval_with_context(elem, env, defs, ctx)?;
-            let sv = eval_set(set, env, defs)?;
-            Ok(Value::Bool(sv.contains(&ev)))
+            Ok(Value::Bool(in_set_symbolic(&ev, set, env, defs)?))
         }
         Expr::NotIn(elem, set) => {
-            if matches!(set.as_ref(), Expr::Any) {
-                return Ok(Value::Bool(false));
-            }
-            if let Expr::FunctionSet(domain_expr, codomain_expr) = set.as_ref() {
-                let ev = eval_with_context(elem, env, defs, ctx)?;
-                if let Value::Fn(f) = ev {
-                    let domain = eval_set(domain_expr, env, defs)?;
-                    let fn_domain: BTreeSet<Value> = f.keys().cloned().collect();
-                    if fn_domain != domain {
-                        return Ok(Value::Bool(true));
-                    }
-                    for val in f.values() {
-                        if !in_set_symbolic(val, codomain_expr, env, defs)? {
-                            return Ok(Value::Bool(true));
-                        }
-                    }
-                    return Ok(Value::Bool(false));
-                }
-                return Ok(Value::Bool(true));
-            }
-            if let Expr::Powerset(inner) = set.as_ref() {
-                let ev = eval_with_context(elem, env, defs, ctx)?;
-                if let Value::Set(s) = ev {
-                    let base = eval_set(inner, env, defs)?;
-                    return Ok(Value::Bool(!s.is_subset(&base)));
-                }
-                return Ok(Value::Bool(true));
-            }
-            if let Expr::SeqSet(domain_expr) = set.as_ref() {
-                let ev = eval_with_context(elem, env, defs, ctx)?;
-                if let Value::Tuple(seq) = ev {
-                    let domain = eval_set(domain_expr, env, defs)?;
-                    for e in seq.iter() {
-                        if !domain.contains(e) {
-                            return Ok(Value::Bool(true));
-                        }
-                    }
-                    return Ok(Value::Bool(false));
-                }
-                return Ok(Value::Bool(true));
-            }
-            if matches!(set.as_ref(), Expr::RecordSet(_)) {
-                let ev = eval_with_context(elem, env, defs, ctx)?;
-                return Ok(Value::Bool(!in_set_symbolic(&ev, set, env, defs)?));
-            }
             let ev = eval_with_context(elem, env, defs, ctx)?;
-            let sv = eval_set(set, env, defs)?;
-            Ok(Value::Bool(!sv.contains(&ev)))
+            Ok(Value::Bool(!in_set_symbolic(&ev, set, env, defs)?))
         }
         Expr::FnApp(f, arg) => {
             if let Expr::Lambda(params, body) = f.as_ref() {

@@ -405,6 +405,12 @@ fn value_to_json(value: &Value) -> serde_json::Value {
         Value::Bool(b) => J::Bool(*b),
         Value::Int(i) => J::Number((*i).into()),
         Value::Str(s) => J::String(s.to_string()),
+        Value::Model(m) => {
+            let mut obj = Map::new();
+            obj.insert("kind".into(), J::String("model_value".into()));
+            obj.insert("name".into(), J::String(m.to_string()));
+            J::Object(obj)
+        }
         Value::Set(elems) => {
             let arr = elems.iter().map(value_to_json).collect();
             let mut obj = Map::new();
@@ -518,7 +524,8 @@ impl StructuredError {
             | EvalError::TypeMismatch { span, .. }
             | EvalError::DivisionByZero { span }
             | EvalError::EmptyChoose { span }
-            | EvalError::DomainError { span, .. } => *span,
+            | EvalError::DomainError { span, .. }
+            | EvalError::NotEnumerable { span, .. } => *span,
         };
         let source_span = span
             .filter(|s| !s.is_empty())

@@ -17,13 +17,15 @@ The binary will be at `target/release/tla`. Prebuilt binaries and the `tla-mcp` 
 ```bash
 tla spec.tla
 tla spec.tla -c 'N=5' -c 'Procs={"p1","p2","p3"}'
-tla spec.tla -c 'Proc={"a","b","c"}' --symmetry Proc
+tla spec.tla -c 'Proc={a,b,c}' --symmetry Proc
 tla spec.tla --config model.cfg
 tla spec.tla --quick    # limit to 10,000 states
 tla spec.tla -i         # interactive TUI
 ```
 
-Constants accept integers (`42`), booleans (`TRUE`), strings (`"hello"`), sets (`{1,2,3}`), tuples (`<<1,2>>`), records (`[hp |-> 100]`), and functions (`a :> 1 @@ b :> 2`).
+Constants accept integers (`42`), booleans (`TRUE`), quoted strings (`"hello"`), sets (`{1,2,3}`), tuples (`<<1,2>>`), records (`[hp |-> 100]`), and functions (`a :> 1 @@ b :> 2`).
+
+A bare identifier is a **model value** — an uninterpreted, pairwise-distinct atom, matching TLC. `n1` is not equal to the string `"n1"`, so `-c 'Proc={a,b,c}'` yields three model values, not three strings. Symmetry reduction requires a set of model values (`--symmetry` rejects a set of quoted strings, as TLC does).
 
 ## Options
 

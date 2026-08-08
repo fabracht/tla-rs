@@ -91,6 +91,220 @@ fn test_should_pass_traffic_light() {
 }
 
 #[test]
+fn test_membership_dispatch_is_shared() {
+    let path = Path::new("test_cases/should_pass/membership_dispatch.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "nested structural sets must be decided the same way wherever `\\in` appears, \
+         got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_membership_in_invariant_uses_shared_dispatch() {
+    let path = Path::new("test_cases/should_pass/membership_in_invariant.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "invariants are evaluated by the context evaluator, which had its own weaker \
+         copy of `\\in` — a bare invariant over SUBSET/Seq/[f: S]/[D -> R] is what \
+         exercises that path, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_next_from_non_enumerable_set_is_an_error() {
+    let path = Path::new("test_cases/should_error/next_not_enumerable.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::NextError(_, _, _)),
+        "`x' \\in Seq({{1,2}})` cannot enumerate successors, so it must be reported; \
+         discarding the enumeration error leaves no candidates, the collector falls back \
+         to the current value, and the run reports a clean pass over one state, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_init_from_non_enumerable_set_is_an_error() {
+    let path = Path::new("test_cases/should_error/init_not_enumerable.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::InitError(_)),
+        "a non-enumerable Init source must name itself, not surface as the misleading \
+         `no initial states found`, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_membership_as_a_check_is_not_a_candidate_source() {
+    let path = Path::new("test_cases/should_pass/membership_check_not_source.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "when another conjunct already determines the variable, `\\in` over a \
+         non-enumerable set is only a membership test and must not be an error, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_model_value_does_not_shadow_a_definition() {
+    let path = Path::new("test_cases/should_violate/model_value_shadowing.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::InvariantViolation(_, _)),
+        "a model value named the same as an operator must not be bound over it — the \
+         environment is consulted before definitions, so binding `Threshold` as a model \
+         value makes `x < Threshold` compare against an atom and the run stops early, \
+         got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_undefined_name_in_set_domain_is_reported() {
+    let path = Path::new("test_cases/should_error/undefined_in_seq_domain.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::InvariantError(_, _, _)),
+        "an undefined name in a `Seq(..)` domain must be reported even when the sequence \
+         is empty; deferring the domain evaluation into the element loop makes the \
+         invariant silently vacuous, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_function_canonicality() {
+    let path = Path::new("test_cases/should_pass/function_canonicality.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "every construct that builds a function must yield the canonical layout for its \
+         domain: `f = [i \\in DOMAIN f |-> f[i]]` must hold for all of them, and equal \
+         functions must collapse to one set element, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_multi_update_except_threads_accumulated_result() {
+    let path = Path::new("test_cases/should_pass/except_sequence.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "[f EXCEPT ![a] = e1, ![b] = e2] means [[f EXCEPT ![a] = e1] EXCEPT ![b] = e2], \
+         so `@` in a later update sees the earlier updates, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_model_value_conformance() {
+    let path = Path::new("test_cases/should_pass/model_value_conformance.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "model-value semantics pinned to an actual TLC 2.19 run: a model value is never \
+         equal to a same-named string, and a function over model values is not a record, \
+         got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_tlc_conformance_functions() {
+    let path = Path::new("test_cases/should_pass/tlc_conformance_functions.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "every invariant here is one probe from a differential corpus whose expected \
+         answer was taken from an actual TLC 2.19 run; 31 of the 55 were wrong before \
+         records, sequences and functions were unified, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_function_identity_matches_tlc() {
+    let path = Path::new("test_cases/should_pass/function_identity.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "a record, a sequence and the same function written with `:>` denote ONE value: \
+         they must compare equal, dedup to one set element, and be interchangeable in \
+         `[S -> T]`, `[f: T]`, witness search, field access and sequence operators, \
+         got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_model_values_are_distinct_from_strings() {
+    let path = Path::new("test_cases/should_pass/model_values_distinct.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "a model value must never equal a same-named string, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_model_values_do_not_collapse_state_space() {
+    let path = Path::new("test_cases/should_pass/model_value_state_space.tla");
+    let result = check_spec_file(path);
+    match result {
+        CheckResult::Ok(stats) => assert_eq!(
+            stats.states_explored, 16,
+            "{{n1, \"n1\", n2, \"n2\"}} has 4 distinct members, so the powerset reached \
+             is 16 states; conflating model values with strings collapses it to 4 and \
+             silently skips reachable states"
+        ),
+        other => panic!("model_value_state_space.tla should pass, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_should_pass_except_sequence() {
+    let path = Path::new("test_cases/should_pass/except_sequence.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "EXCEPT must work on sequences, including nested paths through \
+         records and sequences in both directions, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_pass_fn_merge_precedence() {
+    let path = Path::new("test_cases/should_pass/fn_merge_precedence.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "`:>` binds tighter than `@@` but looser than `+` and `..`, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_pass_record_as_function() {
+    let path = Path::new("test_cases/should_pass/record_as_function.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "record_as_function.tla should pass (records are functions from field names), got: {:?}",
+        result
+    );
+}
+
+#[test]
 fn test_negation_in_precedence() {
     let path = Path::new("test_cases/should_pass/negation_in.tla");
     let result = check_spec_file(path);
@@ -112,6 +326,22 @@ fn test_should_violate_counter_overflow() {
         }
         other => panic!(
             "counter_overflow.tla should violate invariant, got: {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_should_violate_tuple_indexed_prime() {
+    let path = Path::new("test_cases/should_violate/tuple_indexed_prime.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    match result {
+        CheckResult::InvariantViolation(cex, _) => {
+            assert_eq!(cex.violated_invariant, 0);
+        }
+        other => panic!(
+            "x'[1] = 5 must infer the successor <<5, 2>> and violate Inv; \
+             a 0-based tuple index here yields no transitions and a false pass, got: {:?}",
             other
         ),
     }
@@ -400,7 +630,7 @@ fn test_record_set_membership() {
 }
 
 #[test]
-fn test_symmetry_reduces_states() {
+fn test_symmetry_rejects_non_model_values() {
     let path = Path::new("test_cases/benchmark/symmetric_procs.tla");
     let input = fs::read_to_string(path).expect("failed to read spec file");
     let spec = parse(&input).expect("failed to parse spec");
@@ -408,6 +638,57 @@ fn test_symmetry_reduces_states() {
     let proc_set: BTreeSet<Value> = ["p1", "p2", "p3"]
         .iter()
         .map(|s| Value::Str(Arc::from(*s)))
+        .collect();
+
+    let mut domains = Env::new();
+    domains.insert(Arc::from("Proc"), Value::set(proc_set));
+
+    let config = CheckerConfig {
+        symmetric_constants: vec![Arc::from("Proc")],
+        allow_deadlock: true,
+        ..Default::default()
+    };
+
+    match check(&spec, &domains, &config) {
+        CheckResult::PrepareError(PrepareSpecError::NonModelValueSymmetry(name, members)) => {
+            assert_eq!(name.as_ref(), "Proc");
+            assert_eq!(members.len(), 3);
+        }
+        other => panic!(
+            "symmetry over a set of strings is unsound — it requires uninterpreted, \
+             pairwise-distinct elements — and must be rejected, got: {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_symmetry_cfg_directive_reduces_states() {
+    // exercises the cfg `SYMMETRY Name` parse + apply path end to end, which the
+    // check()-level symmetry tests bypass. Three symmetric procs each counting 0..2
+    // give 27 states unreduced; symmetry collapses them to the 10 distinct multisets.
+    let path = Path::new("test_cases/should_pass/symmetry_cfg.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(
+            stats.states_explored, 10,
+            "cfg SYMMETRY must actually reduce the state space"
+        ),
+        other => panic!(
+            "symmetry_cfg.tla should pass with reduction, got: {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_symmetry_reduces_states() {
+    let path = Path::new("test_cases/benchmark/symmetric_procs.tla");
+    let input = fs::read_to_string(path).expect("failed to read spec file");
+    let spec = parse(&input).expect("failed to parse spec");
+
+    let proc_set: BTreeSet<Value> = ["p1", "p2", "p3"]
+        .iter()
+        .map(|s| Value::Model(Arc::from(*s)))
         .collect();
 
     let mut domains = Env::new();

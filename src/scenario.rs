@@ -112,6 +112,9 @@ pub fn execute_scenario_with(
     constants: &Env,
     defs: &Definitions,
 ) -> Result<ScenarioResult, EvalError> {
+    let mut bound_constants = constants.clone();
+    crate::config::bind_model_value_names(&mut bound_constants, spec, defs);
+    let constants = &bound_constants;
     let mut env = constants.clone();
 
     let init_expr = spec
@@ -302,6 +305,7 @@ fn format_value_compact(v: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Int(n) => n.to_string(),
         Value::Str(s) => format!("\"{}\"", s),
+        Value::Model(m) => m.to_string(),
         Value::Set(s) if s.is_empty() => "{}".to_string(),
         Value::Set(s) => {
             let items: Vec<String> = s.iter().take(3).map(format_value_compact).collect();

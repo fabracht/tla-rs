@@ -251,32 +251,68 @@ fn is_keyword(tok: &Token) -> bool {
     matches!(tok, Token::Keyword(_))
 }
 
+fn collect_model_values(val: &Value, out: &mut Vec<Arc<str>>) {
+    match val {
+        Value::Model(name) => out.push(name.clone()),
+        Value::Set(s) => s.iter().for_each(|v| collect_model_values(v, out)),
+        Value::Tuple(t) => t.iter().for_each(|v| collect_model_values(v, out)),
+        Value::Record(r) => r.values().for_each(|v| collect_model_values(v, out)),
+        Value::Fn(f) => f.iter().for_each(|(k, v)| {
+            collect_model_values(k, out);
+            collect_model_values(v, out);
+        }),
+        _ => {}
+    }
+}
+
+pub fn bind_model_value_names(
+    domains: &mut Env,
+    spec: &Spec,
+    defs: &BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>,
+) {
+    let mut names = Vec::new();
+    for (_, val) in domains.iter() {
+        collect_model_values(val, &mut names);
+    }
+    for name in names {
+        let shadows_something = domains.contains_key(&name)
+            || defs.contains_key(&name)
+            || spec.definitions.contains_key(&name)
+            || spec.vars.contains(&name)
+            || spec.constants.contains(&name);
+        if !shadows_something {
+            domains.insert(name.clone(), Value::Model(name));
+        }
+    }
+}
+
 fn parse_constant_value_from_tokens(tokens: &[Token], pos: &mut usize) -> Result<Value, String> {
     let first = parse_constant_maps_to(tokens, pos)?;
     if !matches!(tokens.get(*pos), Some(Token::AtAt)) {
         return Ok(first);
     }
-    let mut merged = match first {
-        Value::Fn(m) => (*m).clone(),
-        other => {
+    let mut merged = match first.as_function_map() {
+        Some(m) => m,
+        None => {
             return Err(format!(
-                "'@@' requires function operands built with ':>', got {:?}",
-                other
+                "'@@' requires function operands built with ':>', got {}",
+                crate::checker::format_value(&first)
             ));
         }
     };
     while matches!(tokens.get(*pos), Some(Token::AtAt)) {
         *pos += 1;
-        match parse_constant_maps_to(tokens, pos)? {
-            Value::Fn(m) => {
-                for (k, v) in m.iter() {
-                    merged.entry(k.clone()).or_insert_with(|| v.clone());
+        let operand = parse_constant_maps_to(tokens, pos)?;
+        match operand.as_function_map() {
+            Some(m) => {
+                for (k, v) in m {
+                    merged.entry(k).or_insert(v);
                 }
             }
-            other => {
+            None => {
                 return Err(format!(
-                    "'@@' requires function operands built with ':>', got {:?}",
-                    other
+                    "'@@' requires function operands built with ':>', got {}",
+                    crate::checker::format_value(&operand)
                 ));
             }
         }
@@ -409,7 +445,7 @@ fn parse_constant_primary(tokens: &[Token], pos: &mut usize) -> Result<Value, St
             Ok(Value::record(fields))
         }
         Token::Ident(s) => {
-            let val = Value::Str(Arc::from(s.as_str()));
+            let val = Value::Model(Arc::from(s.as_str()));
             *pos += 1;
             Ok(val)
         }
@@ -864,9 +900,9 @@ mod tests {
         assert_eq!(cfg.constants.len(), 3);
         assert_eq!(cfg.constants[0].0.as_ref(), "RM");
         let mut expected_set = BTreeSet::new();
-        expected_set.insert(Value::Str("rm1".into()));
-        expected_set.insert(Value::Str("rm2".into()));
-        expected_set.insert(Value::Str("rm3".into()));
+        expected_set.insert(Value::Model("rm1".into()));
+        expected_set.insert(Value::Model("rm2".into()));
+        expected_set.insert(Value::Model("rm3".into()));
         assert_eq!(cfg.constants[0].1, Value::set(expected_set));
         assert_eq!(cfg.constants[1].1, Value::Int(5));
         assert_eq!(cfg.constants[2].1, Value::Bool(true));
@@ -890,7 +926,7 @@ mod tests {
     fn parse_constant_model_value() {
         let input = "CONSTANT\nX = ModelVal";
         let cfg = parse_cfg(input).unwrap();
-        assert_eq!(cfg.constants[0].1, Value::Str("ModelVal".into()));
+        assert_eq!(cfg.constants[0].1, Value::Model("ModelVal".into()));
     }
 
     #[test]
@@ -1043,8 +1079,8 @@ mod tests {
     #[test]
     fn parse_constant_value_sets() {
         let mut expected = BTreeSet::new();
-        expected.insert(Value::Str("a".into()));
-        expected.insert(Value::Str("b".into()));
+        expected.insert(Value::Model("a".into()));
+        expected.insert(Value::Model("b".into()));
         assert_eq!(parse_constant_value("{a,b}"), Some(Value::set(expected)));
     }
 
@@ -1052,7 +1088,7 @@ mod tests {
     fn parse_constant_value_model_value() {
         assert_eq!(
             parse_constant_value("myVal"),
-            Some(Value::Str("myVal".into()))
+            Some(Value::Model("myVal".into()))
         );
     }
 
@@ -1072,7 +1108,7 @@ mod tests {
             Some(Value::tuple(vec![
                 Value::Str("a".into()),
                 Value::Bool(true),
-                Value::Str("x".into())
+                Value::Model("x".into())
             ]))
         );
     }
@@ -1091,8 +1127,8 @@ mod tests {
     #[test]
     fn parse_constant_value_function() {
         let mut m = BTreeMap::new();
-        m.insert(Value::Str("a".into()), Value::Int(1));
-        m.insert(Value::Str("b".into()), Value::Int(2));
+        m.insert(Value::Model("a".into()), Value::Int(1));
+        m.insert(Value::Model("b".into()), Value::Int(2));
         assert_eq!(
             parse_constant_value("a :> 1 @@ b :> 2"),
             Some(Value::func(m.clone()))
@@ -1111,7 +1147,7 @@ mod tests {
     #[test]
     fn parse_constant_value_function_merge_is_left_biased() {
         let mut m = BTreeMap::new();
-        m.insert(Value::Str("a".into()), Value::Int(1));
+        m.insert(Value::Model("a".into()), Value::Int(1));
         assert_eq!(
             parse_constant_value("a :> 1 @@ a :> 9"),
             Some(Value::func(m))
@@ -1148,8 +1184,8 @@ mod tests {
         let input = "CONSTANT F = d1 :> 1 @@ d2 :> 2\nCONSTANT R = [hp |-> 100, mp |-> 50]";
         let cfg = parse_cfg(input).unwrap();
         let mut f = BTreeMap::new();
-        f.insert(Value::Str("d1".into()), Value::Int(1));
-        f.insert(Value::Str("d2".into()), Value::Int(2));
+        f.insert(Value::Model("d1".into()), Value::Int(1));
+        f.insert(Value::Model("d2".into()), Value::Int(2));
         assert_eq!(cfg.constants[0].1, Value::func(f));
         let mut r = BTreeMap::new();
         r.insert(Arc::from("hp"), Value::Int(100));

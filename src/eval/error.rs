@@ -30,9 +30,35 @@ pub enum EvalError {
         message: String,
         span: Option<Span>,
     },
+    NotEnumerable {
+        var: Arc<str>,
+        source: String,
+        span: Option<Span>,
+    },
 }
 
 impl EvalError {
+    pub fn not_enumerable(var: Arc<str>, source: String) -> Self {
+        Self::NotEnumerable {
+            var,
+            source,
+            span: None,
+        }
+    }
+
+    pub fn short_description(&self) -> String {
+        match self {
+            Self::UndefinedVar { name, .. } => format!("undefined variable `{}`", name),
+            Self::TypeMismatch { expected, got, .. } => {
+                format!("expected {}, got {}", expected, value_type_name(got))
+            }
+            Self::DivisionByZero { .. } => "division by zero".to_string(),
+            Self::EmptyChoose { .. } => "CHOOSE found no satisfying value".to_string(),
+            Self::DomainError { message, .. } => message.clone(),
+            Self::NotEnumerable { source, .. } => source.clone(),
+        }
+    }
+
     pub fn undefined_var(name: Arc<str>) -> Self {
         Self::UndefinedVar {
             name,
@@ -93,7 +119,8 @@ impl EvalError {
             | Self::TypeMismatch { span: s, .. }
             | Self::DivisionByZero { span: s }
             | Self::EmptyChoose { span: s }
-            | Self::DomainError { span: s, .. } => *s = Some(span),
+            | Self::DomainError { span: s, .. }
+            | Self::NotEnumerable { span: s, .. } => *s = Some(span),
         }
         self
     }
@@ -104,7 +131,8 @@ impl EvalError {
             | Self::TypeMismatch { span, .. }
             | Self::DivisionByZero { span }
             | Self::EmptyChoose { span }
-            | Self::DomainError { span, .. } => *span,
+            | Self::DomainError { span, .. }
+            | Self::NotEnumerable { span, .. } => *span,
         }
     }
 }
@@ -140,6 +168,10 @@ impl fmt::Display for EvalError {
             Self::DivisionByZero { .. } => write!(f, "division by zero"),
             Self::EmptyChoose { .. } => write!(f, "CHOOSE found no matching value"),
             Self::DomainError { message, .. } => write!(f, "{message}"),
+            Self::NotEnumerable { var, source, .. } => write!(
+                f,
+                "cannot enumerate the values of {var}: the only source for it is {source}"
+            ),
         }
     }
 }
@@ -153,6 +185,7 @@ pub(crate) fn value_type_name(val: &Value) -> &'static str {
         Value::Bool(_) => "Bool",
         Value::Int(_) => "Int",
         Value::Str(_) => "Str",
+        Value::Model(_) => "ModelValue",
         Value::Set(_) => "Set",
         Value::Fn(_) => "Function",
         Value::Record(_) => "Record",

@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.7.0] - 2026-08-03
+
+### Fixed
+
+- A next-state or initial-state predicate that draws a variable from a set the checker cannot enumerate is now reported instead of passing vacuously. `Next == x' \in Seq({1,2}) /\ Len(x') = 1` reaches `<<1>>` and `<<2>>`, so a `Len(x) = 0` invariant is violated — but the enumeration error was discarded, no candidates were produced, the collector fell back to the variable's current value, and the run reported one state and no errors. The error now names both the variable and the source that could not be enumerated. Membership that is only a *check* is unaffected: in `x' = <<1>> /\ x' \in Seq({1,2})` the equality still supplies the successor and the `\in` is evaluated as a test. TLC rejects the first form too ("the right side of \in is not enumerable").
+
+- `[f EXCEPT ![a] = e1, ![b] = e2]` now means `[[f EXCEPT ![a] = e1] EXCEPT ![b] = e2]`, as TLA+ defines it: `@` in a later update sees the earlier updates, and each update's key path is validated against the accumulated result. Previously both read from the original function, so `[<<1,2>> EXCEPT ![1] = 9, ![1] = @ + 1]` gave `<<2, 2>>` where TLC gives `<<10, 2>>`. Reading the stale value also let an earlier update replace a subterm with a function of a different domain while a later update still validated against the original, which could build a value whose layout did not match its domain and therefore compared unequal to its own equal — breaking state dedup.
+
+- A bare identifier from a cfg or `--constant` model-value set can now be named directly in spec and `--scenario` expressions (`step: st'[rm1] = "prepared"`). It previously resolved as an undefined variable, and the string form `"rm1"` no longer matches because a model value is not a string. A model value is never bound over an existing name — an operator (including one from an `EXTENDS`ed module or defined later in the file), a variable, a constant, or a standard-library binding such as `Nat` keeps its meaning, since the environment is consulted before definitions and binding over one of these would silently change what a spec means.
+
+- Model values are now a distinct kind of value instead of being stored as strings, matching TLC. Previously a `CONSTANT Node = {n1, n2}` produced the same values as the strings `{"n1", "n2"}`, so `Cardinality(Node \cup {"n1","n2"})` was 2 where TLC gives 4, and `[n \in Node |-> "idle"]` compared equal to `[n \in {"n1","n2"} |-> "idle"]`. Because conflating two distinct values merges two distinct states, the BFS silently skipped reachable states: a spec whose successors range over `{n1, "n1", n2, "n2"}` explored 4 states instead of 16 and still reported `No errors found` — a false pass. Model values now render bare (`(n1 :> "idle" @@ n2 :> "idle")`) rather than quoted, and carry a `__model` tag through trace JSON so they round-trip.
+
+- A next-state relation that constrains a sequence element by literal index — `x'[1] = 5 /\ x'[2] = x[2]` — no longer silently yields zero transitions and reports `No errors found`. `Expr::TupleAccess` stores a 0-based index and evaluation compensates with `idx + 1`, but candidate inference pushed the raw 0-based value as a function key, so the inferred successor never matched and the action appeared disabled. The record form (`x'.a = 5`) was unaffected, which is why this went unnoticed. This was a false pass: the violation the spec reaches was never reported.
+
+- `EXCEPT` now works on sequences. `[<<10,20>> EXCEPT ![1] = 9]` previously failed with `cannot access into this value`; it now returns `<<9, 20>>`, including `@` in the replacement expression, multiple updates in one `EXCEPT`, and nested paths in both directions (`[s EXCEPT ![1].a = 4]`, `[r EXCEPT !.s[2] = 9]`). Nested record updates through a multi-step path also work now — the top-level record case previously rejected any path longer than one field with `invalid record update path`.
+
+- `:>` and `@@` now have the correct relative precedence. Both were parsed at one shared level alongside `+` and `\cup`, so `1 :> 10 @@ 2 :> 20` associated as `((1 :> 10) @@ 2) :> 20` and failed to evaluate. TLA+ puts `@@` at level 6 and `:>` at 7, so `:>` binds tighter than `@@` and both bind looser than `..`, `+` and `\cup`; `@@` is left-associative. Writing the expression with redundant parentheses is no longer necessary.
+
+- A record, a sequence, and the same function written with `:>` are now one value, as they are in TLA+. Previously `Value` derived structural equality over three separate variants, so `[a |-> 1, b |-> 2]`, `("a" :> 1 @@ "b" :> 2)` and `[i \in {"a","b"} |-> ...]` were three different values: `Cardinality({rec, frec})` was 2 where TLC gives 1, and a spec reaching the same function three ways explored 3 states where TLC finds 1. Functions are now canonicalised on construction from their domain — domain `1..n` (including empty) is laid out as a sequence, a non-empty all-string domain as a record, anything else as a map — so the derived `Eq`/`Hash` that the BFS uses for state dedup are correct by construction. Records and sequences are consequently accepted in `[S -> T]` and `[f: T]`, found by witness search (`\E f \in [S -> T] : f = rec`) and `CHOOSE`, and interchangeable across field access, `DOMAIN`, application, `EXCEPT` and the `Sequences` operators. Fixes #69.
+
+  Display follows suit and now matches TLC: `("a" :> 1 @@ "b" :> 2)` prints as `[a |-> 1, b |-> 2]`, `(1 :> 10 @@ 2 :> 20)` as `<<10, 20>>`, and the empty function as `<<>>` rather than the unparseable `()`. Presentation is decided separately from identity, so a function whose keys are strings but not TLA+ identifiers still prints in `:>` form (`("a b" :> 1 @@ "x-y" :> 2)`) instead of the unparseable `[a b |-> 1, ...]`.
+
+- Symmetry reduction no longer permutes only part of a value. `collect_elements_in_order` visited function keys and values but record values only, and `apply_mapping_to_value` permuted function keys but not record keys — so for record-shaped state the permutation was applied to a proper subset of the value. That is not a group action and could merge states that are not symmetric images of each other. Records are now traversed and permuted as the functions they are, and a permuted function is re-canonicalised because permuting a key can change the domain shape.
+
+- `--symmetry` / cfg `SYMMETRY` now rejects a set whose members are not all model values, matching TLC ("Symmetry function must have model values as domain and range"). Symmetry reduction is sound only over uninterpreted, pairwise-distinct elements; a set of strings has neither property guaranteed, and tla-rs previously reduced such a set silently. This precondition was not expressible before model values became a distinct kind.
+
+- Bag operators now accept a bag in any layout. `IsABag`, `BagUnion` and everything routed through `eval_fn` pattern-matched `Value::Fn`, so a bag over a `1..n` or all-string domain — including `EmptyBag` — was rejected.
+
+### Added
+
+- `test_cases/should_pass/tlc_conformance_functions.tla` pins 55 function/record/sequence identity questions whose expected answers were taken from an actual TLC 2.19 run rather than from reasoning about the spec. 31 of the 55 were answered incorrectly before this release.
+
+- `test_cases/should_pass/model_value_conformance.tla` does the same for 25 model-value questions, likewise answered by a real TLC run.
+
+### Changed
+
+- A membership test resolves its element type once rather than once per element. `q \in Seq(S)` and `s \in SUBSET S` evaluate `S` a single time when it is an ordinary set expression, and recurse into it only when it is itself structural (`SUBSET`, `Seq`, `[D -> R]`, `[f: T]`). Evaluating it per element made `q \in Seq(Msgs)` — the most common shape of TLA+ type invariant — cost time linear in the sequence length at every state, and it also meant an undefined name in the element type went unevaluated whenever the sequence or set was empty, so `q \in Seq(Msg)` with `Msg` misspelled and `q = <<>>` reported a clean run instead of an error.
+
+- Set membership is now decided in one place. `\in` and `\notin` were implemented four times over — twice in the main evaluator and twice in the context evaluator used by `ENABLED` and the liveness pass — and the two pairs did not agree: the context copy tested `SUBSET` by enumerating and comparing, and accepted only a sequence layout for `Seq(S)`. All four now delegate to the single recursive `in_set_symbolic`, so a membership test gives the same answer wherever it appears. `Seq(S)` also recurses into its element type instead of enumerating it, which is what makes `Seq` of a structural set work.
+
+- The recursive-function evaluator no longer carries its own copy of the function-application logic; it now calls the shared `apply_fn_value` helper, so applying a record inside a recursive function definition (`f[s \in SUBSET (DOMAIN r)] == ... r[k] ...`) behaves the same as everywhere else.
+
+- **Machine-readable trace format changed for functions over a `1..n` domain.** Because such a function now canonicalises to a sequence, a variable like `[i \in 1..3 |-> 0]` serialises in `--trace-json`, `--save-counterexample` and the MCP `json` field as a bare array (`[0, 0, 0]`) rather than the tagged key/value list (`[{"key": 1, "value": 0}, ...]`) used before. A record (non-empty string domain) still serialises as a JSON object, and a general function as the tagged list, so the encoding now mirrors the canonical value kind. Consumers that parsed the old shape for indexed functions must be updated.
+
+### Known issues
+
+- Model checking is modestly slower than 0.6.x on function-heavy specs — about 13% on TwoPhase with 5 resource managers — because canonicalising every function on construction and unifying the membership path added per-state work. The cause has not been isolated to a single site; it is being addressed by the state-generation rewrite tracked for the next release, whose prototype is faster than 0.6.x on the same specs.
+
 ## [0.6.11] - 2026-07-15
 
 ### Added
