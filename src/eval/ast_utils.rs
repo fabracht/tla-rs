@@ -239,32 +239,55 @@ fn contains_prime_ref_impl(
                 })
         }
         Expr::FnCall(name, args) => {
-            if let Some((_, body)) = defs.get(name) {
-                if visited.contains(name) {
-                    return false;
+            // Arguments are evaluated in the caller's scope, so a prime in an
+            // argument is a real reference regardless of the operator body.
+            if args
+                .iter()
+                .any(|a| contains_prime_ref_impl(a, defs, visited))
+            {
+                return true;
+            }
+            match defs.get(name) {
+                Some((_, body)) => {
+                    if !visited.insert(name.clone()) {
+                        // Already on the current resolution path: a recursive
+                        // definition we cannot fully inspect here. Over-approximate.
+                        return true;
+                    }
+                    let result = contains_prime_ref_impl(body, defs, visited);
+                    visited.remove(name);
+                    result
                 }
-                visited.insert(name.clone());
-                contains_prime_ref_impl(body, defs, visited)
-            } else {
-                args.iter()
-                    .any(|a| contains_prime_ref_impl(a, defs, visited))
+                // Unresolved operator: its body cannot be inspected, so assume
+                // it may reference a prime. Over-approximation is the only safe
+                // direction — every caller uses this to decide whether to do
+                // MORE work (collect candidates, refine), never less.
+                None => true,
             }
         }
-        Expr::QualifiedCall(instance_expr, op, _) => match instance_expr.as_ref() {
-            Expr::Var(instance_name) => {
-                use super::global_state::RESOLVED_INSTANCES;
-                RESOLVED_INSTANCES.with(|inst_ref| {
-                    let instances = inst_ref.borrow();
-                    if let Some(instance_defs) = instances.get(instance_name)
-                        && let Some((_, body)) = instance_defs.get(op)
-                    {
-                        return contains_prime_ref_impl(body, defs, visited);
-                    }
-                    true
-                })
+        Expr::QualifiedCall(instance_expr, op, args) => {
+            if args
+                .iter()
+                .any(|a| contains_prime_ref_impl(a, defs, visited))
+            {
+                return true;
             }
-            _ => true,
-        },
+            match instance_expr.as_ref() {
+                Expr::Var(instance_name) => {
+                    use super::global_state::RESOLVED_INSTANCES;
+                    RESOLVED_INSTANCES.with(|inst_ref| {
+                        let instances = inst_ref.borrow();
+                        if let Some(instance_defs) = instances.get(instance_name)
+                            && let Some((_, body)) = instance_defs.get(op)
+                        {
+                            return contains_prime_ref_impl(body, defs, visited);
+                        }
+                        true
+                    })
+                }
+                _ => true,
+            }
+        }
         Expr::Lambda(_, body) => contains_prime_ref_impl(body, defs, visited),
         Expr::Let(_, binding, body) => {
             contains_prime_ref_impl(binding, defs, visited)
@@ -420,5 +443,94 @@ pub(crate) fn expr_references(expr: &Expr, name: &Arc<str>) -> bool {
         | Expr::StrongFairness(_, e)
         | Expr::BoxAction(e, _)
         | Expr::DiamondAction(e, _) => expr_references(e, name),
+    }
+}
+
+#[cfg(test)]
+mod prime_ref_tests {
+    use super::contains_prime_ref;
+    use crate::ast::{Expr, Value};
+    use crate::eval::Definitions;
+    use std::sync::Arc;
+
+    fn v(name: &str) -> Expr {
+        Expr::Var(Arc::from(name))
+    }
+    fn prime(name: &str) -> Expr {
+        Expr::Prime(Arc::from(name))
+    }
+    fn call(name: &str, args: Vec<Expr>) -> Expr {
+        Expr::FnCall(Arc::from(name), args)
+    }
+    fn defs(entries: Vec<(&str, Vec<&str>, Expr)>) -> Definitions {
+        entries
+            .into_iter()
+            .map(|(n, ps, body)| {
+                (
+                    Arc::from(n),
+                    (ps.into_iter().map(Arc::from).collect(), body),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn operator_applied_to_a_prime_argument_has_a_prime() {
+        // IsTwice(a) == a = 0  — a prime-free body, but the argument is primed.
+        // The prime is at the call site, so the reference is real.
+        let d = defs(vec![(
+            "IsTwice",
+            vec!["a"],
+            Expr::Eq(Box::new(v("a")), Box::new(Expr::Lit(Value::Int(0)))),
+        )]);
+        assert!(contains_prime_ref(&call("IsTwice", vec![prime("y")]), &d));
+    }
+
+    #[test]
+    fn operator_applied_to_nonprime_arguments_is_prime_free() {
+        let d = defs(vec![(
+            "IsTwice",
+            vec!["a"],
+            Expr::Eq(Box::new(v("a")), Box::new(Expr::Lit(Value::Int(0)))),
+        )]);
+        assert!(!contains_prime_ref(
+            &call("IsTwice", vec![Expr::Lit(Value::Int(1))]),
+            &d
+        ));
+    }
+
+    #[test]
+    fn operator_with_a_primed_body_has_a_prime() {
+        let d = defs(vec![("UsesPrime", vec![], prime("x"))]);
+        assert!(contains_prime_ref(&call("UsesPrime", vec![]), &d));
+    }
+
+    #[test]
+    fn a_recursive_operator_applied_to_a_prime_has_a_prime() {
+        // Sum(n) == IF n = 0 THEN 0 ELSE Sum(n)  — self-referential; the cycle
+        // must not swallow the primed argument.
+        let d = defs(vec![(
+            "Sum",
+            vec!["n"],
+            Expr::If(
+                Box::new(Expr::Eq(
+                    Box::new(v("n")),
+                    Box::new(Expr::Lit(Value::Int(0))),
+                )),
+                Box::new(Expr::Lit(Value::Int(0))),
+                Box::new(call("Sum", vec![v("n")])),
+            ),
+        )]);
+        assert!(contains_prime_ref(&call("Sum", vec![prime("x")]), &d));
+    }
+
+    #[test]
+    fn an_unresolved_operator_is_over_approximated() {
+        // No definition for `Mystery`; its body cannot be inspected, so it must
+        // be assumed to reference a prime.
+        assert!(contains_prime_ref(
+            &call("Mystery", vec![Expr::Lit(Value::Int(1))]),
+            &Definitions::new()
+        ));
     }
 }
