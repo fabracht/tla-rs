@@ -86,6 +86,31 @@ fn test_walker_dependent_next_state_probes() {
     }
 }
 
+/// Cross-scope variable capture. A continuation conjunct (`z' = i`) pushed under
+/// an outer `\E i` must keep seeing that `i` even when it is discharged inside an
+/// operator body that rebinds `i` (`Pick(a) == \E i \in {5,6} : a = i`). With one
+/// flat env and no scope journal the walker fabricates a bogus counterexample on
+/// a valid spec. Both specs are valid — no violation exists — so this asserts the
+/// walker does *not* report one. Asserted only under the walker engine.
+#[test]
+fn test_walker_no_cross_scope_capture() {
+    if std::env::var_os("TLA_WALK").is_none() {
+        return;
+    }
+    for name in [
+        "capture_scope",    // z' = i, i rebound by Pick(y')
+        "capture_disjunct", // (z' = i \/ z' = i + 10) — exercises the journal redo
+    ] {
+        let path = format!("test_cases/walker/{name}.tla");
+        let result = check_spec_file_allow_deadlock(Path::new(&path));
+        assert!(
+            matches!(result, CheckResult::Ok(_)),
+            "{name}.tla is valid; the walker must not fabricate a counterexample by \
+             capturing a rebound quantifier variable, got: {result:?}"
+        );
+    }
+}
+
 /// `ENABLED A` is `\E vars' : A`, so an action that does not constrain every
 /// variable is still enabled — a partial assignment is a legitimate witness.
 /// Routed through the walker with a partial-assignment completion rule (the

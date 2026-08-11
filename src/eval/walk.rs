@@ -53,8 +53,8 @@ pub(crate) struct WalkCtx<'a> {
 impl WalkCtx<'_> {
     /// True once a witness has been found and no further search is needed
     /// (the `ENABLED` case).
-    fn satisfied(&self, emit: &Emit<'_>) -> bool {
-        !self.require_total && !emit.results.is_empty()
+    fn satisfied(&self, run: &Run<'_>) -> bool {
+        !self.require_total && !run.results.is_empty()
     }
 }
 
@@ -80,18 +80,27 @@ impl WalkCtx<'_> {
 
 /// The conjuncts still to be discharged, newest first — TLC's `ActionItemList`.
 /// `Slice` carries a block of owned conjuncts (from `\A` expansion or `UNCHANGED`
-/// desugaring) without allocating a node per item.
+/// desugaring) without allocating a node per item. The `usize` is the scope
+/// mark: the shadow-journal length when the item was pushed, so it can be
+/// discharged in the scope it was written in (see `discharge`).
 enum Cont<'a> {
     Nil,
-    Cons(&'a Expr, &'a Cont<'a>),
-    Slice(&'a [Expr], &'a Cont<'a>),
+    Cons(&'a Expr, usize, &'a Cont<'a>),
+    Slice(&'a [Expr], usize, &'a Cont<'a>),
 }
 
-/// The output side of a walk: the label to attribute to each successor (constant
-/// for one action) and the sink they are collected into.
-struct Emit<'r> {
+/// The mutable state of one walk: the label to attribute to each successor, the
+/// sink they are collected into, and the shadow journal.
+///
+/// The journal records every quantifier binding that *overwrites* an existing
+/// name (`(name, value it shadowed)`). A continuation item pushed at scope mark
+/// `m` must be evaluated with the bindings that were live at `m`, not whatever
+/// an intervening quantifier rebound — TLC gives every continuation node its own
+/// context; the journal reconstructs that with one flat env. See `discharge`.
+struct Run<'r> {
     action: Option<Arc<str>>,
     results: &'r mut Vec<Transition>,
+    journal: Vec<(Arc<str>, Option<Value>)>,
 }
 
 /// Walk one action (a top-level disjunct, already labelled by the caller) and
@@ -103,8 +112,12 @@ pub(crate) fn walk_next(
     action: Option<Arc<str>>,
     results: &mut Vec<Transition>,
 ) -> Result<()> {
-    let mut emit = Emit { action, results };
-    walk(action_expr, &Cont::Nil, env, ctx, &mut emit)
+    let mut run = Run {
+        action,
+        results,
+        journal: Vec::new(),
+    };
+    walk(action_expr, &Cont::Nil, env, ctx, &mut run)
 }
 
 /// Walk the Init predicate over one partial state, binding unprimed variables,
@@ -125,11 +138,12 @@ pub(crate) fn walk_init(
     };
     let mut results = Vec::new();
     {
-        let mut emit = Emit {
+        let mut run = Run {
             action: None,
             results: &mut results,
+            journal: Vec::new(),
         };
-        walk(init, &Cont::Nil, env, &ctx, &mut emit)?;
+        walk(init, &Cont::Nil, env, &ctx, &mut run)?;
     }
     let mut seen = indexmap::IndexSet::new();
     for t in results {
@@ -156,11 +170,12 @@ pub(crate) fn walk_action_enabled(
         require_total: false,
     };
     let mut results = Vec::new();
-    let mut emit = Emit {
+    let mut run = Run {
         action: None,
         results: &mut results,
+        journal: Vec::new(),
     };
-    walk(action, &Cont::Nil, env, &ctx, &mut emit)?;
+    walk(action, &Cont::Nil, env, &ctx, &mut run)?;
     Ok(!results.is_empty())
 }
 
@@ -169,59 +184,66 @@ fn walk(
     cont: &Cont<'_>,
     env: &mut Env,
     ctx: &WalkCtx<'_>,
-    emit: &mut Emit<'_>,
+    run: &mut Run<'_>,
 ) -> Result<()> {
-    if ctx.satisfied(emit) {
+    if ctx.satisfied(run) {
         return Ok(());
     }
     match node {
         // Conjunction: discharge left-to-right. Push the rest onto the
         // continuation and recurse into the head, so every later conjunct sees
         // the primes the earlier ones bound.
-        Expr::And(l, r) => walk(l, &Cont::Cons(r, cont), env, ctx, emit),
+        Expr::And(l, r) => {
+            let mark = run.journal.len();
+            walk(l, &Cont::Cons(r, mark, cont), env, ctx, run)
+        }
 
         // Disjunction: each branch explored with the same continuation and the
         // same partial successor.
         Expr::Or(l, r) => {
-            walk(l, cont, env, ctx, emit)?;
-            walk(r, cont, env, ctx, emit)
+            walk(l, cont, env, ctx, run)?;
+            walk(r, cont, env, ctx, run)
         }
 
         // A named-but-unparameterised action reference, or an action operator:
         // substitute the arguments into the body and walk it.
         Expr::Var(name) => match ctx.defs.get(name) {
-            Some((params, body)) if params.is_empty() => walk(&body.clone(), cont, env, ctx, emit),
-            _ => walk_bool(node, cont, env, ctx, emit),
+            Some((params, body)) if params.is_empty() => walk(&body.clone(), cont, env, ctx, run),
+            _ => walk_bool(node, cont, env, ctx, run),
         },
         Expr::FnCall(name, args) => match ctx.defs.get(name) {
             Some((params, body)) if params.len() == args.len() => {
                 let subs: Vec<(Arc<str>, Expr)> =
                     params.iter().cloned().zip(args.iter().cloned()).collect();
-                walk(&substitute_expr(body, &subs), cont, env, ctx, emit)
+                walk(&substitute_expr(body, &subs), cont, env, ctx, run)
             }
-            _ => walk_bool(node, cont, env, ctx, emit),
+            _ => walk_bool(node, cont, env, ctx, run),
         },
-        Expr::LabeledAction(_, inner) => walk(inner, cont, env, ctx, emit),
+        Expr::LabeledAction(_, inner) => walk(inner, cont, env, ctx, run),
 
         // Instance operator in action position: resolve the operator body (with
         // WITH-substitutions and, for parameterized instances, the instance
         // arguments applied), substitute the call arguments, and walk it.
         Expr::QualifiedCall(instance_expr, op, args) => {
-            walk_qualified_call(instance_expr, op, args, cont, env, ctx, emit)
+            walk_qualified_call(instance_expr, op, args, cont, env, ctx, run)
         }
 
-        // Existential in action position: one branch per witness.
+        // Existential in action position: one branch per witness. The binding
+        // is journalled so a continuation item pushed in an enclosing scope that
+        // is discharged inside this `\E` still sees its own binding, not ours.
         Expr::Exists(var, domain, body) => {
             let dom = eval_set(domain, env, ctx.defs)?;
-            let prev = env.get(var).cloned();
             for val in dom {
-                if ctx.satisfied(emit) {
+                if ctx.satisfied(run) {
                     break;
                 }
-                env.insert(var.clone(), val);
-                walk(body, cont, env, ctx, emit)?;
+                let shadowed = env.insert(var.clone(), val);
+                run.journal.push((var.clone(), shadowed));
+                let r = walk(body, cont, env, ctx, run);
+                let (name, prev) = run.journal.pop().expect("journal balanced");
+                restore(env, &name, prev);
+                r?;
             }
-            restore(env, var, prev);
             Ok(())
         }
 
@@ -233,7 +255,8 @@ fn walk(
                 .into_iter()
                 .map(|val| substitute_expr(body, &[(var.clone(), Expr::Lit(val))]))
                 .collect();
-            advance(&Cont::Slice(&items, cont), env, ctx, emit)
+            let mark = run.journal.len();
+            advance(&Cont::Slice(&items, mark, cont), env, ctx, run)
         }
 
         // UNCHANGED assigns each variable its pre-state value (the evaluator's
@@ -243,16 +266,17 @@ fn walk(
                 .into_iter()
                 .map(|v| Expr::Eq(Box::new(Expr::Prime(v.clone())), Box::new(Expr::Var(v))))
                 .collect();
-            advance(&Cont::Slice(&items, cont), env, ctx, emit)
+            let mark = run.journal.len();
+            advance(&Cont::Slice(&items, mark, cont), env, ctx, run)
         }
 
         // IF: guard is a boolean read in the current partial state; recurse into
         // exactly one branch.
         Expr::If(c, t, e) => {
             if eval_bool(c, env, ctx.defs)? {
-                walk(t, cont, env, ctx, emit)
+                walk(t, cont, env, ctx, run)
             } else {
-                walk(e, cont, env, ctx, emit)
+                walk(e, cont, env, ctx, run)
             }
         }
 
@@ -261,7 +285,7 @@ fn walk(
         Expr::Case(branches) => {
             for (guard, body) in branches {
                 if eval_bool(guard, env, ctx.defs)? {
-                    return walk(body, cont, env, ctx, emit);
+                    return walk(body, cont, env, ctx, run);
                 }
             }
             Err(EvalError::domain_error("CASE: no matching branch"))
@@ -270,30 +294,32 @@ fn walk(
         // LET: bind the definition into the body and walk it.
         Expr::Let(name, binding, body) => {
             let bound = substitute_expr(body, &[(name.clone(), (**binding).clone())]);
-            walk(&bound, cont, env, ctx, emit)
+            walk(&bound, cont, env, ctx, run)
         }
 
         // Equality: an assignment when one side is an (indexed) unbound prime,
         // a constraint otherwise.
-        Expr::Eq(l, r) => walk_eq(node, l, r, cont, env, ctx, emit),
+        Expr::Eq(l, r) => walk_eq(node, l, r, cont, env, ctx, run),
 
         // Membership: a binding construct that enumerates the set when the
         // element is an unbound prime, a constraint otherwise.
-        Expr::In(elem, set) => walk_in(node, elem, set, cont, env, ctx, emit),
+        Expr::In(elem, set) => walk_in(node, elem, set, cont, env, ctx, run),
 
         // Everything else is a boolean predicate: evaluate, prune on false.
-        _ => walk_bool(node, cont, env, ctx, emit),
+        _ => walk_bool(node, cont, env, ctx, run),
     }
 }
 
-/// Discharge the continuation: pop the next pending conjunct, or emit a
+/// Discharge the continuation: pop the next pending conjunct, or run a
 /// successor if none remain.
-fn advance(cont: &Cont<'_>, env: &mut Env, ctx: &WalkCtx<'_>, emit: &mut Emit<'_>) -> Result<()> {
+fn advance(cont: &Cont<'_>, env: &mut Env, ctx: &WalkCtx<'_>, run: &mut Run<'_>) -> Result<()> {
     match cont {
-        Cont::Cons(head, tail) => walk(head, tail, env, ctx, emit),
-        Cont::Slice(items, tail) => match items.split_first() {
-            None => advance(tail, env, ctx, emit),
-            Some((head, rest)) => walk(head, &Cont::Slice(rest, tail), env, ctx, emit),
+        Cont::Cons(head, mark, tail) => discharge(head, tail, *mark, env, ctx, run),
+        Cont::Slice(items, mark, tail) => match items.split_first() {
+            None => advance(tail, env, ctx, run),
+            Some((head, rest)) => {
+                discharge(head, &Cont::Slice(rest, *mark, tail), *mark, env, ctx, run)
+            }
         },
         Cont::Nil => {
             // Generating a state requires every variable assigned — the walker
@@ -301,9 +327,9 @@ fn advance(cont: &Cont<'_>, env: &mut Env, ctx: &WalkCtx<'_>, emit: &mut Emit<'_
             // diagnostic for that lands in a later commit). `ENABLED`
             // (require_total = false) accepts a partial assignment as a witness.
             if !ctx.require_total || ctx.state_keys.iter().all(|k| env.get(k).is_some()) {
-                emit.results.push(Transition {
+                run.results.push(Transition {
                     state: env_to_next_state(env, ctx.vars, ctx.state_keys),
-                    action: emit.action.clone(),
+                    action: run.action.clone(),
                 });
             }
             Ok(())
@@ -311,15 +337,53 @@ fn advance(cont: &Cont<'_>, env: &mut Env, ctx: &WalkCtx<'_>, emit: &mut Emit<'_
     }
 }
 
+/// Discharge a continuation item that was pushed at scope `mark`. The journal
+/// may have grown since — quantifiers entered between the push and now — so
+/// unwind those shadowing bindings to reconstruct the scope the item was written
+/// in, walk it, then redo them so the enclosing scopes see their own bindings
+/// again (sibling disjuncts and the quantifier loops depend on it).
+fn discharge(
+    head: &Expr,
+    tail: &Cont<'_>,
+    mark: usize,
+    env: &mut Env,
+    ctx: &WalkCtx<'_>,
+    run: &mut Run<'_>,
+) -> Result<()> {
+    // Fast path: nothing was shadowed since the item was pushed.
+    if run.journal.len() == mark {
+        return walk(head, tail, env, ctx, run);
+    }
+
+    // Unwind to `mark`, remembering both the shadowed value (to redo the
+    // journal) and the shadowing value currently in env (to redo env).
+    let mut undone: Vec<(Arc<str>, Option<Value>, Option<Value>)> = Vec::new();
+    while run.journal.len() > mark {
+        let (name, shadowed) = run.journal.pop().expect("journal longer than mark");
+        let shadowing = env.get(&name).cloned();
+        restore(env, &name, shadowed.clone());
+        undone.push((name, shadowed, shadowing));
+    }
+
+    let r = walk(head, tail, env, ctx, run);
+
+    // Redo, bottom-of-the-unwound-suffix first, restoring env and journal exactly.
+    for (name, shadowed, shadowing) in undone.into_iter().rev() {
+        restore(env, &name, shadowing);
+        run.journal.push((name, shadowed));
+    }
+    r
+}
+
 fn walk_bool(
     node: &Expr,
     cont: &Cont<'_>,
     env: &mut Env,
     ctx: &WalkCtx<'_>,
-    emit: &mut Emit<'_>,
+    run: &mut Run<'_>,
 ) -> Result<()> {
     if eval_bool(node, env, ctx.defs)? {
-        advance(cont, env, ctx, emit)
+        advance(cont, env, ctx, run)
     } else {
         Ok(())
     }
@@ -332,15 +396,15 @@ fn walk_eq(
     cont: &Cont<'_>,
     env: &mut Env,
     ctx: &WalkCtx<'_>,
-    emit: &mut Emit<'_>,
+    run: &mut Run<'_>,
 ) -> Result<()> {
     if let Some((name, keys)) = ctx.assign_target(l) {
-        return assign_or_constrain(&name, &keys, r, cont, env, ctx, emit);
+        return assign_or_constrain(&name, &keys, r, cont, env, ctx, run);
     }
     if let Some((name, keys)) = ctx.assign_target(r) {
-        return assign_or_constrain(&name, &keys, l, cont, env, ctx, emit);
+        return assign_or_constrain(&name, &keys, l, cont, env, ctx, run);
     }
-    walk_bool(node, cont, env, ctx, emit)
+    walk_bool(node, cont, env, ctx, run)
 }
 
 fn walk_in(
@@ -350,7 +414,7 @@ fn walk_in(
     cont: &Cont<'_>,
     env: &mut Env,
     ctx: &WalkCtx<'_>,
-    emit: &mut Emit<'_>,
+    run: &mut Run<'_>,
 ) -> Result<()> {
     if let Some((name, keys)) = ctx.assign_target(elem)
         && keys.is_empty()
@@ -359,17 +423,17 @@ fn walk_in(
         if env.get(&key).is_none() {
             let dom = eval_set(set, env, ctx.defs)?;
             for val in dom {
-                if ctx.satisfied(emit) {
+                if ctx.satisfied(run) {
                     break;
                 }
                 env.insert(key.clone(), val);
-                advance(cont, env, ctx, emit)?;
+                advance(cont, env, ctx, run)?;
             }
             env.remove(&key);
             return Ok(());
         }
     }
-    walk_bool(node, cont, env, ctx, emit)
+    walk_bool(node, cont, env, ctx, run)
 }
 
 /// Bind `name'` (possibly at a nested key path) to the value of `rhs`, or, if it
@@ -381,7 +445,7 @@ fn assign_or_constrain(
     cont: &Cont<'_>,
     env: &mut Env,
     ctx: &WalkCtx<'_>,
-    emit: &mut Emit<'_>,
+    run: &mut Run<'_>,
 ) -> Result<()> {
     let key = ctx.key_for(name);
     let rhs_val = eval(rhs, env, ctx.defs)?;
@@ -390,13 +454,13 @@ fn assign_or_constrain(
         match env.get(&key).cloned() {
             None => {
                 env.insert(key.clone(), rhs_val);
-                advance(cont, env, ctx, emit)?;
+                advance(cont, env, ctx, run)?;
                 env.remove(&key);
                 Ok(())
             }
             Some(existing) => {
                 if existing == rhs_val {
-                    advance(cont, env, ctx, emit)
+                    advance(cont, env, ctx, run)
                 } else {
                     Ok(())
                 }
@@ -417,7 +481,7 @@ fn assign_or_constrain(
         let updated = update_nested_value(&base, &key_vals, rhs_val)?;
         let prev = env.get(&key).cloned();
         env.insert(key.clone(), updated);
-        advance(cont, env, ctx, emit)?;
+        advance(cont, env, ctx, run)?;
         restore(env, &key, prev);
         Ok(())
     }
@@ -432,7 +496,7 @@ fn walk_qualified_call(
     cont: &Cont<'_>,
     env: &mut Env,
     ctx: &WalkCtx<'_>,
-    emit: &mut Emit<'_>,
+    run: &mut Run<'_>,
 ) -> Result<()> {
     use super::global_state::{PARAMETERIZED_INSTANCES, RESOLVED_INSTANCES};
 
@@ -464,13 +528,13 @@ fn walk_qualified_call(
         // which produces the evaluator's own diagnostic.
         let fallback =
             Expr::QualifiedCall(Box::new(instance_expr.clone()), op.clone(), args.to_vec());
-        return walk_bool(&fallback, cont, env, ctx, emit);
+        return walk_bool(&fallback, cont, env, ctx, run);
     };
 
     if params.len() != args.len() {
         let fallback =
             Expr::QualifiedCall(Box::new(instance_expr.clone()), op.clone(), args.to_vec());
-        return walk_bool(&fallback, cont, env, ctx, emit);
+        return walk_bool(&fallback, cont, env, ctx, run);
     }
 
     let subs: Vec<(Arc<str>, Expr)> = params.into_iter().zip(args.iter().cloned()).collect();
@@ -487,7 +551,7 @@ fn walk_qualified_call(
         phase: ctx.phase,
         require_total: ctx.require_total,
     };
-    walk(&bound_body, cont, env, &sub_ctx, emit)
+    walk(&bound_body, cont, env, &sub_ctx, run)
 }
 
 /// If `expr` is a bare state variable, or an indexed access rooted at one,
