@@ -27,10 +27,41 @@ pub(crate) fn walk_enabled() -> bool {
     std::env::var_os("TLA_WALK").is_some()
 }
 
+/// Whether the walker is generating successors (`x' = e` binds `x'`) or initial
+/// states (`x = e` binds `x`). The machine is otherwise identical, as in TLC.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Phase {
+    Next,
+    Init,
+}
+
 pub(crate) struct WalkCtx<'a> {
     pub vars: &'a [Arc<str>],
-    pub primed_vars: &'a [Arc<str>],
+    /// The env keys the emitted state is read from — the primed names for
+    /// `Next`, the bare variable names for `Init`.
+    pub state_keys: &'a [Arc<str>],
     pub defs: &'a Definitions,
+    pub phase: Phase,
+}
+
+impl WalkCtx<'_> {
+    /// The env key an assignment to state variable `name` binds.
+    fn key_for(&self, name: &Arc<str>) -> Arc<str> {
+        match self.phase {
+            Phase::Next => primed_name(name),
+            Phase::Init => name.clone(),
+        }
+    }
+
+    /// If `expr` is an assignment target for this phase — a prime (`Next`) or a
+    /// bare state variable (`Init`), possibly indexed — return its base name and
+    /// key path.
+    fn assign_target(&self, expr: &Expr) -> Option<(Arc<str>, Vec<Expr>)> {
+        match self.phase {
+            Phase::Next => prime_target(expr),
+            Phase::Init => init_target(expr, self.vars),
+        }
+    }
 }
 
 /// The conjuncts still to be discharged, newest first — TLC's `ActionItemList`.
@@ -60,6 +91,36 @@ pub(crate) fn walk_next(
 ) -> Result<()> {
     let mut emit = Emit { action, results };
     walk(action_expr, &Cont::Nil, env, ctx, &mut emit)
+}
+
+/// Walk the Init predicate over one partial state, binding unprimed variables,
+/// and return the distinct initial states. The same machine as `walk_next`, so
+/// `\E`/`IF`/`LET`/operator calls in Init branch exactly as they do in Next.
+pub(crate) fn walk_init(
+    init: &Expr,
+    env: &mut Env,
+    vars: &[Arc<str>],
+    defs: &Definitions,
+) -> Result<Vec<crate::ast::State>> {
+    let ctx = WalkCtx {
+        vars,
+        state_keys: vars,
+        defs,
+        phase: Phase::Init,
+    };
+    let mut results = Vec::new();
+    {
+        let mut emit = Emit {
+            action: None,
+            results: &mut results,
+        };
+        walk(init, &Cont::Nil, env, &ctx, &mut emit)?;
+    }
+    let mut seen = indexmap::IndexSet::new();
+    for t in results {
+        seen.insert(t.state);
+    }
+    Ok(seen.into_iter().collect())
 }
 
 fn walk(
@@ -191,9 +252,9 @@ fn advance(cont: &Cont<'_>, env: &mut Env, ctx: &WalkCtx<'_>, emit: &mut Emit<'_
             // A successor exists only if every variable was assigned. The walker
             // never invents a stutter for an unassigned variable; a loud
             // diagnostic for that case lands in a later commit.
-            if ctx.primed_vars.iter().all(|p| env.get(p).is_some()) {
+            if ctx.state_keys.iter().all(|k| env.get(k).is_some()) {
                 emit.results.push(Transition {
-                    state: env_to_next_state(env, ctx.vars, ctx.primed_vars),
+                    state: env_to_next_state(env, ctx.vars, ctx.state_keys),
                     action: emit.action.clone(),
                 });
             }
@@ -225,10 +286,10 @@ fn walk_eq(
     ctx: &WalkCtx<'_>,
     emit: &mut Emit<'_>,
 ) -> Result<()> {
-    if let Some((name, keys)) = prime_target(l) {
+    if let Some((name, keys)) = ctx.assign_target(l) {
         return assign_or_constrain(&name, &keys, r, cont, env, ctx, emit);
     }
-    if let Some((name, keys)) = prime_target(r) {
+    if let Some((name, keys)) = ctx.assign_target(r) {
         return assign_or_constrain(&name, &keys, l, cont, env, ctx, emit);
     }
     walk_bool(node, cont, env, ctx, emit)
@@ -243,17 +304,17 @@ fn walk_in(
     ctx: &WalkCtx<'_>,
     emit: &mut Emit<'_>,
 ) -> Result<()> {
-    if let Some((name, keys)) = prime_target(elem)
+    if let Some((name, keys)) = ctx.assign_target(elem)
         && keys.is_empty()
     {
-        let primed = primed_name(&name);
-        if env.get(&primed).is_none() {
+        let key = ctx.key_for(&name);
+        if env.get(&key).is_none() {
             let dom = eval_set(set, env, ctx.defs)?;
             for val in dom {
-                env.insert(primed.clone(), val);
+                env.insert(key.clone(), val);
                 advance(cont, env, ctx, emit)?;
             }
-            env.remove(&primed);
+            env.remove(&key);
             return Ok(());
         }
     }
@@ -271,15 +332,15 @@ fn assign_or_constrain(
     ctx: &WalkCtx<'_>,
     emit: &mut Emit<'_>,
 ) -> Result<()> {
-    let primed = primed_name(name);
+    let key = ctx.key_for(name);
     let rhs_val = eval(rhs, env, ctx.defs)?;
 
     if keys.is_empty() {
-        match env.get(&primed).cloned() {
+        match env.get(&key).cloned() {
             None => {
-                env.insert(primed.clone(), rhs_val);
+                env.insert(key.clone(), rhs_val);
                 advance(cont, env, ctx, emit)?;
-                env.remove(&primed);
+                env.remove(&key);
                 Ok(())
             }
             Some(existing) => {
@@ -298,15 +359,15 @@ fn assign_or_constrain(
             .iter()
             .map(|k| eval(k, env, ctx.defs))
             .collect::<Result<_>>()?;
-        let base = match env.get(&primed).cloned().or_else(|| env.get(name).cloned()) {
+        let base = match env.get(&key).cloned().or_else(|| env.get(name).cloned()) {
             Some(v) => v,
             None => return Ok(()),
         };
         let updated = update_nested_value(&base, &key_vals, rhs_val)?;
-        let prev = env.get(&primed).cloned();
-        env.insert(primed.clone(), updated);
+        let prev = env.get(&key).cloned();
+        env.insert(key.clone(), updated);
         advance(cont, env, ctx, emit)?;
-        restore(env, &primed, prev);
+        restore(env, &key, prev);
         Ok(())
     }
 }
@@ -370,10 +431,35 @@ fn walk_qualified_call(
     }
     let sub_ctx = WalkCtx {
         vars: ctx.vars,
-        primed_vars: ctx.primed_vars,
+        state_keys: ctx.state_keys,
         defs: &merged,
+        phase: ctx.phase,
     };
     walk(&bound_body, cont, env, &sub_ctx, emit)
+}
+
+/// If `expr` is a bare state variable, or an indexed access rooted at one,
+/// return its base name and key path — the `Init`-phase assignment target.
+fn init_target(expr: &Expr, vars: &[Arc<str>]) -> Option<(Arc<str>, Vec<Expr>)> {
+    match expr {
+        Expr::Var(name) if vars.contains(name) => Some((name.clone(), Vec::new())),
+        Expr::FnApp(f, key) => {
+            let (name, mut keys) = init_target(f, vars)?;
+            keys.push((**key).clone());
+            Some((name, keys))
+        }
+        Expr::RecordAccess(r, field) => {
+            let (name, mut keys) = init_target(r, vars)?;
+            keys.push(Expr::Lit(Value::Str(field.clone())));
+            Some((name, keys))
+        }
+        Expr::TupleAccess(t, idx) => {
+            let (name, mut keys) = init_target(t, vars)?;
+            keys.push(Expr::Lit(Value::Int(*idx as i64 + 1)));
+            Some((name, keys))
+        }
+        _ => None,
+    }
 }
 
 /// If `expr` is a prime, or an indexed access rooted at a prime, return the base

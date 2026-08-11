@@ -120,11 +120,12 @@ pub(crate) fn next_states_impl(
 /// disjuncts for action attribution, then walk each one. The walker handles all
 /// nested structure (`\E`, `\/`, `\in`, IF/CASE, dependent assignments) itself.
 fn walk_next_states(effective: &Expr, env: &mut Env, ctx: &EnumCtx<'_>) -> Result<Vec<Transition>> {
-    use super::walk::{WalkCtx, walk_next};
+    use super::walk::{Phase, WalkCtx, walk_next};
     let wctx = WalkCtx {
         vars: ctx.vars,
-        primed_vars: ctx.primed_vars,
+        state_keys: ctx.primed_vars,
         defs: ctx.defs,
+        phase: Phase::Next,
     };
     let mut all = indexmap::IndexSet::new();
     for (disjunct, action) in collect_disjuncts_with_labels(effective, ctx.defs) {

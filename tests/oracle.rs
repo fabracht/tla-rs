@@ -86,6 +86,31 @@ fn test_walker_dependent_next_state_probes() {
     }
 }
 
+/// Init-phase differential corpus. The candidate-inference init collector has no
+/// arms for `\E`/`IF`/`LET`, so an initial state reached only through one of
+/// those is silently dropped (a clean pass, or a bogus "no initial states").
+/// The walker runs the same machine for Init as for Next. Asserted only under
+/// the walker engine.
+#[test]
+fn test_walker_init_probes() {
+    if std::env::var_os("TLA_WALK").is_none() {
+        return;
+    }
+    for name in [
+        "init_disjunct", // x = 0 /\ (y = 1 \/ \E v \in {2,3} : y = v)
+        "init_exists",   // \E v \in {1,2} : x = v
+        "init_if",       // IF TRUE THEN x = 2 ELSE x = 1
+    ] {
+        let path = format!("test_cases/walker/{name}.tla");
+        let result = check_spec_file_allow_deadlock(Path::new(&path));
+        assert!(
+            matches!(result, CheckResult::InvariantViolation(_, _)),
+            "{name}.tla: the walker must reach the initial state the inference \
+             collector drops, got: {result:?}"
+        );
+    }
+}
+
 #[test]
 fn test_should_pass_counter_instantiated() {
     let path = Path::new("test_cases/should_pass/counter_instance.tla");
