@@ -74,6 +74,11 @@ pub(crate) fn next_states_impl(
         defs,
     };
     let effective = resolve_next(next, defs);
+
+    if super::walk::walk_enabled() {
+        return walk_next_states(effective, base_env, &ctx);
+    }
+
     if let Expr::Exists(_, _, _) = effective {
         let action = infer_action_name(effective, defs);
         let mut all_results = indexmap::IndexSet::new();
@@ -109,6 +114,27 @@ pub(crate) fn next_states_impl(
     let mut results = Vec::new();
     enumerate_next(effective, base_env, &ctx, action, &mut results)?;
     Ok(results)
+}
+
+/// Walker engine (TLA_WALK): split the relation into labelled top-level
+/// disjuncts for action attribution, then walk each one. The walker handles all
+/// nested structure (`\E`, `\/`, `\in`, IF/CASE, dependent assignments) itself.
+fn walk_next_states(effective: &Expr, env: &mut Env, ctx: &EnumCtx<'_>) -> Result<Vec<Transition>> {
+    use super::walk::{WalkCtx, walk_next};
+    let wctx = WalkCtx {
+        vars: ctx.vars,
+        primed_vars: ctx.primed_vars,
+        defs: ctx.defs,
+    };
+    let mut all = indexmap::IndexSet::new();
+    for (disjunct, action) in collect_disjuncts_with_labels(effective, ctx.defs) {
+        let mut results = Vec::new();
+        walk_next(disjunct, env, &wctx, action, &mut results)?;
+        for transition in results {
+            all.insert(transition);
+        }
+    }
+    Ok(all.into_iter().collect())
 }
 
 fn resolve_next<'a>(expr: &'a Expr, defs: &'a Definitions) -> &'a Expr {

@@ -57,6 +57,35 @@ fn test_should_pass_counter() {
     );
 }
 
+/// Differential corpus for the continuation-passing walker (TLA_WALK). Each of
+/// these is a next-state relation where a primed variable's value depends on
+/// another primed variable, an operator argument, an IF, or a chain — the shapes
+/// the candidate-inference engine under-approximates into a silent false pass.
+/// The walker must reach the violating successor. Asserted only under the walker
+/// engine, since the inference engine reports these as passing.
+#[test]
+fn test_walker_dependent_next_state_probes() {
+    if std::env::var_os("TLA_WALK").is_none() {
+        return; // corpus is meaningful only under the walker engine
+    }
+    for name in [
+        "dep_assign",    // a' \in S /\ b' = a' + 10
+        "reverse_order", // b' \in S /\ a' = b' + 100  (dependency against declaration order)
+        "if_rhs",        // y' = IF x' = 1 THEN .. ELSE ..
+        "disj_dep",      // x' \in S /\ (y' = f(x') \/ y' = g(x'))
+        "seq_index",     // n' = s'[1] + 100
+        "quant_wrap",    // \A i \in {1} : x' \in S /\ y' = x' + 50
+        "five_chain",    // a'=1 /\ b'=a'+1 /\ ... /\ e'=d'+1
+    ] {
+        let path = format!("test_cases/walker/{name}.tla");
+        let result = check_spec_file_allow_deadlock(Path::new(&path));
+        assert!(
+            matches!(result, CheckResult::InvariantViolation(_, _)),
+            "{name}.tla must reach the violating successor under the walker, got: {result:?}"
+        );
+    }
+}
+
 #[test]
 fn test_should_pass_counter_instantiated() {
     let path = Path::new("test_cases/should_pass/counter_instance.tla");

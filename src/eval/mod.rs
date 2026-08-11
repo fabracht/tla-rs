@@ -11,6 +11,7 @@ mod helpers;
 mod init;
 mod recursive;
 mod state;
+mod walk;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
