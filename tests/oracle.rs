@@ -86,6 +86,30 @@ fn test_walker_dependent_next_state_probes() {
     }
 }
 
+/// `ENABLED A` is `\E vars' : A`, so an action that does not constrain every
+/// variable is still enabled — a partial assignment is a legitimate witness.
+/// Routed through the walker with a partial-assignment completion rule (the
+/// state-generating rule would wrongly demand totality). Asserted only under the
+/// walker engine.
+#[test]
+fn test_walker_enabled_partial_assignment() {
+    if std::env::var_os("TLA_WALK").is_none() {
+        return;
+    }
+    // `Act == x' = 1` leaves y' free, yet ENABLED Act must be true.
+    let violated =
+        check_spec_file_allow_deadlock(Path::new("test_cases/walker/enabled_partial.tla"));
+    assert!(
+        matches!(violated, CheckResult::InvariantViolation(_, _)),
+        "ENABLED of an action that leaves a variable free must be true, got: {violated:?}"
+    );
+    let holds = check_spec_file_allow_deadlock(Path::new("test_cases/walker/enabled_holds.tla"));
+    assert!(
+        matches!(holds, CheckResult::Ok(_)),
+        "ENABLED must still hold where the action is genuinely enabled, got: {holds:?}"
+    );
+}
+
 /// Init-phase differential corpus. The candidate-inference init collector has no
 /// arms for `\E`/`IF`/`LET`, so an initial state reached only through one of
 /// those is silently dropped (a clean pass, or a bogus "no initial states").

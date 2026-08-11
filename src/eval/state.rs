@@ -115,6 +115,9 @@ pub fn is_action_enabled(
         base_env.insert(k.clone(), v.clone());
     }
     let primed_vars = make_primed_names(vars);
+    if super::walk::walk_enabled() {
+        return super::walk::walk_action_enabled(action, &mut base_env, vars, &primed_vars, defs);
+    }
     check_enabled(action, &mut base_env, vars, &primed_vars, 0, defs)
 }
 

@@ -42,6 +42,20 @@ pub(crate) struct WalkCtx<'a> {
     pub state_keys: &'a [Arc<str>],
     pub defs: &'a Definitions,
     pub phase: Phase,
+    /// Whether a successor requires *every* variable assigned. Generating states
+    /// (`Next`/`Init`) demands totality — an unassigned variable is not a state.
+    /// `ENABLED A` is `\E vars' : A`, so a partial assignment is a legitimate
+    /// witness; there totality is not required and the walk short-circuits on the
+    /// first witness.
+    pub require_total: bool,
+}
+
+impl WalkCtx<'_> {
+    /// True once a witness has been found and no further search is needed
+    /// (the `ENABLED` case).
+    fn satisfied(&self, emit: &Emit<'_>) -> bool {
+        !self.require_total && !emit.results.is_empty()
+    }
 }
 
 impl WalkCtx<'_> {
@@ -107,6 +121,7 @@ pub(crate) fn walk_init(
         state_keys: vars,
         defs,
         phase: Phase::Init,
+        require_total: true,
     };
     let mut results = Vec::new();
     {
@@ -123,6 +138,32 @@ pub(crate) fn walk_init(
     Ok(seen.into_iter().collect())
 }
 
+/// `ENABLED action` in the current state: does the action have any successor?
+/// `ENABLED A` is `\E vars' : A`, so a partial assignment counts — an action
+/// that leaves some variable unconstrained is still enabled.
+pub(crate) fn walk_action_enabled(
+    action: &Expr,
+    env: &mut Env,
+    vars: &[Arc<str>],
+    state_keys: &[Arc<str>],
+    defs: &Definitions,
+) -> Result<bool> {
+    let ctx = WalkCtx {
+        vars,
+        state_keys,
+        defs,
+        phase: Phase::Next,
+        require_total: false,
+    };
+    let mut results = Vec::new();
+    let mut emit = Emit {
+        action: None,
+        results: &mut results,
+    };
+    walk(action, &Cont::Nil, env, &ctx, &mut emit)?;
+    Ok(!results.is_empty())
+}
+
 fn walk(
     node: &Expr,
     cont: &Cont<'_>,
@@ -130,6 +171,9 @@ fn walk(
     ctx: &WalkCtx<'_>,
     emit: &mut Emit<'_>,
 ) -> Result<()> {
+    if ctx.satisfied(emit) {
+        return Ok(());
+    }
     match node {
         // Conjunction: discharge left-to-right. Push the rest onto the
         // continuation and recurse into the head, so every later conjunct sees
@@ -171,6 +215,9 @@ fn walk(
             let dom = eval_set(domain, env, ctx.defs)?;
             let prev = env.get(var).cloned();
             for val in dom {
+                if ctx.satisfied(emit) {
+                    break;
+                }
                 env.insert(var.clone(), val);
                 walk(body, cont, env, ctx, emit)?;
             }
@@ -249,10 +296,11 @@ fn advance(cont: &Cont<'_>, env: &mut Env, ctx: &WalkCtx<'_>, emit: &mut Emit<'_
             Some((head, rest)) => walk(head, &Cont::Slice(rest, tail), env, ctx, emit),
         },
         Cont::Nil => {
-            // A successor exists only if every variable was assigned. The walker
-            // never invents a stutter for an unassigned variable; a loud
-            // diagnostic for that case lands in a later commit.
-            if ctx.state_keys.iter().all(|k| env.get(k).is_some()) {
+            // Generating a state requires every variable assigned — the walker
+            // never invents a stutter for an unassigned variable (a loud
+            // diagnostic for that lands in a later commit). `ENABLED`
+            // (require_total = false) accepts a partial assignment as a witness.
+            if !ctx.require_total || ctx.state_keys.iter().all(|k| env.get(k).is_some()) {
                 emit.results.push(Transition {
                     state: env_to_next_state(env, ctx.vars, ctx.state_keys),
                     action: emit.action.clone(),
@@ -311,6 +359,9 @@ fn walk_in(
         if env.get(&key).is_none() {
             let dom = eval_set(set, env, ctx.defs)?;
             for val in dom {
+                if ctx.satisfied(emit) {
+                    break;
+                }
                 env.insert(key.clone(), val);
                 advance(cont, env, ctx, emit)?;
             }
@@ -434,6 +485,7 @@ fn walk_qualified_call(
         state_keys: ctx.state_keys,
         defs: &merged,
         phase: ctx.phase,
+        require_total: ctx.require_total,
     };
     walk(&bound_body, cont, env, &sub_ctx, emit)
 }
