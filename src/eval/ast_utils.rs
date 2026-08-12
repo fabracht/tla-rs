@@ -124,8 +124,20 @@ fn contains_prime_ref_impl(
 ) -> bool {
     match expr {
         Expr::Prime(_) | Expr::Unchanged(_) => true,
-        Expr::Var(_)
-        | Expr::Lit(_)
+        // A bare name may be a zero-argument operator whose body references a
+        // prime (e.g. `Act == x' = 1`). Resolve it; over-approximate on a cycle.
+        Expr::Var(name) => match defs.get(name) {
+            Some((params, body)) if params.is_empty() => {
+                if !visited.insert(name.clone()) {
+                    return true;
+                }
+                let result = contains_prime_ref_impl(body, defs, visited);
+                visited.remove(name);
+                result
+            }
+            _ => false,
+        },
+        Expr::Lit(_)
         | Expr::OldValue
         | Expr::Any
         | Expr::EmptyBag

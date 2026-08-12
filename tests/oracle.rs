@@ -188,6 +188,30 @@ fn test_walker_init_probes() {
     }
 }
 
+/// Cliff guard: a wide prime-free guard (`\A i \in 1..24 : ...`) conjoined with a
+/// single assignment. A structural walk of the guard branches on every inner
+/// disjunct — O(2^24) dead work — before pruning. Hoisting prime-free conjuncts
+/// evaluates the guard as one boolean instead, so the check finishes instantly.
+/// Bound is generous to stay stable across machines while still catching a
+/// return to exponential behaviour (which runs for minutes). Walker engine only.
+#[test]
+fn test_walker_hoists_prime_free_guard() {
+    if std::env::var_os("TLA_WALK").is_none() {
+        return;
+    }
+    let start = std::time::Instant::now();
+    let result = check_spec_file_allow_deadlock(Path::new("test_cases/walker/cliff_guard.tla"));
+    let elapsed = start.elapsed();
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "cliff_guard.tla should pass, got: {result:?}"
+    );
+    assert!(
+        elapsed.as_secs_f64() < 1.0,
+        "cliff_guard.tla must not branch on the prime-free guard; took {elapsed:?}"
+    );
+}
+
 #[test]
 fn test_should_pass_counter_instantiated() {
     let path = Path::new("test_cases/should_pass/counter_instance.tla");

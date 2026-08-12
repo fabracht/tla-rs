@@ -14,6 +14,7 @@
 use std::sync::Arc;
 
 use super::Definitions;
+use super::ast_utils::contains_prime_ref;
 use super::core::{eval, expand_unchanged_vars};
 use super::error::{EvalError, Result};
 use super::helpers::{eval_bool, eval_set, get_nested, update_nested_value};
@@ -196,6 +197,24 @@ fn walk(
 ) -> Result<()> {
     if ctx.satisfied(run) {
         return Ok(());
+    }
+    // Hoist prime-free conjuncts: a node that assigns nothing is a guard, so
+    // evaluate it in place instead of branching structurally. Without this a
+    // prime-free `\A i \in 1..n : (P \/ Q)` walked as an action discharges the
+    // whole continuation once per disjunct — O(2^n). If evaluating it errors,
+    // fall through to the structural walk (which produces the real diagnostic
+    // and preserves conjunct order). Only in `Next`, where "assigns nothing"
+    // is exactly "contains no prime".
+    if ctx.phase == Phase::Next
+        && !matches!(node, Expr::And(_, _))
+        && !contains_prime_ref(node, ctx.defs)
+        && let Ok(b) = eval_bool(node, env, ctx.defs)
+    {
+        return if b {
+            advance(cont, env, ctx, run)
+        } else {
+            Ok(())
+        };
     }
     match node {
         // Conjunction: discharge left-to-right. Push the rest onto the
