@@ -16,7 +16,7 @@ use std::sync::Arc;
 use super::Definitions;
 use super::core::{eval, expand_unchanged_vars};
 use super::error::{EvalError, Result};
-use super::helpers::{eval_bool, eval_set, update_nested_value};
+use super::helpers::{eval_bool, eval_set, get_nested, update_nested_value};
 use super::state::env_to_next_state;
 use crate::ast::{Env, Expr, Transition, Value};
 use crate::intern::primed_name;
@@ -101,6 +101,11 @@ struct Run<'r> {
     action: Option<Arc<str>>,
     results: &'r mut Vec<Transition>,
     journal: Vec<(Arc<str>, Option<Value>)>,
+    /// The `(state key, key path)` pairs already assigned on the current branch.
+    /// A second assignment to the same path is a *constraint* (compare), not an
+    /// overwrite — `f'[1] = 5 /\ f'[1] = 6` is unsatisfiable, and a `\A` that
+    /// sets every index must not be silently overwritten by a later `f'[i] = e`.
+    assigned_paths: Vec<(Arc<str>, Vec<Value>)>,
 }
 
 /// Walk one action (a top-level disjunct, already labelled by the caller) and
@@ -116,6 +121,7 @@ pub(crate) fn walk_next(
         action,
         results,
         journal: Vec::new(),
+        assigned_paths: Vec::new(),
     };
     walk(action_expr, &Cont::Nil, env, ctx, &mut run)
 }
@@ -142,6 +148,7 @@ pub(crate) fn walk_init(
             action: None,
             results: &mut results,
             journal: Vec::new(),
+            assigned_paths: Vec::new(),
         };
         walk(init, &Cont::Nil, env, &ctx, &mut run)?;
     }
@@ -174,6 +181,7 @@ pub(crate) fn walk_action_enabled(
         action: None,
         results: &mut results,
         journal: Vec::new(),
+        assigned_paths: Vec::new(),
     };
     walk(action, &Cont::Nil, env, &ctx, &mut run)?;
     Ok(!results.is_empty())
@@ -467,13 +475,33 @@ fn assign_or_constrain(
             }
         }
     } else {
-        // Indexed assignment `name'[k..] = rhs`. Base is the current binding of
-        // `name'` if any, otherwise the pre-state value of `name`. Overwrite
-        // semantics; repeated-key constraint handling lands in a later commit.
+        // Indexed assignment `name'[k..] = rhs`.
         let key_vals: Vec<Value> = keys
             .iter()
             .map(|k| eval(k, env, ctx.defs))
             .collect::<Result<_>>()?;
+
+        // If this exact path was already assigned on this branch, the equality is
+        // a *constraint*: the value already there must match, or the branch has no
+        // successor. (`f'[1] = 5 /\ f'[1] = 6` is unsatisfiable.)
+        let already_assigned = run
+            .assigned_paths
+            .iter()
+            .any(|(k, p)| *k == key && *p == key_vals);
+        if already_assigned {
+            let matches = env
+                .get(&key)
+                .and_then(|v| get_nested(v, &key_vals).ok())
+                .is_some_and(|existing| existing == rhs_val);
+            return if matches {
+                advance(cont, env, ctx, run)
+            } else {
+                Ok(())
+            };
+        }
+
+        // A fresh path: extend the partial function. Base is the current binding
+        // of `name'` if any, otherwise the pre-state value of `name`.
         let base = match env.get(&key).cloned().or_else(|| env.get(name).cloned()) {
             Some(v) => v,
             None => return Ok(()),
@@ -481,9 +509,11 @@ fn assign_or_constrain(
         let updated = update_nested_value(&base, &key_vals, rhs_val)?;
         let prev = env.get(&key).cloned();
         env.insert(key.clone(), updated);
-        advance(cont, env, ctx, run)?;
+        run.assigned_paths.push((key.clone(), key_vals));
+        let r = advance(cont, env, ctx, run);
+        run.assigned_paths.pop();
         restore(env, &key, prev);
-        Ok(())
+        r
     }
 }
 

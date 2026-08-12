@@ -86,6 +86,34 @@ fn test_walker_dependent_next_state_probes() {
     }
 }
 
+/// Indexed-prime assignment is a *constraint* on a repeated key path, not an
+/// overwrite. `f'[1] = 5 /\ f'[1] = 6` is unsatisfiable, and a `\A` that assigns
+/// every index must not be silently overwritten by a later `f'[i] = e`. An
+/// overwriting walker fabricates a successor satisfying neither conjunct. A
+/// distinct-key assignment (`f'[1] = 5 /\ f'[2] = 6`, a tla-rs extension TLC does
+/// not have) must still work. Asserted only under the walker engine.
+#[test]
+fn test_walker_indexed_prime_is_a_constraint() {
+    if std::env::var_os("TLA_WALK").is_none() {
+        return;
+    }
+    for name in ["indexed_conflict", "indexed_forall_conflict"] {
+        let path = format!("test_cases/walker/{name}.tla");
+        let result = check_spec_file_allow_deadlock(Path::new(&path));
+        assert!(
+            matches!(result, CheckResult::Ok(_)),
+            "{name}.tla: conflicting indexed assignments are unsatisfiable and must \
+             yield no successor, got: {result:?}"
+        );
+    }
+    let distinct =
+        check_spec_file_allow_deadlock(Path::new("test_cases/walker/indexed_distinct.tla"));
+    assert!(
+        matches!(distinct, CheckResult::InvariantViolation(_, _)),
+        "distinct indexed assignments must still combine into one successor, got: {distinct:?}"
+    );
+}
+
 /// Cross-scope variable capture. A continuation conjunct (`z' = i`) pushed under
 /// an outer `\E i` must keep seeing that `i` even when it is discharged inside an
 /// operator body that rebinds `i` (`Pick(a) == \E i \in {5,6} : a = i`). With one
