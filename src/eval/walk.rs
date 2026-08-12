@@ -28,6 +28,21 @@ pub(crate) fn walk_enabled() -> bool {
     std::env::var_os("TLA_WALK").is_some()
 }
 
+thread_local! {
+    static ALLOW_UNASSIGNED_STUTTER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Opt into treating a variable an action leaves unassigned as an implicit
+/// `UNCHANGED` (a stutter of that variable) instead of a hard error. Off by
+/// default: an unassigned variable is a malformed action, as in TLC.
+pub fn set_allow_unassigned_stutter(allow: bool) {
+    ALLOW_UNASSIGNED_STUTTER.with(|c| c.set(allow));
+}
+
+fn allow_unassigned_stutter() -> bool {
+    ALLOW_UNASSIGNED_STUTTER.with(std::cell::Cell::get)
+}
+
 /// Whether the walker is generating successors (`x' = e` binds `x'`) or initial
 /// states (`x = e` binds `x`). The machine is otherwise identical, as in TLC.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -348,20 +363,69 @@ fn advance(cont: &Cont<'_>, env: &mut Env, ctx: &WalkCtx<'_>, run: &mut Run<'_>)
                 discharge(head, &Cont::Slice(rest, *mark, tail), *mark, env, ctx, run)
             }
         },
-        Cont::Nil => {
-            // Generating a state requires every variable assigned — the walker
-            // never invents a stutter for an unassigned variable (a loud
-            // diagnostic for that lands in a later commit). `ENABLED`
-            // (require_total = false) accepts a partial assignment as a witness.
-            if !ctx.require_total || ctx.state_keys.iter().all(|k| env.get(k).is_some()) {
-                run.results.push(Transition {
-                    state: env_to_next_state(env, ctx.vars, ctx.state_keys),
-                    action: run.action.clone(),
-                });
-            }
-            Ok(())
-        }
+        Cont::Nil => emit(env, ctx, run),
     }
+}
+
+/// Record a successor once the whole relation is discharged. `ENABLED`
+/// (`require_total = false`) accepts any partial assignment as a witness.
+/// Generating a state (`Next`/`Init`) demands every variable assigned: a
+/// variable the action left unbound is a malformed action and a hard error,
+/// unless `--allow-unassigned-stutter` opts into treating it as an implicit
+/// `UNCHANGED` — only possible in `Next`, where the current value exists.
+fn emit(env: &mut Env, ctx: &WalkCtx<'_>, run: &mut Run<'_>) -> Result<()> {
+    if !ctx.require_total {
+        run.results.push(Transition {
+            state: env_to_next_state(env, ctx.vars, ctx.state_keys),
+            action: run.action.clone(),
+        });
+        return Ok(());
+    }
+
+    let missing: Vec<usize> = (0..ctx.state_keys.len())
+        .filter(|&i| env.get(&ctx.state_keys[i]).is_none())
+        .collect();
+
+    if missing.is_empty() {
+        run.results.push(Transition {
+            state: env_to_next_state(env, ctx.vars, ctx.state_keys),
+            action: run.action.clone(),
+        });
+        return Ok(());
+    }
+
+    if ctx.phase == Phase::Next && allow_unassigned_stutter() {
+        for &i in &missing {
+            if let Some(current) = env.get(&ctx.vars[i]).cloned() {
+                env.insert(ctx.state_keys[i].clone(), current);
+            }
+        }
+        if ctx.state_keys.iter().all(|k| env.get(k).is_some()) {
+            run.results.push(Transition {
+                state: env_to_next_state(env, ctx.vars, ctx.state_keys),
+                action: run.action.clone(),
+            });
+        }
+        for &i in &missing {
+            env.remove(&ctx.state_keys[i]);
+        }
+        return Ok(());
+    }
+
+    let names = missing
+        .iter()
+        .map(|&i| ctx.vars[i].to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let action = run
+        .action
+        .as_ref()
+        .map(|a| format!(" in action {a}"))
+        .unwrap_or_default();
+    Err(EvalError::domain_error(format!(
+        "variable(s) not assigned{action}: {names} \
+         (pass --allow-unassigned-stutter to treat as UNCHANGED)"
+    )))
 }
 
 /// Discharge a continuation item that was pushed at scope `mark`. The journal

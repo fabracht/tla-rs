@@ -418,6 +418,9 @@ fn main() -> ExitCode {
                 config.allow_deadlock = true;
                 cli_allow_deadlock = true;
             }
+            "--allow-unassigned-stutter" => {
+                config.allow_unassigned_stutter = true;
+            }
             "--check-liveness" => {
                 config.check_liveness = true;
             }
@@ -604,6 +607,9 @@ fn main() -> ExitCode {
                 );
                 println!("  --replay FILE              Replay a counterexample interactively");
                 println!("  --allow-deadlock           Allow states with no successors");
+                println!(
+                    "  --allow-unassigned-stutter Treat a variable an action leaves unassigned as UNCHANGED"
+                );
                 println!("  --check-liveness           Check liveness and fairness properties");
                 println!("  --quick, -q                Quick exploration (limit: 10,000 states)");
                 println!("  --verbose, -v              Verbose output (show more details)");

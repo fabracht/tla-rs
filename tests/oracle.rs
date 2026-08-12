@@ -212,6 +212,37 @@ fn test_walker_hoists_prime_free_guard() {
     );
 }
 
+/// A variable an action leaves unassigned is a malformed action: TLC raises a
+/// hard error, and the inference engine silently drops the successor (a false
+/// pass). The walker must fail loudly by default, and `--allow-unassigned-stutter`
+/// must recover the lenient "unassigned means UNCHANGED" behaviour. Walker only.
+#[test]
+fn test_walker_unassigned_variable_is_loud() {
+    if std::env::var_os("TLA_WALK").is_none() {
+        return;
+    }
+    let path = Path::new("test_cases/walker/unassigned_var.tla");
+
+    let strict = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(strict, CheckResult::NextError(..)),
+        "unassigned_var.tla must fail loudly when Bump leaves y unassigned, got: {strict:?}"
+    );
+
+    let lenient = check_spec_file_with_config(
+        path,
+        CheckerConfig {
+            allow_deadlock: true,
+            allow_unassigned_stutter: true,
+            ..Default::default()
+        },
+    );
+    assert!(
+        matches!(lenient, CheckResult::Ok(_)),
+        "--allow-unassigned-stutter must treat y as UNCHANGED, got: {lenient:?}"
+    );
+}
+
 #[test]
 fn test_should_pass_counter_instantiated() {
     let path = Path::new("test_cases/should_pass/counter_instance.tla");

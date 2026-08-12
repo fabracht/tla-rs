@@ -48,6 +48,7 @@ pub use self::state::{
 };
 
 pub(crate) use self::ast_utils::contains_prime_ref;
+pub use self::walk::set_allow_unassigned_stutter;
 
 pub(crate) fn resolve_parameterized_defs(
     param_inst: &ParameterizedInstance,

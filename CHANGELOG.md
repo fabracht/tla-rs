@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- A variable that an action leaves unassigned is now a reported error naming the variable and the action, matching TLC ("The variable x was not assigned a value"). Previously such a successor was silently dropped: `Next == (x' = 1 - x) \/ UNCHANGED <<x, y>>` where the first disjunct forgets `y'` explored only the stutters of the second disjunct and reported a clean run, hiding that the intended action is malformed — a false pass. Pass `--allow-unassigned-stutter` to recover the old lenient behaviour, which treats an unassigned variable as an implicit `UNCHANGED` of that variable.
+
+### Added
+
+- `--allow-unassigned-stutter` treats a variable an action leaves unassigned as `UNCHANGED` instead of raising an error.
+
 ## [0.7.0] - 2026-08-03
 
 ### Fixed
