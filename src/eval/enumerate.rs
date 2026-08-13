@@ -68,6 +68,50 @@ pub(crate) fn next_states_impl(
     primed_vars: &[Arc<str>],
     defs: &Definitions,
 ) -> Result<Vec<Transition>> {
+    let results = next_states_dispatch(next, base_env, vars, primed_vars, defs)?;
+    #[cfg(debug_assertions)]
+    debug_assert_successors_satisfy_next(next, base_env, primed_vars, defs, &results);
+    Ok(results)
+}
+
+/// In debug builds, every emitted successor must actually satisfy the next-state
+/// relation: binding its primed values into the current state and evaluating
+/// `Next` must yield `true`. This catches an engine fabricating a successor the
+/// relation forbids — the failure mode that turns a real violation into a false
+/// pass or a bogus counterexample. Compiled out of release builds.
+#[cfg(debug_assertions)]
+fn debug_assert_successors_satisfy_next(
+    next: &Expr,
+    base_env: &mut Env,
+    primed_vars: &[Arc<str>],
+    defs: &Definitions,
+    results: &[Transition],
+) {
+    for transition in results {
+        for (i, primed) in primed_vars.iter().enumerate() {
+            if let Some(val) = transition.state.values.get(i) {
+                base_env.insert(primed.clone(), val.clone());
+            }
+        }
+        let holds = eval_bool(next, base_env, defs);
+        for primed in primed_vars {
+            base_env.remove(primed);
+        }
+        debug_assert!(
+            matches!(holds, Ok(true)),
+            "engine emitted a successor that does not satisfy Next: {:?} (eval = {holds:?})",
+            transition.state.values
+        );
+    }
+}
+
+fn next_states_dispatch(
+    next: &Expr,
+    base_env: &mut Env,
+    vars: &[Arc<str>],
+    primed_vars: &[Arc<str>],
+    defs: &Definitions,
+) -> Result<Vec<Transition>> {
     let ctx = EnumCtx {
         vars,
         primed_vars,
