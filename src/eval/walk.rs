@@ -9,12 +9,13 @@
 //! assigned. Dependencies like `b' = a' + 10` need no analysis: `a'` is already
 //! bound when `b'`'s conjunct is reached.
 //!
-//! Gated behind `TLA_WALK` while both engines coexist (design commits 3–10).
+//! The default engine; the legacy candidate-inference engine remains available
+//! for one release as an escape hatch (`TLA_ENGINE=inference`).
 
 use std::sync::Arc;
 
 use super::Definitions;
-use super::ast_utils::contains_prime_ref;
+use super::ast_utils::{collect_disjuncts_with_labels, contains_prime_ref};
 use super::core::{eval, expand_unchanged_vars};
 use super::error::{EvalError, Result};
 use super::helpers::{eval_bool, eval_set, get_nested, update_nested_value};
@@ -23,13 +24,20 @@ use crate::ast::{Env, Expr, Transition, Value};
 use crate::intern::primed_name;
 use crate::substitution::substitute_expr;
 
-/// Whether the walker engine is selected.
-pub(crate) fn walk_enabled() -> bool {
-    std::env::var_os("TLA_WALK").is_some()
+thread_local! {
+    static USE_INFERENCE_ENGINE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static ALLOW_UNASSIGNED_STUTTER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-thread_local! {
-    static ALLOW_UNASSIGNED_STUTTER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+/// Select the legacy candidate-inference engine instead of the default walker.
+/// Retained for one release as an escape hatch (`TLA_ENGINE=inference`).
+pub fn set_use_inference_engine(use_inference: bool) {
+    USE_INFERENCE_ENGINE.with(|c| c.set(use_inference));
+}
+
+/// Whether the walker engine is selected. Default; the inference engine is opt-in.
+pub(crate) fn walk_enabled() -> bool {
+    !USE_INFERENCE_ENGINE.with(std::cell::Cell::get)
 }
 
 /// Opt into treating a variable an action leaves unassigned as an implicit
@@ -241,27 +249,51 @@ fn walk(
         }
 
         // Disjunction: each branch explored with the same continuation and the
-        // same partial successor.
+        // same partial successor. When no enclosing action has named these
+        // transitions yet, recover each disjunct's action name — operator bodies
+        // are inlined before the walk, so the name is matched back structurally,
+        // the same way the inference engine attributes actions. This is what pins
+        // `\E rm : A(rm) \/ B(rm)` to A and B instead of a single unnamed lump.
+        Expr::Or(_, _) if run.action.is_none() => {
+            for (disjunct, label) in collect_disjuncts_with_labels(node, ctx.defs) {
+                match label {
+                    Some(name) => walk_named(name, disjunct, cont, env, ctx, run)?,
+                    None => walk(disjunct, cont, env, ctx, run)?,
+                }
+            }
+            Ok(())
+        }
         Expr::Or(l, r) => {
             walk(l, cont, env, ctx, run)?;
             walk(r, cont, env, ctx, run)
         }
 
         // A named-but-unparameterised action reference, or an action operator:
-        // substitute the arguments into the body and walk it.
+        // substitute the arguments into the body and walk it. Entering a named
+        // action names the transitions it produces (for fairness attribution and
+        // the per-action histogram) unless an enclosing action already named them.
         Expr::Var(name) => match ctx.defs.get(name) {
-            Some((params, body)) if params.is_empty() => walk(&body.clone(), cont, env, ctx, run),
+            Some((params, body)) if params.is_empty() => {
+                walk_named(name.clone(), &body.clone(), cont, env, ctx, run)
+            }
             _ => walk_bool(node, cont, env, ctx, run),
         },
         Expr::FnCall(name, args) => match ctx.defs.get(name) {
             Some((params, body)) if params.len() == args.len() => {
                 let subs: Vec<(Arc<str>, Expr)> =
                     params.iter().cloned().zip(args.iter().cloned()).collect();
-                walk(&substitute_expr(body, &subs), cont, env, ctx, run)
+                walk_named(
+                    name.clone(),
+                    &substitute_expr(body, &subs),
+                    cont,
+                    env,
+                    ctx,
+                    run,
+                )
             }
             _ => walk_bool(node, cont, env, ctx, run),
         },
-        Expr::LabeledAction(_, inner) => walk(inner, cont, env, ctx, run),
+        Expr::LabeledAction(label, inner) => walk_named(label.clone(), inner, cont, env, ctx, run),
 
         // Instance operator in action position: resolve the operator body (with
         // WITH-substitutions and, for parameterized instances, the instance
@@ -350,6 +382,28 @@ fn walk(
         // Everything else is a boolean predicate: evaluate, prune on false.
         _ => walk_bool(node, cont, env, ctx, run),
     }
+}
+
+/// Walk a named action's body, attributing the successors it emits to `label`
+/// unless an enclosing action already claimed them. The label is restored on the
+/// way out (including on error) so sibling disjuncts are attributed independently.
+/// Matches the inference engine, which labels a transition by the innermost named
+/// disjunct that produced it (`sub_action.or(action)`).
+fn walk_named(
+    label: Arc<str>,
+    body: &Expr,
+    cont: &Cont<'_>,
+    env: &mut Env,
+    ctx: &WalkCtx<'_>,
+    run: &mut Run<'_>,
+) -> Result<()> {
+    if run.action.is_some() {
+        return walk(body, cont, env, ctx, run);
+    }
+    run.action = Some(label);
+    let result = walk(body, cont, env, ctx, run);
+    run.action = None;
+    result
 }
 
 /// Discharge the continuation: pop the next pending conjunct, or run a

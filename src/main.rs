@@ -302,6 +302,9 @@ fn main() -> ExitCode {
     }
 
     let mut config = CheckerConfig::new();
+    if std::env::var("TLA_ENGINE").ok().as_deref() == Some("inference") {
+        config.use_inference_engine = true;
+    }
     let mut spec_path = None;
     let mut constants: Vec<(Arc<str>, Value)> = Vec::new();
     let mut scenario_input: Option<String> = None;

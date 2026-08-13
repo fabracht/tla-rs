@@ -116,7 +116,7 @@ pub(crate) fn next_states_impl(
     Ok(results)
 }
 
-/// Walker engine (TLA_WALK): split the relation into labelled top-level
+/// Walker engine: split the relation into labelled top-level
 /// disjuncts for action attribution, then walk each one. The walker handles all
 /// nested structure (`\E`, `\/`, `\in`, IF/CASE, dependent assignments) itself.
 fn walk_next_states(effective: &Expr, env: &mut Env, ctx: &EnumCtx<'_>) -> Result<Vec<Transition>> {

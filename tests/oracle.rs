@@ -8,6 +8,12 @@ use tla_checker::checker::{CheckResult, CheckerConfig, PrepareSpecError, check};
 use tla_checker::config::{apply_config, parse_cfg};
 use tla_checker::parser::{parse, parse_with_warnings};
 
+/// The suite runs under the walker by default; `TLA_ENGINE=inference` runs the
+/// whole suite under the legacy engine so both can be exercised in CI.
+fn inference_engine_selected() -> bool {
+    std::env::var("TLA_ENGINE").ok().as_deref() == Some("inference")
+}
+
 fn check_spec_file(path: &Path) -> CheckResult {
     check_spec_file_with_config(path, CheckerConfig::default())
 }
@@ -21,6 +27,16 @@ fn check_spec_file_allow_deadlock(path: &Path) -> CheckResult {
 }
 
 fn check_spec_file_with_config(path: &Path, mut config: CheckerConfig) -> CheckResult {
+    if inference_engine_selected() {
+        config.use_inference_engine = true;
+    }
+    check_loaded(path, config)
+}
+
+/// Parse a spec (with its adjacent cfg) and check it under exactly the engine the
+/// caller's config names — no `TLA_ENGINE` override. Used by the differential test
+/// that must exercise both engines in one process.
+fn check_loaded(path: &Path, mut config: CheckerConfig) -> CheckResult {
     let input = fs::read_to_string(path).expect("failed to read spec file");
     let mut spec = match parse(&input) {
         Ok(s) => s,
@@ -57,7 +73,7 @@ fn test_should_pass_counter() {
     );
 }
 
-/// Differential corpus for the continuation-passing walker (TLA_WALK). Each of
+/// Differential corpus for the continuation-passing walker. Each of
 /// these is a next-state relation where a primed variable's value depends on
 /// another primed variable, an operator argument, an IF, or a chain — the shapes
 /// the candidate-inference engine under-approximates into a silent false pass.
@@ -65,8 +81,8 @@ fn test_should_pass_counter() {
 /// engine, since the inference engine reports these as passing.
 #[test]
 fn test_walker_dependent_next_state_probes() {
-    if std::env::var_os("TLA_WALK").is_none() {
-        return; // corpus is meaningful only under the walker engine
+    if inference_engine_selected() {
+        return; // corpus asserts walker-correct behaviour the inference engine gets wrong
     }
     for name in [
         "dep_assign",    // a' \in S /\ b' = a' + 10
@@ -94,7 +110,7 @@ fn test_walker_dependent_next_state_probes() {
 /// not have) must still work. Asserted only under the walker engine.
 #[test]
 fn test_walker_indexed_prime_is_a_constraint() {
-    if std::env::var_os("TLA_WALK").is_none() {
+    if inference_engine_selected() {
         return;
     }
     for name in ["indexed_conflict", "indexed_forall_conflict"] {
@@ -122,7 +138,7 @@ fn test_walker_indexed_prime_is_a_constraint() {
 /// walker does *not* report one. Asserted only under the walker engine.
 #[test]
 fn test_walker_no_cross_scope_capture() {
-    if std::env::var_os("TLA_WALK").is_none() {
+    if inference_engine_selected() {
         return;
     }
     for name in [
@@ -146,7 +162,7 @@ fn test_walker_no_cross_scope_capture() {
 /// walker engine.
 #[test]
 fn test_walker_enabled_partial_assignment() {
-    if std::env::var_os("TLA_WALK").is_none() {
+    if inference_engine_selected() {
         return;
     }
     // `Act == x' = 1` leaves y' free, yet ENABLED Act must be true.
@@ -170,7 +186,7 @@ fn test_walker_enabled_partial_assignment() {
 /// the walker engine.
 #[test]
 fn test_walker_init_probes() {
-    if std::env::var_os("TLA_WALK").is_none() {
+    if inference_engine_selected() {
         return;
     }
     for name in [
@@ -196,7 +212,7 @@ fn test_walker_init_probes() {
 /// return to exponential behaviour (which runs for minutes). Walker engine only.
 #[test]
 fn test_walker_hoists_prime_free_guard() {
-    if std::env::var_os("TLA_WALK").is_none() {
+    if inference_engine_selected() {
         return;
     }
     let start = std::time::Instant::now();
@@ -218,7 +234,7 @@ fn test_walker_hoists_prime_free_guard() {
 /// must recover the lenient "unassigned means UNCHANGED" behaviour. Walker only.
 #[test]
 fn test_walker_unassigned_variable_is_loud() {
-    if std::env::var_os("TLA_WALK").is_none() {
+    if inference_engine_selected() {
         return;
     }
     let path = Path::new("test_cases/walker/unassigned_var.tla");
@@ -241,6 +257,46 @@ fn test_walker_unassigned_variable_is_loud() {
         matches!(lenient, CheckResult::Ok(_)),
         "--allow-unassigned-stutter must treat y as UNCHANGED, got: {lenient:?}"
     );
+}
+
+/// Engine-equivalence gate for the default flip. On well-formed specs the
+/// inference engine handles correctly, the walker and the inference engine must
+/// agree exactly: same reachable-state count, same transition count, and the same
+/// per-action transition histogram (the "label histogram" — a stronger check than
+/// the state count alone, since it pins which action produced each edge). Runs
+/// both engines explicitly, so it is independent of `TLA_ENGINE`.
+#[test]
+fn test_engines_agree_on_known_correct_specs() {
+    for name in [
+        "official/TwoPhase",
+        "should_pass/counter",
+        "should_pass/two_bit",
+    ] {
+        let owned = format!("test_cases/{name}.tla");
+        let path = Path::new(&owned);
+        let cfg = |use_inference_engine| CheckerConfig {
+            allow_deadlock: true,
+            use_inference_engine,
+            ..Default::default()
+        };
+        let walker = check_loaded(path, cfg(false));
+        let infer = check_loaded(path, cfg(true));
+        let (CheckResult::Ok(w), CheckResult::Ok(i)) = (&walker, &infer) else {
+            panic!("{name}: both engines must complete; walker={walker:?} infer={infer:?}");
+        };
+        assert_eq!(
+            w.states_explored, i.states_explored,
+            "{name}: reachable-state count must match across engines"
+        );
+        assert_eq!(
+            w.transitions, i.transitions,
+            "{name}: transition count must match across engines"
+        );
+        assert_eq!(
+            w.transitions_by_action, i.transitions_by_action,
+            "{name}: per-action transition histogram must match across engines"
+        );
+    }
 }
 
 #[test]

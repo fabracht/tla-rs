@@ -4,11 +4,15 @@
 
 ### Changed
 
+- State generation now uses a continuation-passing walker over the next-state relation, replacing the candidate-inference engine. The old engine inferred a set of candidate values per primed variable and filtered their cross product, which can only ever *reject* a successor — so any shortfall in the inference produced too few successors and a silent false pass. Concretely, the walker reaches successors the old engine dropped: a primed variable whose value depends on another primed variable (`a' \in S /\ b' = a' + 10`), on an operator argument, or on an `IF`/`CASE`; initial states reached only through `\E`/`IF`/`LET`; and it attributes every transition to the action that produced it, including actions quantified as `\E rm \in RM : A(rm) \/ B(rm)` (the old engine could reach these states but is needed for fairness/liveness to know which action fired). On the corpus the walker also runs faster (TwoPhase 5RM ~0.35s vs ~0.54s). Pass `TLA_ENGINE=inference` to select the previous engine for one release; it will be removed after that.
+
 - A variable that an action leaves unassigned is now a reported error naming the variable and the action, matching TLC ("The variable x was not assigned a value"). Previously such a successor was silently dropped: `Next == (x' = 1 - x) \/ UNCHANGED <<x, y>>` where the first disjunct forgets `y'` explored only the stutters of the second disjunct and reported a clean run, hiding that the intended action is malformed — a false pass. Pass `--allow-unassigned-stutter` to recover the old lenient behaviour, which treats an unassigned variable as an implicit `UNCHANGED` of that variable.
 
 ### Added
 
 - `--allow-unassigned-stutter` treats a variable an action leaves unassigned as `UNCHANGED` instead of raising an error.
+
+- `TLA_ENGINE=inference` selects the previous candidate-inference engine for one release.
 
 ## [0.7.0] - 2026-08-03
 
