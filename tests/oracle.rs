@@ -259,6 +259,22 @@ fn test_walker_unassigned_variable_is_loud() {
     );
 }
 
+/// A whole-variable prime assignment followed by an indexed reference to the
+/// same variable is a *constraint* on the value already there, not an overwrite.
+/// `f' = [i \in {1,2} |-> 9] /\ f'[1] = 5` is contradictory (`9 # 5`), so it has
+/// no successor. The walker must not fabricate `[g EXCEPT ![1] = 5]`, which
+/// satisfies the index but violates `f' = g` — a phantom successor and a false
+/// pass. Both engines reach the same verdict here, so it is asserted on either.
+#[test]
+fn test_whole_assignment_then_index_is_a_constraint() {
+    let result = check_spec_file(Path::new("test_cases/walker/whole_then_indexed.tla"));
+    assert!(
+        matches!(result, CheckResult::Deadlock(..)),
+        "a whole assignment then a conflicting indexed constraint must yield no successor, \
+         got: {result:?}"
+    );
+}
+
 /// Engine-equivalence gate for the default flip. On well-formed specs the
 /// inference engine handles correctly, the walker and the inference engine must
 /// agree exactly: same reachable-state count, same transition count, and the same

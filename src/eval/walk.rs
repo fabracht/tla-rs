@@ -130,6 +130,11 @@ struct Run<'r> {
     /// overwrite — `f'[1] = 5 /\ f'[1] = 6` is unsatisfiable, and a `\A` that
     /// sets every index must not be silently overwritten by a later `f'[i] = e`.
     assigned_paths: Vec<(Arc<str>, Vec<Value>)>,
+    /// State keys bound as a *whole* on this branch (`f' = g`, `f' \in S`, or an
+    /// `UNCHANGED f`). A later indexed reference to such a key is a constraint on
+    /// the value already there, not an overwrite — `f' = g /\ f'[1] = 5` requires
+    /// `g[1] = 5`, it does not rebind index 1 to 5.
+    fully_assigned: Vec<Arc<str>>,
 }
 
 /// Walk one action (a top-level disjunct, already labelled by the caller) and
@@ -146,6 +151,7 @@ pub(crate) fn walk_next(
         results,
         journal: Vec::new(),
         assigned_paths: Vec::new(),
+        fully_assigned: Vec::new(),
     };
     walk(action_expr, &Cont::Nil, env, ctx, &mut run)
 }
@@ -173,6 +179,7 @@ pub(crate) fn walk_init(
             results: &mut results,
             journal: Vec::new(),
             assigned_paths: Vec::new(),
+            fully_assigned: Vec::new(),
         };
         walk(init, &Cont::Nil, env, &ctx, &mut run)?;
     }
@@ -206,6 +213,7 @@ pub(crate) fn walk_action_enabled(
         results: &mut results,
         journal: Vec::new(),
         assigned_paths: Vec::new(),
+        fully_assigned: Vec::new(),
     };
     walk(action, &Cont::Nil, env, &ctx, &mut run)?;
     Ok(!results.is_empty())
@@ -567,15 +575,21 @@ fn walk_in(
         let key = ctx.key_for(&name);
         if env.get(&key).is_none() {
             let dom = eval_set(set, env, ctx.defs)?;
+            run.fully_assigned.push(key.clone());
+            let mut result = Ok(());
             for val in dom {
                 if ctx.satisfied(run) {
                     break;
                 }
                 env.insert(key.clone(), val);
-                advance(cont, env, ctx, run)?;
+                result = advance(cont, env, ctx, run);
+                if result.is_err() {
+                    break;
+                }
             }
+            run.fully_assigned.pop();
             env.remove(&key);
-            return Ok(());
+            return result;
         }
     }
     walk_bool(node, cont, env, ctx, run)
@@ -599,9 +613,11 @@ fn assign_or_constrain(
         match env.get(&key).cloned() {
             None => {
                 env.insert(key.clone(), rhs_val);
-                advance(cont, env, ctx, run)?;
+                run.fully_assigned.push(key.clone());
+                let r = advance(cont, env, ctx, run);
+                run.fully_assigned.pop();
                 env.remove(&key);
-                Ok(())
+                r
             }
             Some(existing) => {
                 if existing == rhs_val {
@@ -618,13 +634,16 @@ fn assign_or_constrain(
             .map(|k| eval(k, env, ctx.defs))
             .collect::<Result<_>>()?;
 
-        // If this exact path was already assigned on this branch, the equality is
-        // a *constraint*: the value already there must match, or the branch has no
-        // successor. (`f'[1] = 5 /\ f'[1] = 6` is unsatisfiable.)
-        let already_assigned = run
-            .assigned_paths
-            .iter()
-            .any(|(k, p)| *k == key && *p == key_vals);
+        // The equality is a *constraint* (the value already there must match, or
+        // the branch has no successor) when either the whole variable was already
+        // assigned — `f' = g /\ f'[1] = 5` requires `g[1] = 5`, it does not rebind
+        // index 1 — or this exact indexed path was already assigned on this branch
+        // (`f'[1] = 5 /\ f'[1] = 6` is unsatisfiable).
+        let already_assigned = run.fully_assigned.contains(&key)
+            || run
+                .assigned_paths
+                .iter()
+                .any(|(k, p)| *k == key && *p == key_vals);
         if already_assigned {
             let matches = env
                 .get(&key)
