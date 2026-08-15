@@ -292,7 +292,13 @@ fn contains_prime_ref_impl(
                         if let Some(instance_defs) = instances.get(instance_name)
                             && let Some((_, body)) = instance_defs.get(op)
                         {
-                            return contains_prime_ref_impl(body, defs, visited);
+                            let marker: Arc<str> = Arc::from(format!("{instance_name}!{op}"));
+                            if !visited.insert(marker.clone()) {
+                                return true;
+                            }
+                            let result = contains_prime_ref_impl(body, defs, visited);
+                            visited.remove(&marker);
+                            return result;
                         }
                         true
                     })
