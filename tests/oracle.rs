@@ -259,6 +259,23 @@ fn test_walker_unassigned_variable_is_loud() {
     );
 }
 
+/// Indexed-prime membership `f'[k] \in S` enumerates the index over the set,
+/// one successor per element — `f'[1] \in {5,6} /\ f'[2] = 0` reaches `[5,0]` and
+/// `[6,0]`, so an invariant `f[1] # 5` is violated. The inference engine has no
+/// arm for an indexed element and drops the successors (a clean pass, a false
+/// pass); asserted only under the walker.
+#[test]
+fn test_walker_indexed_prime_membership() {
+    if inference_engine_selected() {
+        return;
+    }
+    let result = check_spec_file_allow_deadlock(Path::new("test_cases/walker/indexed_in.tla"));
+    assert!(
+        matches!(result, CheckResult::InvariantViolation(_, _)),
+        "the walker must reach the successor `f'[1] \\in {{5,6}}` enumerates, got: {result:?}"
+    );
+}
+
 /// A whole-variable prime assignment followed by an indexed reference to the
 /// same variable is a *constraint* on the value already there, not an overwrite.
 /// `f' = [i \in {1,2} |-> 9] /\ f'[1] = 5` is contradictory (`9 # 5`), so it has

@@ -569,26 +569,45 @@ fn walk_in(
     ctx: &WalkCtx<'_>,
     run: &mut Run<'_>,
 ) -> Result<()> {
-    if let Some((name, keys)) = ctx.assign_target(elem)
-        && keys.is_empty()
-    {
-        let key = ctx.key_for(&name);
-        if env.get(&key).is_none() {
+    if let Some((name, keys)) = ctx.assign_target(elem) {
+        if keys.is_empty() {
+            let key = ctx.key_for(&name);
+            if env.get(&key).is_none() {
+                let dom = eval_set(set, env, ctx.defs)?;
+                run.fully_assigned.push(key.clone());
+                let mut result = Ok(());
+                for val in dom {
+                    if ctx.satisfied(run) {
+                        break;
+                    }
+                    env.insert(key.clone(), val);
+                    result = advance(cont, env, ctx, run);
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                run.fully_assigned.pop();
+                env.remove(&key);
+                return result;
+            }
+        } else {
+            // `name'[k..] \in S` is the indexed counterpart of `name'[k..] = v`:
+            // it binds the path to each element of S, i.e. one branch per witness
+            // of `\E v \in S : name'[k..] = v`. Each branch goes through the same
+            // path that a `name'[k..] = v` equality would, so an indexed
+            // assignment, an indexed re-constraint, and a whole-variable
+            // assignment on the same key all interact the same way here.
             let dom = eval_set(set, env, ctx.defs)?;
-            run.fully_assigned.push(key.clone());
             let mut result = Ok(());
             for val in dom {
                 if ctx.satisfied(run) {
                     break;
                 }
-                env.insert(key.clone(), val);
-                result = advance(cont, env, ctx, run);
+                result = assign_or_constrain(&name, &keys, &Expr::Lit(val), cont, env, ctx, run);
                 if result.is_err() {
                     break;
                 }
             }
-            run.fully_assigned.pop();
-            env.remove(&key);
             return result;
         }
     }
