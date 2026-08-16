@@ -2,7 +2,33 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::ast::Expr;
-use crate::eval::Definitions;
+use crate::eval::{Definitions, expr_references};
+
+/// Substitute into the body of a binder that binds `var`, avoiding capture.
+/// `subs` must already exclude any substitution of `var` itself. If `var` occurs
+/// free in a replacement, binding it here would capture that occurrence (`{c \in S
+/// : c # author}` with `author <- c` would become `c # c`), so `var` is first
+/// renamed to a fresh name that clashes with nothing in scope. Returns the
+/// (possibly renamed) bound variable and the substituted body.
+fn substitute_bound(var: &Arc<str>, body: &Expr, subs: &[(Arc<str>, Expr)]) -> (Arc<str>, Expr) {
+    if !subs.iter().any(|(_, repl)| expr_references(repl, var)) {
+        return (var.clone(), substitute_expr(body, subs));
+    }
+    let mut i = 0u64;
+    let fresh = loop {
+        let cand: Arc<str> = Arc::from(format!("{var}${i}"));
+        let clashes = expr_references(body, &cand)
+            || subs
+                .iter()
+                .any(|(p, r)| *p == cand || expr_references(r, &cand));
+        if !clashes {
+            break cand;
+        }
+        i += 1;
+    };
+    let renamed = substitute_expr(body, &[(var.clone(), Expr::Var(fresh.clone()))]);
+    (fresh, substitute_expr(&renamed, subs))
+}
 
 pub fn apply_substitutions(module_defs: &Definitions, subs: &[(Arc<str>, Expr)]) -> Definitions {
     let mut result = BTreeMap::new();
@@ -280,18 +306,20 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
         ),
         Expr::SetFilter(var, domain, pred) => {
             let filtered_subs: Vec<_> = subs.iter().filter(|(p, _)| p != var).cloned().collect();
+            let (nvar, npred) = substitute_bound(var, pred, &filtered_subs);
             Expr::SetFilter(
-                var.clone(),
+                nvar,
                 Box::new(substitute_expr(domain, subs)),
-                Box::new(substitute_expr(pred, &filtered_subs)),
+                Box::new(npred),
             )
         }
         Expr::SetMap(var, domain, body) => {
             let filtered_subs: Vec<_> = subs.iter().filter(|(p, _)| p != var).cloned().collect();
+            let (nvar, nbody) = substitute_bound(var, body, &filtered_subs);
             Expr::SetMap(
-                var.clone(),
+                nvar,
                 Box::new(substitute_expr(domain, subs)),
-                Box::new(substitute_expr(body, &filtered_subs)),
+                Box::new(nbody),
             )
         }
         Expr::Union(l, r) => Expr::Union(
@@ -325,31 +353,35 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
 
         Expr::Exists(var, domain, body) => {
             let filtered_subs: Vec<_> = subs.iter().filter(|(p, _)| p != var).cloned().collect();
+            let (nvar, nbody) = substitute_bound(var, body, &filtered_subs);
             Expr::Exists(
-                var.clone(),
+                nvar,
                 Box::new(substitute_expr(domain, subs)),
-                Box::new(substitute_expr(body, &filtered_subs)),
+                Box::new(nbody),
             )
         }
         Expr::Forall(var, domain, body) => {
             let filtered_subs: Vec<_> = subs.iter().filter(|(p, _)| p != var).cloned().collect();
+            let (nvar, nbody) = substitute_bound(var, body, &filtered_subs);
             Expr::Forall(
-                var.clone(),
+                nvar,
                 Box::new(substitute_expr(domain, subs)),
-                Box::new(substitute_expr(body, &filtered_subs)),
+                Box::new(nbody),
             )
         }
         Expr::Choose(var, domain, body) => {
             let filtered_subs: Vec<_> = subs.iter().filter(|(p, _)| p != var).cloned().collect();
+            let (nvar, nbody) = substitute_bound(var, body, &filtered_subs);
             Expr::Choose(
-                var.clone(),
+                nvar,
                 Box::new(substitute_expr(domain, subs)),
-                Box::new(substitute_expr(body, &filtered_subs)),
+                Box::new(nbody),
             )
         }
         Expr::ChooseUnbounded(var, body) => {
             let filtered_subs: Vec<_> = subs.iter().filter(|(p, _)| p != var).cloned().collect();
-            Expr::ChooseUnbounded(var.clone(), Box::new(substitute_expr(body, &filtered_subs)))
+            let (nvar, nbody) = substitute_bound(var, body, &filtered_subs);
+            Expr::ChooseUnbounded(nvar, Box::new(nbody))
         }
 
         Expr::FnApp(f, arg) => Expr::FnApp(
@@ -358,10 +390,11 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
         ),
         Expr::FnDef(var, domain, body) => {
             let filtered_subs: Vec<_> = subs.iter().filter(|(p, _)| p != var).cloned().collect();
+            let (nvar, nbody) = substitute_bound(var, body, &filtered_subs);
             Expr::FnDef(
-                var.clone(),
+                nvar,
                 Box::new(substitute_expr(domain, subs)),
-                Box::new(substitute_expr(body, &filtered_subs)),
+                Box::new(nbody),
             )
         }
         Expr::FnCall(name, args) => Expr::FnCall(
@@ -374,9 +407,38 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
                 .filter(|(p, _)| !params.contains(p))
                 .cloned()
                 .collect();
+            // Rename any parameter captured by a replacement before substituting.
+            let mut renames: Vec<(Arc<str>, Expr)> = Vec::new();
+            let mut new_params: Vec<Arc<str>> = Vec::with_capacity(params.len());
+            for prm in params {
+                if filtered_subs.iter().any(|(_, r)| expr_references(r, prm)) {
+                    let mut i = 0u64;
+                    let fresh = loop {
+                        let cand: Arc<str> = Arc::from(format!("{prm}${i}"));
+                        let clashes = expr_references(body, &cand)
+                            || new_params.contains(&cand)
+                            || filtered_subs
+                                .iter()
+                                .any(|(p, r)| *p == cand || expr_references(r, &cand));
+                        if !clashes {
+                            break cand;
+                        }
+                        i += 1;
+                    };
+                    renames.push((prm.clone(), Expr::Var(fresh.clone())));
+                    new_params.push(fresh);
+                } else {
+                    new_params.push(prm.clone());
+                }
+            }
+            let renamed = if renames.is_empty() {
+                (**body).clone()
+            } else {
+                substitute_expr(body, &renames)
+            };
             Expr::Lambda(
-                params.clone(),
-                Box::new(substitute_expr(body, &filtered_subs)),
+                new_params,
+                Box::new(substitute_expr(&renamed, &filtered_subs)),
             )
         }
         Expr::FnMerge(l, r) => Expr::FnMerge(
@@ -460,10 +522,11 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
         ),
         Expr::Let(var, binding, body) => {
             let filtered_subs: Vec<_> = subs.iter().filter(|(p, _)| p != var).cloned().collect();
+            let (nvar, nbody) = substitute_bound(var, body, &filtered_subs);
             Expr::Let(
-                var.clone(),
+                nvar,
                 Box::new(substitute_expr(binding, subs)),
-                Box::new(substitute_expr(body, &filtered_subs)),
+                Box::new(nbody),
             )
         }
         Expr::Case(branches) => Expr::Case(

@@ -590,6 +590,21 @@ fn test_negation_in_precedence() {
     );
 }
 
+/// Operator-argument capture. `Mutate(c, d)` is called with the `\E`-bound
+/// variable `c`, whose name also binds inside the body (`{c \in S : c # author}`,
+/// `[c \in S |-> ...]`). Inlining the operator must not capture: `c # author`
+/// must stay `c # <the argument>`, not collapse to `c # c`. If it captures,
+/// `recipients` is always empty, no pending diagram is ever produced, and the
+/// reachable violation is missed — a false pass. Must violate on either engine.
+#[test]
+fn test_should_violate_operator_arg_capture() {
+    let path = Path::new("test_cases/should_violate/operator_arg_capture.tla");
+    assert!(
+        matches!(check_spec_file(path), CheckResult::InvariantViolation(..)),
+        "operator_arg_capture.tla must reach the violation; a captured argument hides it"
+    );
+}
+
 #[test]
 fn test_should_violate_counter_overflow() {
     let path = Path::new("test_cases/should_violate/counter_overflow.tla");
