@@ -621,7 +621,12 @@ fn assign_or_constrain(
 
         let base = match env.get(&key).cloned().or_else(|| env.get(name).cloned()) {
             Some(v) => v,
-            None => return Ok(()),
+            None => {
+                return Err(EvalError::domain_error(format!(
+                    "cannot assign an element of `{name}` before `{name}` has a value; \
+                     assign the whole variable first"
+                )));
+            }
         };
         let updated = update_nested_value(&base, &key_vals, rhs_val)?;
         let prev = env.get(&key).cloned();

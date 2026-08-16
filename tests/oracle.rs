@@ -196,6 +196,24 @@ fn test_walker_init_probes() {
     }
 }
 
+/// An indexed assignment in Init with nothing to update — `Init == f[1] = 5`,
+/// where `f` has no prior whole value and Init has no pre-state — cannot build
+/// `f` and must be reported, not silently dropped. Dropping the branch is a
+/// silent false pass when it is one disjunct of an otherwise-satisfiable Init.
+/// Walker only; the legacy engine drops it silently.
+#[test]
+fn test_walker_init_indexed_without_base_is_loud() {
+    if inference_engine_selected() {
+        return;
+    }
+    let result =
+        check_spec_file_allow_deadlock(Path::new("test_cases/walker/init_indexed_no_base.tla"));
+    assert!(
+        matches!(result, CheckResult::InitError(_)),
+        "an indexed Init assignment with no base must be reported, got: {result:?}"
+    );
+}
+
 /// Cliff guard: a wide prime-free guard (`\A i \in 1..24 : ...`) conjoined with a
 /// single assignment. A structural walk of the guard branches on every inner
 /// disjunct — O(2^24) dead work — before pruning. Hoisting prime-free conjuncts
