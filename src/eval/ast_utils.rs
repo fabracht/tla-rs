@@ -124,8 +124,6 @@ fn contains_prime_ref_impl(
 ) -> bool {
     match expr {
         Expr::Prime(_) | Expr::Unchanged(_) => true,
-        // A bare name may be a zero-argument operator whose body references a
-        // prime (e.g. `Act == x' = 1`). Resolve it; over-approximate on a cycle.
         Expr::Var(name) => match defs.get(name) {
             Some((params, body)) if params.is_empty() => {
                 if !visited.insert(name.clone()) {
@@ -251,8 +249,6 @@ fn contains_prime_ref_impl(
                 })
         }
         Expr::FnCall(name, args) => {
-            // Arguments are evaluated in the caller's scope, so a prime in an
-            // argument is a real reference regardless of the operator body.
             if args
                 .iter()
                 .any(|a| contains_prime_ref_impl(a, defs, visited))
@@ -262,18 +258,12 @@ fn contains_prime_ref_impl(
             match defs.get(name) {
                 Some((_, body)) => {
                     if !visited.insert(name.clone()) {
-                        // Already on the current resolution path: a recursive
-                        // definition we cannot fully inspect here. Over-approximate.
                         return true;
                     }
                     let result = contains_prime_ref_impl(body, defs, visited);
                     visited.remove(name);
                     result
                 }
-                // Unresolved operator: its body cannot be inspected, so assume
-                // it may reference a prime. Over-approximation is the only safe
-                // direction — every caller uses this to decide whether to do
-                // MORE work (collect candidates, refine), never less.
                 None => true,
             }
         }
@@ -494,8 +484,6 @@ mod prime_ref_tests {
 
     #[test]
     fn operator_applied_to_a_prime_argument_has_a_prime() {
-        // IsTwice(a) == a = 0  — a prime-free body, but the argument is primed.
-        // The prime is at the call site, so the reference is real.
         let d = defs(vec![(
             "IsTwice",
             vec!["a"],
@@ -525,8 +513,6 @@ mod prime_ref_tests {
 
     #[test]
     fn a_recursive_operator_applied_to_a_prime_has_a_prime() {
-        // Sum(n) == IF n = 0 THEN 0 ELSE Sum(n)  — self-referential; the cycle
-        // must not swallow the primed argument.
         let d = defs(vec![(
             "Sum",
             vec!["n"],
@@ -544,8 +530,6 @@ mod prime_ref_tests {
 
     #[test]
     fn an_unresolved_operator_is_over_approximated() {
-        // No definition for `Mystery`; its body cannot be inspected, so it must
-        // be assumed to reference a prime.
         assert!(contains_prime_ref(
             &call("Mystery", vec![Expr::Lit(Value::Int(1))]),
             &Definitions::new()

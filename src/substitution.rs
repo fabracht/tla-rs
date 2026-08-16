@@ -407,7 +407,6 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
                 .filter(|(p, _)| !params.contains(p))
                 .cloned()
                 .collect();
-            // Rename any parameter captured by a replacement before substituting.
             let mut renames: Vec<(Arc<str>, Expr)> = Vec::new();
             let mut new_params: Vec<Arc<str>> = Vec::with_capacity(params.len());
             for prm in params {

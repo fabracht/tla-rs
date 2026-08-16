@@ -82,16 +82,16 @@ fn test_should_pass_counter() {
 #[test]
 fn test_walker_dependent_next_state_probes() {
     if inference_engine_selected() {
-        return; // corpus asserts walker-correct behaviour the inference engine gets wrong
+        return;
     }
     for name in [
-        "dep_assign",    // a' \in S /\ b' = a' + 10
-        "reverse_order", // b' \in S /\ a' = b' + 100  (dependency against declaration order)
-        "if_rhs",        // y' = IF x' = 1 THEN .. ELSE ..
-        "disj_dep",      // x' \in S /\ (y' = f(x') \/ y' = g(x'))
-        "seq_index",     // n' = s'[1] + 100
-        "quant_wrap",    // \A i \in {1} : x' \in S /\ y' = x' + 50
-        "five_chain",    // a'=1 /\ b'=a'+1 /\ ... /\ e'=d'+1
+        "dep_assign",
+        "reverse_order",
+        "if_rhs",
+        "disj_dep",
+        "seq_index",
+        "quant_wrap",
+        "five_chain",
     ] {
         let path = format!("test_cases/walker/{name}.tla");
         let result = check_spec_file_allow_deadlock(Path::new(&path));
@@ -141,10 +141,7 @@ fn test_walker_no_cross_scope_capture() {
     if inference_engine_selected() {
         return;
     }
-    for name in [
-        "capture_scope",    // z' = i, i rebound by Pick(y')
-        "capture_disjunct", // (z' = i \/ z' = i + 10) — exercises the journal redo
-    ] {
+    for name in ["capture_scope", "capture_disjunct"] {
         let path = format!("test_cases/walker/{name}.tla");
         let result = check_spec_file_allow_deadlock(Path::new(&path));
         assert!(
@@ -165,7 +162,6 @@ fn test_walker_enabled_partial_assignment() {
     if inference_engine_selected() {
         return;
     }
-    // `Act == x' = 1` leaves y' free, yet ENABLED Act must be true.
     let violated =
         check_spec_file_allow_deadlock(Path::new("test_cases/walker/enabled_partial.tla"));
     assert!(
@@ -189,11 +185,7 @@ fn test_walker_init_probes() {
     if inference_engine_selected() {
         return;
     }
-    for name in [
-        "init_disjunct", // x = 0 /\ (y = 1 \/ \E v \in {2,3} : y = v)
-        "init_exists",   // \E v \in {1,2} : x = v
-        "init_if",       // IF TRUE THEN x = 2 ELSE x = 1
-    ] {
+    for name in ["init_disjunct", "init_exists", "init_if"] {
         let path = format!("test_cases/walker/{name}.tla");
         let result = check_spec_file_allow_deadlock(Path::new(&path));
         assert!(

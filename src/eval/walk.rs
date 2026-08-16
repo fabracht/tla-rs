@@ -229,13 +229,6 @@ fn walk(
     if ctx.satisfied(run) {
         return Ok(());
     }
-    // Hoist prime-free conjuncts: a node that assigns nothing is a guard, so
-    // evaluate it in place instead of branching structurally. Without this a
-    // prime-free `\A i \in 1..n : (P \/ Q)` walked as an action discharges the
-    // whole continuation once per disjunct — O(2^n). If evaluating it errors,
-    // fall through to the structural walk (which produces the real diagnostic
-    // and preserves conjunct order). Only in `Next`, where "assigns nothing"
-    // is exactly "contains no prime".
     if ctx.phase == Phase::Next
         && !matches!(node, Expr::And(_, _))
         && !contains_prime_ref(node, ctx.defs)
@@ -248,20 +241,11 @@ fn walk(
         };
     }
     match node {
-        // Conjunction: discharge left-to-right. Push the rest onto the
-        // continuation and recurse into the head, so every later conjunct sees
-        // the primes the earlier ones bound.
         Expr::And(l, r) => {
             let mark = run.journal.len();
             walk(l, &Cont::Cons(r, mark, cont), env, ctx, run)
         }
 
-        // Disjunction: each branch explored with the same continuation and the
-        // same partial successor. When no enclosing action has named these
-        // transitions yet, recover each disjunct's action name — operator bodies
-        // are inlined before the walk, so the name is matched back structurally,
-        // the same way the inference engine attributes actions. This is what pins
-        // `\E rm : A(rm) \/ B(rm)` to A and B instead of a single unnamed lump.
         Expr::Or(_, _) if run.action.is_none() => {
             for (disjunct, label) in collect_disjuncts_with_labels(node, ctx.defs) {
                 match label {
@@ -276,10 +260,6 @@ fn walk(
             walk(r, cont, env, ctx, run)
         }
 
-        // A named-but-unparameterised action reference, or an action operator:
-        // substitute the arguments into the body and walk it. Entering a named
-        // action names the transitions it produces (for fairness attribution and
-        // the per-action histogram) unless an enclosing action already named them.
         Expr::Var(name) => match ctx.defs.get(name) {
             Some((params, body)) if params.is_empty() => {
                 walk_named(name.clone(), &body.clone(), cont, env, ctx, run)
@@ -303,16 +283,10 @@ fn walk(
         },
         Expr::LabeledAction(label, inner) => walk_named(label.clone(), inner, cont, env, ctx, run),
 
-        // Instance operator in action position: resolve the operator body (with
-        // WITH-substitutions and, for parameterized instances, the instance
-        // arguments applied), substitute the call arguments, and walk it.
         Expr::QualifiedCall(instance_expr, op, args) => {
             walk_qualified_call(instance_expr, op, args, cont, env, ctx, run)
         }
 
-        // Existential in action position: one branch per witness. The binding
-        // is journalled so a continuation item pushed in an enclosing scope that
-        // is discharged inside this `\E` still sees its own binding, not ours.
         Expr::Exists(var, domain, body) => {
             let dom = eval_set(domain, env, ctx.defs)?;
             for val in dom {
@@ -329,8 +303,6 @@ fn walk(
             Ok(())
         }
 
-        // Universal in action position: the body must hold for every element,
-        // so expand to a conjunction over the (concrete) domain.
         Expr::Forall(var, domain, body) => {
             let dom = eval_set(domain, env, ctx.defs)?;
             let items: Vec<Expr> = dom
@@ -341,8 +313,6 @@ fn walk(
             advance(&Cont::Slice(&items, mark, cont), env, ctx, run)
         }
 
-        // UNCHANGED assigns each variable its pre-state value (the evaluator's
-        // own arm is a *constraint*, which needs the primes already bound).
         Expr::Unchanged(vars) => {
             let items: Vec<Expr> = expand_unchanged_vars(vars, ctx.defs)
                 .into_iter()
@@ -352,8 +322,6 @@ fn walk(
             advance(&Cont::Slice(&items, mark, cont), env, ctx, run)
         }
 
-        // IF: guard is a boolean read in the current partial state; recurse into
-        // exactly one branch.
         Expr::If(c, t, e) => {
             if eval_bool(c, env, ctx.defs)? {
                 walk(t, cont, env, ctx, run)
@@ -362,8 +330,6 @@ fn walk(
             }
         }
 
-        // CASE: first branch whose guard holds; a non-exhaustive CASE is a hard
-        // error (as in the evaluator).
         Expr::Case(branches) => {
             for (guard, body) in branches {
                 if eval_bool(guard, env, ctx.defs)? {
@@ -373,21 +339,15 @@ fn walk(
             Err(EvalError::domain_error("CASE: no matching branch"))
         }
 
-        // LET: bind the definition into the body and walk it.
         Expr::Let(name, binding, body) => {
             let bound = substitute_expr(body, &[(name.clone(), (**binding).clone())]);
             walk(&bound, cont, env, ctx, run)
         }
 
-        // Equality: an assignment when one side is an (indexed) unbound prime,
-        // a constraint otherwise.
         Expr::Eq(l, r) => walk_eq(node, l, r, cont, env, ctx, run),
 
-        // Membership: a binding construct that enumerates the set when the
-        // element is an unbound prime, a constraint otherwise.
         Expr::In(elem, set) => walk_in(node, elem, set, cont, env, ctx, run),
 
-        // Everything else is a boolean predicate: evaluate, prune on false.
         _ => walk_bool(node, cont, env, ctx, run),
     }
 }
@@ -503,13 +463,10 @@ fn discharge(
     ctx: &WalkCtx<'_>,
     run: &mut Run<'_>,
 ) -> Result<()> {
-    // Fast path: nothing was shadowed since the item was pushed.
     if run.journal.len() == mark {
         return walk(head, tail, env, ctx, run);
     }
 
-    // Unwind to `mark`, remembering both the shadowed value (to redo the
-    // journal) and the shadowing value currently in env (to redo env).
     let mut undone: Vec<(Arc<str>, Option<Value>, Option<Value>)> = Vec::new();
     while run.journal.len() > mark {
         let (name, shadowed) = run.journal.pop().expect("journal longer than mark");
@@ -520,7 +477,6 @@ fn discharge(
 
     let r = walk(head, tail, env, ctx, run);
 
-    // Redo, bottom-of-the-unwound-suffix first, restoring env and journal exactly.
     for (name, shadowed, shadowing) in undone.into_iter().rev() {
         restore(env, &name, shadowing);
         run.journal.push((name, shadowed));
@@ -591,12 +547,6 @@ fn walk_in(
                 return result;
             }
         } else {
-            // `name'[k..] \in S` is the indexed counterpart of `name'[k..] = v`:
-            // it binds the path to each element of S, i.e. one branch per witness
-            // of `\E v \in S : name'[k..] = v`. Each branch goes through the same
-            // path that a `name'[k..] = v` equality would, so an indexed
-            // assignment, an indexed re-constraint, and a whole-variable
-            // assignment on the same key all interact the same way here.
             let dom = eval_set(set, env, ctx.defs)?;
             let mut result = Ok(());
             for val in dom {
@@ -647,17 +597,11 @@ fn assign_or_constrain(
             }
         }
     } else {
-        // Indexed assignment `name'[k..] = rhs`.
         let key_vals: Vec<Value> = keys
             .iter()
             .map(|k| eval(k, env, ctx.defs))
             .collect::<Result<_>>()?;
 
-        // The equality is a *constraint* (the value already there must match, or
-        // the branch has no successor) when either the whole variable was already
-        // assigned — `f' = g /\ f'[1] = 5` requires `g[1] = 5`, it does not rebind
-        // index 1 — or this exact indexed path was already assigned on this branch
-        // (`f'[1] = 5 /\ f'[1] = 6` is unsatisfiable).
         let already_assigned = run.fully_assigned.contains(&key)
             || run
                 .assigned_paths
@@ -675,8 +619,6 @@ fn assign_or_constrain(
             };
         }
 
-        // A fresh path: extend the partial function. Base is the current binding
-        // of `name'` if any, otherwise the pre-state value of `name`.
         let base = match env.get(&key).cloned().or_else(|| env.get(name).cloned()) {
             Some(v) => v,
             None => return Ok(()),
@@ -713,13 +655,6 @@ fn walk_qualified_call(
             Some((instance_defs.clone(), params.clone(), body.clone()))
         }),
         Expr::FnCall(instance_name, instance_args) => {
-            // Resolve with the arguments' concrete values, not their expressions.
-            // A `WITH p <- f[arg]` substitution puts `arg` under a prime, and
-            // `prime_expr` primes every variable it contains, so a symbolic
-            // `Var` argument becomes an undefined `arg'`; a `Lit` value is rigid
-            // under priming. The inference engine resolves with values for the
-            // same reason. Arguments in action position are always bound here; if
-            // one is not evaluable, fall back to the symbolic resolution.
             let concrete: Option<Vec<Value>> = instance_args
                 .iter()
                 .map(|a| eval(a, env, ctx.defs).ok())
@@ -747,8 +682,6 @@ fn walk_qualified_call(
     };
 
     let Some((instance_defs, params, body)) = resolved else {
-        // Not resolvable as an action call; fall back to boolean evaluation,
-        // which produces the evaluator's own diagnostic.
         let fallback =
             Expr::QualifiedCall(Box::new(instance_expr.clone()), op.clone(), args.to_vec());
         return walk_bool(&fallback, cont, env, ctx, run);
