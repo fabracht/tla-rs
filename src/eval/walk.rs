@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use super::Definitions;
-use super::ast_utils::{collect_disjuncts_with_labels, contains_prime_ref};
+use super::ast_utils::{collect_disjuncts_with_labels, contains_prime_ref, parameterized_let_op};
 use super::core::{eval, expand_unchanged_vars};
 use super::error::{EvalError, Result};
 use super::helpers::{eval_bool, eval_set, get_nested, update_nested_value};
@@ -340,6 +340,18 @@ fn walk(
         }
 
         Expr::Let(name, binding, body) => {
+            if let Some((params, op_body)) = parameterized_let_op(binding) {
+                let mut merged = ctx.defs.clone();
+                merged.insert(name.clone(), (params, op_body.clone()));
+                let sub_ctx = WalkCtx {
+                    vars: ctx.vars,
+                    state_keys: ctx.state_keys,
+                    defs: &merged,
+                    phase: ctx.phase,
+                    require_total: ctx.require_total,
+                };
+                return walk(body, cont, env, &sub_ctx, run);
+            }
             let bound = substitute_expr(body, &[(name.clone(), (**binding).clone())]);
             walk(&bound, cont, env, ctx, run)
         }

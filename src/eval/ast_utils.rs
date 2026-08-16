@@ -50,6 +50,26 @@ pub(crate) fn format_expr_brief(expr: &Expr) -> String {
     }
 }
 
+/// A parameterized `LET F(p1, ..) == body` operator, which the parser encodes as
+/// `Let("_params", TupleLit([p1, ..]), body)`. Returns its parameter names and
+/// body so a caller can register it as a definition; `None` for a plain LET value.
+pub(crate) fn parameterized_let_op(binding: &Expr) -> Option<(Vec<Arc<str>>, &Expr)> {
+    if let Expr::Let(marker, params_tuple, body) = binding
+        && marker.as_ref() == "_params"
+        && let Expr::TupleLit(param_exprs) = params_tuple.as_ref()
+    {
+        let params: Option<Vec<Arc<str>>> = param_exprs
+            .iter()
+            .map(|e| match e {
+                Expr::Var(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect();
+        return params.map(|p| (p, body.as_ref()));
+    }
+    None
+}
+
 fn match_def_body(expr: &Expr, defs: &Definitions) -> Option<Arc<str>> {
     for (name, (params, body)) in defs {
         if params.is_empty() && body == expr {

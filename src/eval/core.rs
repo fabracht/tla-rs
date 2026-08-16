@@ -1342,6 +1342,11 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Let(var, binding, body) => {
+            if let Some((params, op_body)) = super::ast_utils::parameterized_let_op(binding) {
+                let mut local_defs = defs.clone();
+                local_defs.insert(var.clone(), (params, op_body.clone()));
+                return eval(body, env, &local_defs);
+            }
             if let Expr::FnDef(param, domain_expr, fn_body) = binding.as_ref() {
                 let mut local_defs = defs.clone();
                 local_defs.insert(var.clone(), (vec![], (**binding).clone()));

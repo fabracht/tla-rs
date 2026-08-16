@@ -196,6 +196,37 @@ fn test_walker_init_probes() {
     }
 }
 
+/// A parameterized `LET` operator (`LET Double(n) == n * 2 IN Double(x) < 8`)
+/// used in an invariant must resolve on both engines — the parser encodes it as a
+/// `_params` marker that the evaluator now expands into a definition.
+#[test]
+fn test_should_violate_let_operator_invariant() {
+    let path = Path::new("test_cases/should_violate/let_operator_invariant.tla");
+    assert!(
+        matches!(check_spec_file(path), CheckResult::InvariantViolation(..)),
+        "let_operator_invariant.tla must resolve the parameterized LET operator and violate"
+    );
+}
+
+/// A parameterized `LET` operator in a next-state assignment
+/// (`LET Bump(n) == n + 1 IN x' = Bump(x)`). The walker registers the operator as
+/// a definition and enumerates the successor; the inference engine cannot infer a
+/// candidate through the call, so this is asserted only under the walker.
+#[test]
+fn test_walker_let_operator_in_action() {
+    if inference_engine_selected() {
+        return;
+    }
+    let path = Path::new("test_cases/walker/let_operator_action.tla");
+    assert!(
+        matches!(
+            check_spec_file_allow_deadlock(path),
+            CheckResult::InvariantViolation(..)
+        ),
+        "the walker must enumerate `x' = Bump(x)` for a parameterized LET operator"
+    );
+}
+
 /// An indexed assignment in Init with nothing to update — `Init == f[1] = 5`,
 /// where `f` has no prior whole value and Init has no pre-state — cannot build
 /// `f` and must be reported, not silently dropped. Dropping the branch is a
