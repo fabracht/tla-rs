@@ -1620,6 +1620,24 @@ fn test_parameterized_instance_in_init() {
     );
 }
 
+/// A parameterized-instance action in the next-state relation
+/// (`Channel(id)!Send(msg)` under `\E id \in Ids`). The `WITH buffer <-
+/// channels[id]` substitution places `id` under a prime, so resolving the
+/// instance with `id` as a symbolic variable rather than its bound value makes
+/// `prime_expr` produce an undefined `id'`. Both engines must reach the same 9
+/// reachable states.
+#[test]
+fn test_parameterized_instance_in_next() {
+    let path = Path::new("test_cases/should_pass/parameterized_instance.tla");
+    match check_spec_file_allow_deadlock(path) {
+        CheckResult::Ok(stats) => assert_eq!(
+            stats.states_explored, 9,
+            "parameterized_instance.tla should reach 9 states"
+        ),
+        other => panic!("parameterized_instance.tla should pass, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_parameterized_instance_init_unbound_var() {
     let path = Path::new("test_cases/should_pass/param_instance_init_unbound.tla");

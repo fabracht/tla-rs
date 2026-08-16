@@ -712,19 +712,37 @@ fn walk_qualified_call(
             let (params, body) = instance_defs.get(op)?;
             Some((instance_defs.clone(), params.clone(), body.clone()))
         }),
-        Expr::FnCall(instance_name, instance_args) => PARAMETERIZED_INSTANCES.with(|r| {
-            let instances = r.borrow();
-            let param_inst = instances.get(instance_name)?;
-            if instance_args.len() != param_inst.params.len() {
-                return None;
-            }
-            let instance_defs =
-                super::resolve_parameterized_defs_symbolic(param_inst, instance_args.to_vec());
-            let (params, body) = instance_defs.get(op)?;
-            let params = params.clone();
-            let body = body.clone();
-            Some((instance_defs, params, body))
-        }),
+        Expr::FnCall(instance_name, instance_args) => {
+            // Resolve with the arguments' concrete values, not their expressions.
+            // A `WITH p <- f[arg]` substitution puts `arg` under a prime, and
+            // `prime_expr` primes every variable it contains, so a symbolic
+            // `Var` argument becomes an undefined `arg'`; a `Lit` value is rigid
+            // under priming. The inference engine resolves with values for the
+            // same reason. Arguments in action position are always bound here; if
+            // one is not evaluable, fall back to the symbolic resolution.
+            let concrete: Option<Vec<Value>> = instance_args
+                .iter()
+                .map(|a| eval(a, env, ctx.defs).ok())
+                .collect();
+            PARAMETERIZED_INSTANCES.with(|r| {
+                let instances = r.borrow();
+                let param_inst = instances.get(instance_name)?;
+                if instance_args.len() != param_inst.params.len() {
+                    return None;
+                }
+                let instance_defs = match &concrete {
+                    Some(vals) => super::resolve_parameterized_defs(param_inst, vals.clone()),
+                    None => super::resolve_parameterized_defs_symbolic(
+                        param_inst,
+                        instance_args.to_vec(),
+                    ),
+                };
+                let (params, body) = instance_defs.get(op)?;
+                let params = params.clone();
+                let body = body.clone();
+                Some((instance_defs, params, body))
+            })
+        }
         _ => None,
     };
 
