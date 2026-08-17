@@ -269,6 +269,30 @@ fn test_walker_hoists_prime_free_guard() {
     );
 }
 
+/// The prime-free-guard hoist must still fire when the guard calls a recursive
+/// operator (`Sum`). `contains_prime_ref` bails on the recursive cycle, and if it
+/// bailed to "has a prime" the hoist would be skipped and the wide `\A` would
+/// branch O(2^n). The recursive operator is prime-free, so the cycle contributes
+/// no prime and the guard is hoisted. Walker only.
+#[test]
+fn test_walker_hoists_guard_with_recursive_operator() {
+    if inference_engine_selected() {
+        return;
+    }
+    let start = std::time::Instant::now();
+    let result =
+        check_spec_file_allow_deadlock(Path::new("test_cases/walker/cliff_guard_recursive.tla"));
+    let elapsed = start.elapsed();
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "cliff_guard_recursive.tla should pass, got: {result:?}"
+    );
+    assert!(
+        elapsed.as_secs_f64() < 1.0,
+        "a prime-free guard calling a recursive operator must still hoist; took {elapsed:?}"
+    );
+}
+
 /// A variable an action leaves unassigned is a malformed action: TLC raises a
 /// hard error, and the inference engine silently drops the successor (a false
 /// pass). The walker must fail loudly by default, and `--allow-unassigned-stutter`

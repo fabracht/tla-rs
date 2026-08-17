@@ -147,7 +147,7 @@ fn contains_prime_ref_impl(
         Expr::Var(name) => match defs.get(name) {
             Some((params, body)) if params.is_empty() => {
                 if !visited.insert(name.clone()) {
-                    return true;
+                    return false;
                 }
                 let result = contains_prime_ref_impl(body, defs, visited);
                 visited.remove(name);
@@ -278,7 +278,7 @@ fn contains_prime_ref_impl(
             match defs.get(name) {
                 Some((_, body)) => {
                     if !visited.insert(name.clone()) {
-                        return true;
+                        return false;
                     }
                     let result = contains_prime_ref_impl(body, defs, visited);
                     visited.remove(name);
@@ -304,7 +304,7 @@ fn contains_prime_ref_impl(
                         {
                             let marker: Arc<str> = Arc::from(format!("{instance_name}!{op}"));
                             if !visited.insert(marker.clone()) {
-                                return true;
+                                return false;
                             }
                             let result = contains_prime_ref_impl(body, defs, visited);
                             visited.remove(&marker);
