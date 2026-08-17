@@ -730,49 +730,46 @@ fn walk_qualified_call(
 /// If `expr` is a bare state variable, or an indexed access rooted at one,
 /// return its base name and key path — the `Init`-phase assignment target.
 fn init_target(expr: &Expr, vars: &[Arc<str>]) -> Option<(Arc<str>, Vec<Expr>)> {
-    match expr {
-        Expr::Var(name) if vars.contains(name) => Some((name.clone(), Vec::new())),
-        Expr::FnApp(f, key) => {
-            let (name, mut keys) = init_target(f, vars)?;
-            keys.push((**key).clone());
-            Some((name, keys))
-        }
-        Expr::RecordAccess(r, field) => {
-            let (name, mut keys) = init_target(r, vars)?;
-            keys.push(Expr::Lit(Value::Str(field.clone())));
-            Some((name, keys))
-        }
-        Expr::TupleAccess(t, idx) => {
-            let (name, mut keys) = init_target(t, vars)?;
-            keys.push(Expr::Lit(Value::Int(*idx as i64 + 1)));
-            Some((name, keys))
-        }
+    key_path_target(expr, &|e| match e {
+        Expr::Var(name) if vars.contains(name) => Some(name.clone()),
         _ => None,
-    }
+    })
 }
 
 /// If `expr` is a prime, or an indexed access rooted at a prime, return the base
 /// variable name and the key path (outermost first).
-fn prime_target(expr: &Expr) -> Option<(Arc<str>, Vec<Expr>)> {
+/// Unwind an (indexed) assignment target — `base`, `base[k]`, `base.f`,
+/// `base[i]` — into its root name and key path. `base_name` recognises the root
+/// for the phase (a prime for `Next`, a bare state variable for `Init`).
+fn key_path_target(
+    expr: &Expr,
+    base_name: &impl Fn(&Expr) -> Option<Arc<str>>,
+) -> Option<(Arc<str>, Vec<Expr>)> {
     match expr {
-        Expr::Prime(name) => Some((name.clone(), Vec::new())),
         Expr::FnApp(f, key) => {
-            let (name, mut keys) = prime_target(f)?;
+            let (name, mut keys) = key_path_target(f, base_name)?;
             keys.push((**key).clone());
             Some((name, keys))
         }
         Expr::RecordAccess(r, field) => {
-            let (name, mut keys) = prime_target(r)?;
+            let (name, mut keys) = key_path_target(r, base_name)?;
             keys.push(Expr::Lit(Value::Str(field.clone())));
             Some((name, keys))
         }
         Expr::TupleAccess(t, idx) => {
-            let (name, mut keys) = prime_target(t)?;
+            let (name, mut keys) = key_path_target(t, base_name)?;
             keys.push(Expr::Lit(Value::Int(*idx as i64 + 1)));
             Some((name, keys))
         }
-        _ => None,
+        other => base_name(other).map(|name| (name, Vec::new())),
     }
+}
+
+fn prime_target(expr: &Expr) -> Option<(Arc<str>, Vec<Expr>)> {
+    key_path_target(expr, &|e| match e {
+        Expr::Prime(name) => Some(name.clone()),
+        _ => None,
+    })
 }
 
 fn restore(env: &mut Env, key: &Arc<str>, prev: Option<Value>) {
