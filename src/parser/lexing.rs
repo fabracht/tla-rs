@@ -24,6 +24,10 @@ pub struct Parser {
     pub(super) quantified_temporal: Vec<(Arc<str>, Expr, Expr)>,
     pub(super) warnings: Vec<Spanned<String>>,
     pub(super) fresh_counter: u64,
+    /// Names bound by an enclosing `LET`. An operator reference whose name is in
+    /// scope here must not be inlined from the top-level definitions — the local
+    /// `LET` binding shadows it, and inlining would use the wrong (top-level) body.
+    pub(super) let_scope: Vec<Arc<str>>,
 }
 
 impl Parser {
@@ -47,6 +51,7 @@ impl Parser {
             quantified_temporal: Vec::new(),
             warnings: Vec::new(),
             fresh_counter: 0,
+            let_scope: Vec::new(),
         })
     }
 

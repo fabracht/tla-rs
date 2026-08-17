@@ -208,6 +208,33 @@ fn test_should_violate_let_operator_invariant() {
     );
 }
 
+/// A `LET`-local operator or value must shadow a same-named top-level
+/// definition. `LET G(n) == 0 IN G(x)` with a top-level `G(n) == 1000` must use
+/// the local `0`, not the top-level `1000`. The parser inlines operator
+/// applications from the top-level definitions, so it must skip a name that an
+/// enclosing `LET` binds. Covers both the parameterized and the zero-arg form.
+#[test]
+fn test_should_pass_let_shadows_toplevel() {
+    let path = Path::new("test_cases/should_pass/let_shadows_toplevel.tla");
+    assert!(
+        matches!(check_spec_file_allow_deadlock(path), CheckResult::Ok(_)),
+        "let_shadows_toplevel.tla: LET-local G/c (== 0) must shadow the top-level (== 1000)"
+    );
+}
+
+/// The other direction: a `LET`-local operator whose body *causes* a violation
+/// the top-level definition would not. `LET G(n) == 1000 IN G(x) < 50` with a
+/// top-level `G(n) == 0` must violate — if the top-level `0` were used it would
+/// be a false pass.
+#[test]
+fn test_should_violate_let_shadows_toplevel() {
+    let path = Path::new("test_cases/should_violate/let_shadows_toplevel_violation.tla");
+    assert!(
+        matches!(check_spec_file(path), CheckResult::InvariantViolation(..)),
+        "let_shadows_toplevel_violation.tla: the LET-local G (== 1000) must be used and violate"
+    );
+}
+
 /// A parameterized `LET` operator in a next-state assignment
 /// (`LET Bump(n) == n + 1 IN x' = Bump(x)`). The walker registers the operator as
 /// a definition and enumerates the successor; the inference engine cannot infer a
