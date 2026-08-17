@@ -33,7 +33,7 @@ fn substitute_bound(var: &Arc<str>, body: &Expr, subs: &[(Arc<str>, Expr)]) -> (
 pub fn apply_substitutions(module_defs: &Definitions, subs: &[(Arc<str>, Expr)]) -> Definitions {
     let mut result = BTreeMap::new();
     for (name, (params, body)) in module_defs {
-        let new_body = substitute_expr(body, subs);
+        let new_body = Arc::new(substitute_expr(body, subs));
         result.insert(name.clone(), (params.clone(), new_body));
     }
     result
@@ -723,14 +723,14 @@ mod tests {
             var("Op"),
             (
                 vec![],
-                Expr::Add(Box::new(var_expr("N")), Box::new(lit_int(1))),
+                Expr::Add(Box::new(var_expr("N")), Box::new(lit_int(1))).into(),
             ),
         );
         let subs = vec![(var("N"), lit_int(10))];
         let result = apply_substitutions(&defs, &subs);
         let (_, body) = result.get(&var("Op")).expect("Op should exist");
         assert_eq!(
-            *body,
+            **body,
             Expr::Add(Box::new(lit_int(10)), Box::new(lit_int(1)))
         );
     }

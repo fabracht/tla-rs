@@ -499,7 +499,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         .count_properties
         .iter()
         .filter_map(|name| match defs.get(name) {
-            Some((params, expr)) if params.is_empty() => Some((name.clone(), expr.clone())),
+            Some((params, expr)) if params.is_empty() => Some((name.clone(), (**expr).clone())),
             Some(_) => {
                 if !config.quiet {
                     eprintln!("  Warning: '{}' has parameters, skipping", name);
@@ -2014,7 +2014,7 @@ mod tests {
             extends: vec![],
             definitions: BTreeMap::from([(
                 Arc::from("Action"),
-                (vec![], eq(prime_expr("x"), var_expr("x"))),
+                (vec![], Arc::new(eq(prime_expr("x"), var_expr("x")))),
             )]),
             assumes: vec![],
             instances: vec![],
@@ -2054,10 +2054,10 @@ mod tests {
                 Arc::from("Action"),
                 (
                     vec![],
-                    and(
+                    Arc::new(and(
                         eq(var_expr("x"), lit_int(0)),
                         eq(prime_expr("x"), lit_int(1)),
-                    ),
+                    )),
                 ),
             )]),
             assumes: vec![],

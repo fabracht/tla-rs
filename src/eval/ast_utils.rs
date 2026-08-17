@@ -72,7 +72,7 @@ pub(crate) fn parameterized_let_op(binding: &Expr) -> Option<(Vec<Arc<str>>, &Ex
 
 fn match_def_body(expr: &Expr, defs: &Definitions) -> Option<Arc<str>> {
     for (name, (params, body)) in defs {
-        if params.is_empty() && body == expr {
+        if params.is_empty() && body.as_ref() == expr {
             return Some(name.clone());
         }
     }
@@ -100,7 +100,7 @@ pub(crate) fn infer_name_from_let_chain(expr: &Expr, defs: &Definitions) -> Opti
         depth += 1;
     }
     for (name, (params, body)) in defs {
-        if params.len() == depth && body == inner {
+        if params.len() == depth && body.as_ref() == inner {
             return Some(name.clone());
         }
     }
@@ -496,7 +496,7 @@ mod prime_ref_tests {
             .map(|(n, ps, body)| {
                 (
                     Arc::from(n),
-                    (ps.into_iter().map(Arc::from).collect(), body),
+                    (ps.into_iter().map(Arc::from).collect(), Arc::new(body)),
                 )
             })
             .collect()

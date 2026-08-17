@@ -342,7 +342,7 @@ fn walk(
         Expr::Let(name, binding, body) => {
             if let Some((params, op_body)) = parameterized_let_op(binding) {
                 let mut merged = ctx.defs.clone();
-                merged.insert(name.clone(), (params, op_body.clone()));
+                merged.insert(name.clone(), (params, Arc::new(op_body.clone())));
                 let sub_ctx = WalkCtx {
                     vars: ctx.vars,
                     state_keys: ctx.state_keys,
@@ -664,7 +664,7 @@ fn walk_qualified_call(
 ) -> Result<()> {
     use super::global_state::{PARAMETERIZED_INSTANCES, RESOLVED_INSTANCES};
 
-    let resolved: Option<(Definitions, Vec<Arc<str>>, Expr)> = match instance_expr {
+    let resolved: Option<(Definitions, Vec<Arc<str>>, Arc<Expr>)> = match instance_expr {
         Expr::Var(instance_name) => RESOLVED_INSTANCES.with(|r| {
             let instances = r.borrow();
             let instance_defs = instances.get(instance_name)?;

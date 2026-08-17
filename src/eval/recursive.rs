@@ -61,7 +61,7 @@ pub(crate) fn eval_with_memo(
                 }
                 if let Some((params, fn_body)) = defs.get(name)
                     && params.is_empty()
-                    && let Expr::FnDef(p, _, body) = fn_body
+                    && let Expr::FnDef(p, _, body) = fn_body.as_ref()
                 {
                     let prev_p = env.insert(p.clone(), av.clone());
                     let result =
@@ -85,7 +85,7 @@ pub(crate) fn eval_with_memo(
 
         Expr::Let(var, binding, body) => {
             let mut local_defs = defs.clone();
-            local_defs.insert(var.clone(), (vec![], (**binding).clone()));
+            local_defs.insert(var.clone(), (vec![], Arc::new((**binding).clone())));
             eval_with_memo(body, env, &local_defs, fn_name, fn_param, fn_domain, memo)
         }
 

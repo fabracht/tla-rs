@@ -1340,7 +1340,7 @@ fn test_pingpong_action_labels_not_unnamed() {
         .get(&Arc::from("NotFinished") as &str)
         .expect("NotFinished should be defined")
         .clone();
-    spec.invariants = vec![not_finished.1];
+    spec.invariants = vec![(*not_finished.1).clone()];
     spec.invariant_names = vec![Some(Arc::from("NotFinished"))];
 
     let mut config = CheckerConfig {

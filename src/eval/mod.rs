@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use crate::ast::Expr;
 
-pub type Definitions = BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>;
+pub type Definitions = crate::ast::DefinitionMap;
 pub type ResolvedInstances = BTreeMap<Arc<str>, Definitions>;
 
 #[derive(Debug, Clone)]
@@ -489,7 +489,7 @@ mod tests {
         let mut d = defs();
         d.insert(
             var("Double"),
-            (vec![var("n")], add(var_expr("n"), var_expr("n"))),
+            (vec![var("n")], add(var_expr("n"), var_expr("n")).into()),
         );
         let mut env = Env::new();
         let expr = Expr::FnCall(var("Double"), vec![lit_int(5)]);
