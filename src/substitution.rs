@@ -4,6 +4,20 @@ use std::sync::Arc;
 use crate::ast::Expr;
 use crate::eval::{Definitions, expr_references};
 
+/// A `$`-suffixed name derived from `base` that no `clashes` predicate rejects.
+/// The `$` cannot appear in a source identifier, so a name that also avoids every
+/// caller-supplied clash source is guaranteed fresh in scope.
+fn fresh_name(base: &Arc<str>, clashes: impl Fn(&Arc<str>) -> bool) -> Arc<str> {
+    let mut i = 0u64;
+    loop {
+        let cand: Arc<str> = Arc::from(format!("{base}${i}"));
+        if !clashes(&cand) {
+            return cand;
+        }
+        i += 1;
+    }
+}
+
 /// Substitute into the body of a binder that binds `var`, avoiding capture.
 /// `subs` must already exclude any substitution of `var` itself. If `var` occurs
 /// free in a replacement, binding it here would capture that occurrence (`{c \in S
@@ -14,18 +28,12 @@ fn substitute_bound(var: &Arc<str>, body: &Expr, subs: &[(Arc<str>, Expr)]) -> (
     if !subs.iter().any(|(_, repl)| expr_references(repl, var)) {
         return (var.clone(), substitute_expr(body, subs));
     }
-    let mut i = 0u64;
-    let fresh = loop {
-        let cand: Arc<str> = Arc::from(format!("{var}${i}"));
-        let clashes = expr_references(body, &cand)
+    let fresh = fresh_name(var, |cand| {
+        expr_references(body, cand)
             || subs
                 .iter()
-                .any(|(p, r)| *p == cand || expr_references(r, &cand));
-        if !clashes {
-            break cand;
-        }
-        i += 1;
-    };
+                .any(|(p, r)| p == cand || expr_references(r, cand))
+    });
     let renamed = substitute_expr(body, &[(var.clone(), Expr::Var(fresh.clone()))]);
     (fresh, substitute_expr(&renamed, subs))
 }
@@ -411,19 +419,13 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
             let mut new_params: Vec<Arc<str>> = Vec::with_capacity(params.len());
             for prm in params {
                 if filtered_subs.iter().any(|(_, r)| expr_references(r, prm)) {
-                    let mut i = 0u64;
-                    let fresh = loop {
-                        let cand: Arc<str> = Arc::from(format!("{prm}${i}"));
-                        let clashes = expr_references(body, &cand)
-                            || new_params.contains(&cand)
+                    let fresh = fresh_name(prm, |cand| {
+                        expr_references(body, cand)
+                            || new_params.contains(cand)
                             || filtered_subs
                                 .iter()
-                                .any(|(p, r)| *p == cand || expr_references(r, &cand));
-                        if !clashes {
-                            break cand;
-                        }
-                        i += 1;
-                    };
+                                .any(|(p, r)| p == cand || expr_references(r, cand))
+                    });
                     renames.push((prm.clone(), Expr::Var(fresh.clone())));
                     new_params.push(fresh);
                 } else {
