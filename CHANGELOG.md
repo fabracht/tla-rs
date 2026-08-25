@@ -8,6 +8,8 @@
 
 - A variable that an action leaves unassigned is now a reported error naming the variable and the action, matching TLC ("The variable x was not assigned a value"). Previously such a successor was silently dropped: `Next == (x' = 1 - x) \/ UNCHANGED <<x, y>>` where the first disjunct forgets `y'` explored only the stutters of the second disjunct and reported a clean run, hiding that the intended action is malformed — a false pass. Pass `--allow-unassigned-stutter` to recover the old lenient behaviour, which treats an unassigned variable as an implicit `UNCHANGED` of that variable.
 
+- Conjuncts of an `Init` or next-state predicate are now evaluated in order, so a guard that reads a variable before the conjunct that assigns it is an error, matching TLC ("the identifier x is undefined"). `Init == x > 0 /\ x \in 1..3` must be written `x \in 1..3 /\ x > 0`. The previous candidate-inference engine was order-insensitive and accepted the guard-first form; specs that relied on that now report the undefined variable instead. Writing the assignment (`x = e` / `x \in S`, or a primed assignment in `Next`) before any guard that reads the variable works unchanged.
+
 ### Added
 
 - `--allow-unassigned-stutter` treats a variable an action leaves unassigned as `UNCHANGED` instead of raising an error.
