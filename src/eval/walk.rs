@@ -6,8 +6,10 @@
 //! successor state. A primed variable is *bound* at the conjunct that assigns
 //! it; `\/`, `\E`, `\in`, `IF`/`CASE` branch the recursion; a successor is
 //! emitted only when the whole relation has been discharged with every variable
-//! assigned. Dependencies like `b' = a' + 10` need no analysis: `a'` is already
-//! bound when `b'`'s conjunct is reached.
+//! assigned. Dependencies like `b' = a' + 10` need no analysis when the assigning
+//! conjunct precedes the dependent one: `a'` is already bound when `b'`'s conjunct
+//! is reached. Conjuncts are evaluated in source order, as in TLC, so a read of a
+//! variable before the conjunct that assigns it is an error, not a reordering.
 //!
 //! The default engine; the legacy candidate-inference engine remains available
 //! for one release as an escape hatch (`TLA_ENGINE=inference`).
@@ -611,11 +613,30 @@ fn assign_or_constrain(
                 r
             }
             Some(existing) => {
-                if existing == rhs_val {
-                    advance(cont, env, ctx, run)
-                } else {
-                    Ok(())
+                let indexed: Vec<Vec<Value>> = run
+                    .assigned_paths
+                    .iter()
+                    .filter(|(k, _)| *k == key)
+                    .map(|(_, p)| p.clone())
+                    .collect();
+                if run.fully_assigned.contains(&key) || indexed.is_empty() {
+                    return if existing == rhs_val {
+                        advance(cont, env, ctx, run)
+                    } else {
+                        Ok(())
+                    };
                 }
+                for path in &indexed {
+                    if get_nested(&existing, path)? != get_nested(&rhs_val, path)? {
+                        return Ok(());
+                    }
+                }
+                let prev = env.insert(key.clone(), rhs_val);
+                run.fully_assigned.push(key.clone());
+                let r = advance(cont, env, ctx, run);
+                run.fully_assigned.pop();
+                restore(env, &key, prev);
+                r
             }
         }
     } else {

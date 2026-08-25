@@ -498,6 +498,40 @@ fn test_equality_binds_unbound_prime() {
     }
 }
 
+/// An indexed assignment followed by a whole-variable assignment to the same
+/// variable — `f'[1] = 5 /\ f' = g` — must let the whole assignment be
+/// authoritative: `f' = g` (when `g[1] = 5`), not the partial value the indexed
+/// assignment built from the current state. Building `f'` from the pre-state and
+/// then rejecting the whole assignment as a mismatched constraint drops a valid
+/// successor — a false pass. Both engines must reach the violating `<<5, 9>>`.
+#[test]
+fn test_indexed_then_whole_assignment_is_authoritative() {
+    let path = Path::new("test_cases/should_violate/indexed_then_whole_assignment.tla");
+    assert!(
+        matches!(
+            check_spec_file_allow_deadlock(path),
+            CheckResult::InvariantViolation(..)
+        ),
+        "f'[1] = 5 /\\ f' = g must reach f' = g, not silently drop the successor"
+    );
+}
+
+/// A second whole assignment after an indexed-then-whole override must be a full
+/// equality constraint, not a partial path check: `f'[1] = 5 /\ f' = g /\ f' = h`
+/// with `g # h` is unsatisfiable (no `f'` equals both), so TLC yields no successor
+/// and the invariant holds. Once the first whole assignment makes `f'` authoritative
+/// the walker must compare the second whole value in full, not merely at the earlier
+/// indexed path — otherwise it emits a phantom successor and reports a spurious
+/// violation. Both engines must find no violation.
+#[test]
+fn test_double_whole_after_indexed_is_full_equality() {
+    let path = Path::new("test_cases/should_pass/double_whole_after_indexed.tla");
+    assert!(
+        matches!(check_spec_file_allow_deadlock(path), CheckResult::Ok(_)),
+        "f' = g /\\ f' = h with g # h must yield no successor, not a phantom state"
+    );
+}
+
 /// An indexed constraint on a whole-assigned variable whose index is outside the
 /// value's domain — `f' = g /\ f'[k] = v` with `k` not in `DOMAIN g` — is an
 /// out-of-domain application, which must be reported, not silently pruned as an
