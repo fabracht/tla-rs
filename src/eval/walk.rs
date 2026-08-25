@@ -519,10 +519,20 @@ fn walk_eq(
     ctx: &WalkCtx<'_>,
     run: &mut Run<'_>,
 ) -> Result<()> {
-    if let Some((name, keys)) = ctx.assign_target(l) {
+    let lt = ctx.assign_target(l);
+    let rt = ctx.assign_target(r);
+    let unbound_whole = |t: &Option<(Arc<str>, Vec<Expr>)>| matches!(t, Some((n, k)) if k.is_empty() && env.get(&ctx.key_for(n)).is_none());
+    if !unbound_whole(&lt)
+        && let Some((name, keys)) = &rt
+        && keys.is_empty()
+        && env.get(&ctx.key_for(name)).is_none()
+    {
+        return assign_or_constrain(name, keys, l, cont, env, ctx, run);
+    }
+    if let Some((name, keys)) = lt {
         return assign_or_constrain(&name, &keys, r, cont, env, ctx, run);
     }
-    if let Some((name, keys)) = ctx.assign_target(r) {
+    if let Some((name, keys)) = rt {
         return assign_or_constrain(&name, &keys, l, cont, env, ctx, run);
     }
     walk_bool(node, cont, env, ctx, run)
@@ -620,11 +630,11 @@ fn assign_or_constrain(
                 .iter()
                 .any(|(k, p)| *k == key && *p == key_vals);
         if already_assigned {
-            let matches = env
-                .get(&key)
-                .and_then(|v| get_nested(v, &key_vals).ok())
-                .is_some_and(|existing| existing == rhs_val);
-            return if matches {
+            let current = match env.get(&key) {
+                Some(v) => get_nested(v, &key_vals)?,
+                None => return Ok(()),
+            };
+            return if current == rhs_val {
                 advance(cont, env, ctx, run)
             } else {
                 Ok(())

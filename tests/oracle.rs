@@ -482,6 +482,38 @@ fn test_membership_in_invariant_uses_shared_dispatch() {
     );
 }
 
+/// An equality between two primed variables assigns whichever side is unbound.
+/// `x' = 1 /\ x' = y'` binds `x'` first, then `x' = y'` must bind `y'` to `x'`
+/// (`= 1`), not evaluate the unbound `y'` as a constraint. Both engines and TLC
+/// reach the successor `(1, 1)`, so the run has two states.
+#[test]
+fn test_equality_binds_unbound_prime() {
+    let path = Path::new("test_cases/should_pass/equality_binds_unbound_prime.tla");
+    match check_spec_file_allow_deadlock(path) {
+        CheckResult::Ok(stats) => assert_eq!(
+            stats.states_explored, 2,
+            "x' = 1 /\\ x' = y' must bind y' and reach (1, 1)"
+        ),
+        other => panic!("equality_binds_unbound_prime.tla should pass, got: {other:?}"),
+    }
+}
+
+/// An indexed constraint on a whole-assigned variable whose index is outside the
+/// value's domain — `f' = g /\ f'[k] = v` with `k` not in `DOMAIN g` — is an
+/// out-of-domain application, which must be reported, not silently pruned as an
+/// unsatisfiable constraint (a swallowed modeling error).
+#[test]
+fn test_indexed_out_of_domain_is_an_error() {
+    let path = Path::new("test_cases/should_error/indexed_out_of_domain.tla");
+    assert!(
+        matches!(
+            check_spec_file_allow_deadlock(path),
+            CheckResult::NextError(..)
+        ),
+        "f'[5] with 5 not in the domain must be reported, not silently dropped"
+    );
+}
+
 #[test]
 fn test_next_from_non_enumerable_set_is_an_error() {
     let path = Path::new("test_cases/should_error/next_not_enumerable.tla");
