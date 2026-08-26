@@ -29,7 +29,7 @@ pub(crate) fn expand_unchanged_vars(vars: &[Arc<str>], defs: &Definitions) -> Ve
     for var in vars {
         if let Some((params, body)) = defs.get(var)
             && params.is_empty()
-            && let Expr::TupleLit(elems) = body
+            && let Expr::TupleLit(elems) = body.as_ref()
             && elems.iter().all(|e| matches!(e, Expr::Var(_)))
         {
             for elem in elems {
@@ -1342,9 +1342,14 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Let(var, binding, body) => {
+            if let Some((params, op_body)) = super::ast_utils::parameterized_let_op(binding) {
+                let mut local_defs = defs.clone();
+                local_defs.insert(var.clone(), (params, Arc::new(op_body.clone())));
+                return eval(body, env, &local_defs);
+            }
             if let Expr::FnDef(param, domain_expr, fn_body) = binding.as_ref() {
                 let mut local_defs = defs.clone();
-                local_defs.insert(var.clone(), (vec![], (**binding).clone()));
+                local_defs.insert(var.clone(), (vec![], Arc::new((**binding).clone())));
                 let dom = eval_set(domain_expr, env, &local_defs)?;
                 let dom_vec: Vec<_> = dom.into_iter().collect();
                 let fn_result =

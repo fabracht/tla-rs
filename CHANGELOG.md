@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.8.0] - 2026-08-13
+
+### Changed
+
+- State generation now uses a continuation-passing walker over the next-state relation, replacing the candidate-inference engine. The old engine inferred a set of candidate values per primed variable and filtered their cross product, which can only ever *reject* a successor — so any shortfall in the inference produced too few successors and a silent false pass. Concretely, the walker reaches successors the old engine dropped: a primed variable whose value depends on another primed variable (`a' \in S /\ b' = a' + 10`), on an operator argument, or on an `IF`/`CASE`; initial states reached only through `\E`/`IF`/`LET`; and it attributes every transition to the action that produced it, including actions quantified as `\E rm \in RM : A(rm) \/ B(rm)` (the old engine could reach these states but is needed for fairness/liveness to know which action fired). On the corpus the walker also runs faster (TwoPhase 5RM ~0.35s vs ~0.54s). Pass `TLA_ENGINE=inference` to select the previous engine for one release; it will be removed after that.
+
+- A variable that an action leaves unassigned is now a reported error naming the variable and the action, matching TLC ("The variable x was not assigned a value"). Previously such a successor was silently dropped: `Next == (x' = 1 - x) \/ UNCHANGED <<x, y>>` where the first disjunct forgets `y'` explored only the stutters of the second disjunct and reported a clean run, hiding that the intended action is malformed — a false pass. Pass `--allow-unassigned-stutter` to recover the old lenient behaviour, which treats an unassigned variable as an implicit `UNCHANGED` of that variable.
+
+- Conjuncts of an `Init` or next-state predicate are now evaluated in order, so a guard that reads a variable before the conjunct that assigns it is an error, matching TLC ("the identifier x is undefined"). `Init == x > 0 /\ x \in 1..3` must be written `x \in 1..3 /\ x > 0`. The previous candidate-inference engine was order-insensitive and accepted the guard-first form; specs that relied on that now report the undefined variable instead. Writing the assignment (`x = e` / `x \in S`, or a primed assignment in `Next`) before any guard that reads the variable works unchanged.
+
+- Operator definition bodies are shared via `Arc`, so resolving a parameterized `LET` or an instance operator no longer deep-clones the whole definition map per call — an ~18-42x speedup on specs with a large definition set and many such calls per state.
+
+### Fixed
+
+- A `LET`-local definition now shadows a same-named top-level operator, as TLA+ lexical scoping requires. `LET G(n) == 0 IN G(x)` with a top-level `G(n) == 1000` previously used the top-level `1000` on both engines — the parser inlined operator applications from the top-level definitions without tracking `LET` scope, a silent wrong result (spurious violation or false pass). The zero-argument form (`LET c == 0` over a top-level `c`) was affected too.
+
+- A parameterized `LET` operator (`LET F(x) == body IN ... F(...)`) now resolves. The parser encoded it as a marker that no evaluator consumed, so both engines errored with an undefined variable. It resolves in invariants and guards on both engines; the walker additionally enumerates it in a next-state assignment (`x' = F(x)`), which the inference engine cannot.
+
+- Substitution is capture-avoiding. Substituting an argument whose name collides with a bound variable inside the target (`Op(c)` where the body binds `c`, as in `{c \in S : c # author}`) no longer captures it into `c # c`. This affected operator inlining in the walker and `WITH` substitutions in module instantiation; a bound variable is now alpha-renamed when a replacement would capture it.
+
+- An equality between two primed variables assigns whichever side is unbound. `x' = 1 /\ x' = y'` binds `y' := 1` and reaches the successor instead of evaluating the still-unbound `y'` as a constraint and aborting.
+
+- An indexed next-state constraint whose index is outside the value's domain — `f' = g /\ f'[k] = v` with `k` not in `DOMAIN g` — is reported as an out-of-domain access, not silently pruned as an unsatisfiable constraint.
+
+### Added
+
+- `--allow-unassigned-stutter` treats a variable an action leaves unassigned as `UNCHANGED` instead of raising an error.
+
+- `TLA_ENGINE=inference` selects the previous candidate-inference engine for one release.
+
 ## [0.7.0] - 2026-08-03
 
 ### Fixed

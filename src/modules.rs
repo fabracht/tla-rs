@@ -223,14 +223,14 @@ mod tests {
             var("Op"),
             (
                 vec![],
-                Expr::Add(Box::new(var_expr("N")), Box::new(lit_int(1))),
+                Expr::Add(Box::new(var_expr("N")), Box::new(lit_int(1))).into(),
             ),
         );
         module_defs.insert(
             var("Helper"),
             (
                 vec![var("x")],
-                Expr::Mul(Box::new(var_expr("x")), Box::new(var_expr("N"))),
+                Expr::Mul(Box::new(var_expr("x")), Box::new(var_expr("N"))).into(),
             ),
         );
 
@@ -288,13 +288,13 @@ mod tests {
         let s_defs = resolved.get(&Arc::from("S") as &Arc<str>).unwrap();
         let (_, op_body) = s_defs.get(&var("Op")).unwrap();
         assert_eq!(
-            *op_body,
+            **op_body,
             Expr::Add(Box::new(lit_int(5)), Box::new(lit_int(1)))
         );
         let (params, helper_body) = s_defs.get(&var("Helper")).unwrap();
         assert_eq!(params, &vec![var("x")]);
         assert_eq!(
-            *helper_body,
+            **helper_body,
             Expr::Mul(Box::new(var_expr("x")), Box::new(lit_int(5)))
         );
 

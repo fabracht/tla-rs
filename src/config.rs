@@ -265,11 +265,7 @@ fn collect_model_values(val: &Value, out: &mut Vec<Arc<str>>) {
     }
 }
 
-pub fn bind_model_value_names(
-    domains: &mut Env,
-    spec: &Spec,
-    defs: &BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>,
-) {
+pub fn bind_model_value_names(domains: &mut Env, spec: &Spec, defs: &crate::ast::DefinitionMap) {
     let mut names = Vec::new();
     for (_, val) in domains.iter() {
         collect_model_values(val, &mut names);
@@ -653,7 +649,7 @@ pub fn apply_config(
     if let Some(ref init_name) = cfg.init {
         match spec.definitions.get(init_name.as_ref()) {
             Some((params, expr)) if params.is_empty() => {
-                spec.init = Some(expr.clone());
+                spec.init = Some((**expr).clone());
             }
             Some(_) => {
                 return Err(format!(
@@ -670,7 +666,7 @@ pub fn apply_config(
     if let Some(ref next_name) = cfg.next {
         match spec.definitions.get(next_name.as_ref()) {
             Some((params, expr)) if params.is_empty() => {
-                spec.next = Some(expr.clone());
+                spec.next = Some((**expr).clone());
             }
             Some(_) => {
                 return Err(format!(
@@ -695,7 +691,7 @@ pub fn apply_config(
         for inv_name in &cfg.invariants {
             match spec.definitions.get(inv_name.as_ref()) {
                 Some((params, expr)) if params.is_empty() => {
-                    new_invariants.push(expr.clone());
+                    new_invariants.push((**expr).clone());
                     new_names.push(Some(inv_name.clone()));
                 }
                 Some(_) => {
@@ -720,7 +716,7 @@ pub fn apply_config(
         for prop_name in &cfg.properties {
             match spec.definitions.get(prop_name.as_ref()) {
                 Some((params, expr)) if params.is_empty() => {
-                    let expr = expr.clone();
+                    let expr = (**expr).clone();
                     if crate::ast::expr_contains_temporal(&expr) {
                         if !parser_pre_extracts_temporal(prop_name) {
                             warnings.extend(spec.extract_fairness_and_liveness(&expr));
@@ -750,15 +746,15 @@ pub fn apply_config(
         && cli_symmetry.is_empty()
     {
         if let Some((_params, expr)) = spec.definitions.get(sym_name.as_ref()) {
-            if let Expr::FnCall(const_name, _) = expr {
+            if let Expr::FnCall(const_name, _) = expr.as_ref() {
                 checker_config.symmetric_constants.push(const_name.clone());
-            } else if let Expr::Permutations(inner) = expr {
+            } else if let Expr::Permutations(inner) = expr.as_ref() {
                 if let Expr::Var(const_name) = inner.as_ref() {
                     checker_config.symmetric_constants.push(const_name.clone());
                 } else {
                     checker_config.symmetric_constants.push(sym_name.clone());
                 }
-            } else if let Expr::Var(const_name) = expr {
+            } else if let Expr::Var(const_name) = expr.as_ref() {
                 checker_config.symmetric_constants.push(const_name.clone());
             } else {
                 checker_config.symmetric_constants.push(sym_name.clone());
@@ -777,7 +773,7 @@ pub fn apply_config(
     for c in &cfg.constraints {
         match spec.definitions.get(c.as_ref()) {
             Some((params, expr)) if params.is_empty() => {
-                checker_config.state_constraints.push(expr.clone());
+                checker_config.state_constraints.push((**expr).clone());
             }
             Some(_) => {
                 return Err(format!(
@@ -1250,7 +1246,7 @@ mod tests {
             Arc::from("Perms"),
             (
                 vec![],
-                Expr::Permutations(Box::new(Expr::Var(Arc::from("RM")))),
+                Expr::Permutations(Box::new(Expr::Var(Arc::from("RM")))).into(),
             ),
         );
 
@@ -1296,7 +1292,7 @@ mod tests {
         );
         spec.definitions.insert(
             Arc::from("Eventually1"),
-            (vec![], Expr::Eventually(Box::new(inner.clone()))),
+            (vec![], Expr::Eventually(Box::new(inner.clone())).into()),
         );
 
         let cfg = parse_cfg("PROPERTY Eventually1").unwrap();
@@ -1350,7 +1346,7 @@ mod tests {
         ));
         spec.definitions.insert(
             Arc::from("Leads"),
-            (vec![], Expr::LeadsTo(p.clone(), q.clone())),
+            (vec![], Expr::LeadsTo(p.clone(), q.clone()).into()),
         );
 
         let cfg = parse_cfg("PROPERTY Leads").unwrap();
@@ -1397,7 +1393,7 @@ mod tests {
             Box::new(Expr::BoxAction(Box::new(next_expr.clone()), Arc::from("x"))),
         );
         spec.definitions
-            .insert(Arc::from("Spec"), (vec![], spec_body));
+            .insert(Arc::from("Spec"), (vec![], spec_body.into()));
 
         let cfg = parse_cfg("SPECIFICATION Spec").unwrap();
         let mut domains = Env::new();
@@ -1462,7 +1458,7 @@ mod tests {
             )),
         );
         spec.definitions
-            .insert(Arc::from("Spec"), (vec![], spec_body));
+            .insert(Arc::from("Spec"), (vec![], spec_body.into()));
 
         let cfg = parse_cfg("SPECIFICATION Spec").unwrap();
         let mut domains = Env::new();
@@ -1502,8 +1498,10 @@ mod tests {
             constants: vec![],
         };
 
-        spec.definitions
-            .insert(Arc::from("Spec"), (vec![], Expr::Var(Arc::from("Init"))));
+        spec.definitions.insert(
+            Arc::from("Spec"),
+            (vec![], Expr::Var(Arc::from("Init")).into()),
+        );
 
         let cfg = parse_cfg("SPECIFICATION Spec").unwrap();
         let mut domains = Env::new();

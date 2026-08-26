@@ -23,8 +23,11 @@ pub fn init_states(
     #[cfg(feature = "profiling")]
     let _start = Instant::now();
 
-    let mut results = Vec::new();
     let mut initial_env = domains.clone();
+    if super::walk::walk_enabled() {
+        return super::walk::walk_init(init, &mut initial_env, vars, defs);
+    }
+    let mut results = Vec::new();
     enumerate_init(init, &mut initial_env, vars, 0, domains, defs, &mut results)?;
 
     #[cfg(feature = "profiling")]

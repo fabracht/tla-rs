@@ -229,9 +229,13 @@ impl Parser {
             }
         }
 
-        let mut all_defs = self.fn_definitions.clone();
+        let mut all_defs: crate::eval::Definitions = self
+            .fn_definitions
+            .iter()
+            .map(|(name, (params, body))| (name.clone(), (params.clone(), Arc::new(body.clone()))))
+            .collect();
         for (name, expr) in &self.definitions {
-            all_defs.insert(name.clone(), (vec![], expr.clone()));
+            all_defs.insert(name.clone(), (vec![], std::sync::Arc::new(expr.clone())));
         }
 
         Ok(Spec {

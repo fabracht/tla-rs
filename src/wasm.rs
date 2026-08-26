@@ -430,6 +430,17 @@ fn result_to_wasm(
             format!("Assume {} error: {}", idx, format_eval_error(&e)),
             warnings,
         ),
+        CheckResult::PrepareError(PrepareSpecError::NonModelValueSymmetry(name, values)) => {
+            WasmCheckResult::err(
+                "NonModelValueSymmetry",
+                format!(
+                    "Symmetry set {} contains non-model values: {}",
+                    name,
+                    values.join(", ")
+                ),
+                warnings,
+            )
+        }
     }
 }
 

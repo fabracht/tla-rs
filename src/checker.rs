@@ -48,6 +48,8 @@ pub struct CheckerConfig {
     #[cfg(not(target_arch = "wasm32"))]
     pub trace_json_path: Option<PathBuf>,
     pub state_constraints: Vec<Expr>,
+    pub allow_unassigned_stutter: bool,
+    pub use_inference_engine: bool,
 }
 
 impl Default for CheckerConfig {
@@ -73,6 +75,8 @@ impl Default for CheckerConfig {
             #[cfg(not(target_arch = "wasm32"))]
             trace_json_path: None,
             state_constraints: Vec::new(),
+            allow_unassigned_stutter: false,
+            use_inference_engine: false,
         }
     }
 }
@@ -337,6 +341,8 @@ pub fn prepare_spec(
 }
 
 pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult {
+    crate::eval::set_use_inference_engine(config.use_inference_engine);
+    crate::eval::set_allow_unassigned_stutter(config.allow_unassigned_stutter);
     #[cfg(not(target_arch = "wasm32"))]
     let prep = prepare_spec(spec, domains, config.spec_path.as_ref(), config.quiet);
     #[cfg(target_arch = "wasm32")]
@@ -493,7 +499,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         .count_properties
         .iter()
         .filter_map(|name| match defs.get(name) {
-            Some((params, expr)) if params.is_empty() => Some((name.clone(), expr.clone())),
+            Some((params, expr)) if params.is_empty() => Some((name.clone(), (**expr).clone())),
             Some(_) => {
                 if !config.quiet {
                     eprintln!("  Warning: '{}' has parameters, skipping", name);
@@ -2008,7 +2014,7 @@ mod tests {
             extends: vec![],
             definitions: BTreeMap::from([(
                 Arc::from("Action"),
-                (vec![], eq(prime_expr("x"), var_expr("x"))),
+                (vec![], Arc::new(eq(prime_expr("x"), var_expr("x")))),
             )]),
             assumes: vec![],
             instances: vec![],
@@ -2048,10 +2054,10 @@ mod tests {
                 Arc::from("Action"),
                 (
                     vec![],
-                    and(
+                    Arc::new(and(
                         eq(var_expr("x"), lit_int(0)),
                         eq(prime_expr("x"), lit_int(1)),
-                    ),
+                    )),
                 ),
             )]),
             assumes: vec![],

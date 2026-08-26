@@ -68,12 +68,61 @@ pub(crate) fn next_states_impl(
     primed_vars: &[Arc<str>],
     defs: &Definitions,
 ) -> Result<Vec<Transition>> {
+    let results = next_states_dispatch(next, base_env, vars, primed_vars, defs)?;
+    #[cfg(debug_assertions)]
+    debug_assert_successors_satisfy_next(next, base_env, primed_vars, defs, &results);
+    Ok(results)
+}
+
+/// In debug builds, every emitted successor must actually satisfy the next-state
+/// relation: binding its primed values into the current state and evaluating
+/// `Next` must yield `true`. This catches an engine fabricating a successor the
+/// relation forbids — the failure mode that turns a real violation into a false
+/// pass or a bogus counterexample. Compiled out of release builds.
+#[cfg(debug_assertions)]
+fn debug_assert_successors_satisfy_next(
+    next: &Expr,
+    base_env: &mut Env,
+    primed_vars: &[Arc<str>],
+    defs: &Definitions,
+    results: &[Transition],
+) {
+    for transition in results {
+        for (i, primed) in primed_vars.iter().enumerate() {
+            if let Some(val) = transition.state.values.get(i) {
+                base_env.insert(primed.clone(), val.clone());
+            }
+        }
+        let holds = eval_bool(next, base_env, defs);
+        for primed in primed_vars {
+            base_env.remove(primed);
+        }
+        debug_assert!(
+            matches!(holds, Ok(true)),
+            "engine emitted a successor that does not satisfy Next: {:?} (eval = {holds:?})",
+            transition.state.values
+        );
+    }
+}
+
+fn next_states_dispatch(
+    next: &Expr,
+    base_env: &mut Env,
+    vars: &[Arc<str>],
+    primed_vars: &[Arc<str>],
+    defs: &Definitions,
+) -> Result<Vec<Transition>> {
     let ctx = EnumCtx {
         vars,
         primed_vars,
         defs,
     };
     let effective = resolve_next(next, defs);
+
+    if super::walk::walk_enabled() {
+        return walk_next_states(effective, base_env, &ctx);
+    }
+
     if let Expr::Exists(_, _, _) = effective {
         let action = infer_action_name(effective, defs);
         let mut all_results = indexmap::IndexSet::new();
@@ -109,6 +158,29 @@ pub(crate) fn next_states_impl(
     let mut results = Vec::new();
     enumerate_next(effective, base_env, &ctx, action, &mut results)?;
     Ok(results)
+}
+
+/// Walker engine: split the relation into labelled top-level
+/// disjuncts for action attribution, then walk each one. The walker handles all
+/// nested structure (`\E`, `\/`, `\in`, IF/CASE, dependent assignments) itself.
+fn walk_next_states(effective: &Expr, env: &mut Env, ctx: &EnumCtx<'_>) -> Result<Vec<Transition>> {
+    use super::walk::{Phase, WalkCtx, walk_next};
+    let wctx = WalkCtx {
+        vars: ctx.vars,
+        state_keys: ctx.primed_vars,
+        defs: ctx.defs,
+        phase: Phase::Next,
+        require_total: true,
+    };
+    let mut all = indexmap::IndexSet::new();
+    for (disjunct, action) in collect_disjuncts_with_labels(effective, ctx.defs) {
+        let mut results = Vec::new();
+        walk_next(disjunct, env, &wctx, action, &mut results)?;
+        for transition in results {
+            all.insert(transition);
+        }
+    }
+    Ok(all.into_iter().collect())
 }
 
 fn resolve_next<'a>(expr: &'a Expr, defs: &'a Definitions) -> &'a Expr {

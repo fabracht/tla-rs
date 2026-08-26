@@ -50,9 +50,29 @@ pub(crate) fn format_expr_brief(expr: &Expr) -> String {
     }
 }
 
+/// A parameterized `LET F(p1, ..) == body` operator, which the parser encodes as
+/// `Let("_params", TupleLit([p1, ..]), body)`. Returns its parameter names and
+/// body so a caller can register it as a definition; `None` for a plain LET value.
+pub(crate) fn parameterized_let_op(binding: &Expr) -> Option<(Vec<Arc<str>>, &Expr)> {
+    if let Expr::Let(marker, params_tuple, body) = binding
+        && marker.as_ref() == "_params"
+        && let Expr::TupleLit(param_exprs) = params_tuple.as_ref()
+    {
+        let params: Option<Vec<Arc<str>>> = param_exprs
+            .iter()
+            .map(|e| match e {
+                Expr::Var(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect();
+        return params.map(|p| (p, body.as_ref()));
+    }
+    None
+}
+
 fn match_def_body(expr: &Expr, defs: &Definitions) -> Option<Arc<str>> {
     for (name, (params, body)) in defs {
-        if params.is_empty() && body == expr {
+        if params.is_empty() && body.as_ref() == expr {
             return Some(name.clone());
         }
     }
@@ -80,7 +100,7 @@ pub(crate) fn infer_name_from_let_chain(expr: &Expr, defs: &Definitions) -> Opti
         depth += 1;
     }
     for (name, (params, body)) in defs {
-        if params.len() == depth && body == inner {
+        if params.len() == depth && body.as_ref() == inner {
             return Some(name.clone());
         }
     }
@@ -124,8 +144,18 @@ fn contains_prime_ref_impl(
 ) -> bool {
     match expr {
         Expr::Prime(_) | Expr::Unchanged(_) => true,
-        Expr::Var(_)
-        | Expr::Lit(_)
+        Expr::Var(name) => match defs.get(name) {
+            Some((params, body)) if params.is_empty() => {
+                if !visited.insert(name.clone()) {
+                    return false;
+                }
+                let result = contains_prime_ref_impl(body, defs, visited);
+                visited.remove(name);
+                result
+            }
+            _ => false,
+        },
+        Expr::Lit(_)
         | Expr::OldValue
         | Expr::Any
         | Expr::EmptyBag
@@ -239,32 +269,53 @@ fn contains_prime_ref_impl(
                 })
         }
         Expr::FnCall(name, args) => {
-            if let Some((_, body)) = defs.get(name) {
-                if visited.contains(name) {
-                    return false;
+            if args
+                .iter()
+                .any(|a| contains_prime_ref_impl(a, defs, visited))
+            {
+                return true;
+            }
+            match defs.get(name) {
+                Some((_, body)) => {
+                    if !visited.insert(name.clone()) {
+                        return false;
+                    }
+                    let result = contains_prime_ref_impl(body, defs, visited);
+                    visited.remove(name);
+                    result
                 }
-                visited.insert(name.clone());
-                contains_prime_ref_impl(body, defs, visited)
-            } else {
-                args.iter()
-                    .any(|a| contains_prime_ref_impl(a, defs, visited))
+                None => true,
             }
         }
-        Expr::QualifiedCall(instance_expr, op, _) => match instance_expr.as_ref() {
-            Expr::Var(instance_name) => {
-                use super::global_state::RESOLVED_INSTANCES;
-                RESOLVED_INSTANCES.with(|inst_ref| {
-                    let instances = inst_ref.borrow();
-                    if let Some(instance_defs) = instances.get(instance_name)
-                        && let Some((_, body)) = instance_defs.get(op)
-                    {
-                        return contains_prime_ref_impl(body, defs, visited);
-                    }
-                    true
-                })
+        Expr::QualifiedCall(instance_expr, op, args) => {
+            if args
+                .iter()
+                .any(|a| contains_prime_ref_impl(a, defs, visited))
+            {
+                return true;
             }
-            _ => true,
-        },
+            match instance_expr.as_ref() {
+                Expr::Var(instance_name) => {
+                    use super::global_state::RESOLVED_INSTANCES;
+                    RESOLVED_INSTANCES.with(|inst_ref| {
+                        let instances = inst_ref.borrow();
+                        if let Some(instance_defs) = instances.get(instance_name)
+                            && let Some((_, body)) = instance_defs.get(op)
+                        {
+                            let marker: Arc<str> = Arc::from(format!("{instance_name}!{op}"));
+                            if !visited.insert(marker.clone()) {
+                                return false;
+                            }
+                            let result = contains_prime_ref_impl(body, defs, visited);
+                            visited.remove(&marker);
+                            return result;
+                        }
+                        true
+                    })
+                }
+                _ => true,
+            }
+        }
         Expr::Lambda(_, body) => contains_prime_ref_impl(body, defs, visited),
         Expr::Let(_, binding, body) => {
             contains_prime_ref_impl(binding, defs, visited)
@@ -420,5 +471,88 @@ pub(crate) fn expr_references(expr: &Expr, name: &Arc<str>) -> bool {
         | Expr::StrongFairness(_, e)
         | Expr::BoxAction(e, _)
         | Expr::DiamondAction(e, _) => expr_references(e, name),
+    }
+}
+
+#[cfg(test)]
+mod prime_ref_tests {
+    use super::contains_prime_ref;
+    use crate::ast::{Expr, Value};
+    use crate::eval::Definitions;
+    use std::sync::Arc;
+
+    fn v(name: &str) -> Expr {
+        Expr::Var(Arc::from(name))
+    }
+    fn prime(name: &str) -> Expr {
+        Expr::Prime(Arc::from(name))
+    }
+    fn call(name: &str, args: Vec<Expr>) -> Expr {
+        Expr::FnCall(Arc::from(name), args)
+    }
+    fn defs(entries: Vec<(&str, Vec<&str>, Expr)>) -> Definitions {
+        entries
+            .into_iter()
+            .map(|(n, ps, body)| {
+                (
+                    Arc::from(n),
+                    (ps.into_iter().map(Arc::from).collect(), Arc::new(body)),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn operator_applied_to_a_prime_argument_has_a_prime() {
+        let d = defs(vec![(
+            "IsTwice",
+            vec!["a"],
+            Expr::Eq(Box::new(v("a")), Box::new(Expr::Lit(Value::Int(0)))),
+        )]);
+        assert!(contains_prime_ref(&call("IsTwice", vec![prime("y")]), &d));
+    }
+
+    #[test]
+    fn operator_applied_to_nonprime_arguments_is_prime_free() {
+        let d = defs(vec![(
+            "IsTwice",
+            vec!["a"],
+            Expr::Eq(Box::new(v("a")), Box::new(Expr::Lit(Value::Int(0)))),
+        )]);
+        assert!(!contains_prime_ref(
+            &call("IsTwice", vec![Expr::Lit(Value::Int(1))]),
+            &d
+        ));
+    }
+
+    #[test]
+    fn operator_with_a_primed_body_has_a_prime() {
+        let d = defs(vec![("UsesPrime", vec![], prime("x"))]);
+        assert!(contains_prime_ref(&call("UsesPrime", vec![]), &d));
+    }
+
+    #[test]
+    fn a_recursive_operator_applied_to_a_prime_has_a_prime() {
+        let d = defs(vec![(
+            "Sum",
+            vec!["n"],
+            Expr::If(
+                Box::new(Expr::Eq(
+                    Box::new(v("n")),
+                    Box::new(Expr::Lit(Value::Int(0))),
+                )),
+                Box::new(Expr::Lit(Value::Int(0))),
+                Box::new(call("Sum", vec![v("n")])),
+            ),
+        )]);
+        assert!(contains_prime_ref(&call("Sum", vec![prime("x")]), &d));
+    }
+
+    #[test]
+    fn an_unresolved_operator_is_over_approximated() {
+        assert!(contains_prime_ref(
+            &call("Mystery", vec![Expr::Lit(Value::Int(1))]),
+            &Definitions::new()
+        ));
     }
 }

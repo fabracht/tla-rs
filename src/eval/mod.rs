@@ -11,13 +11,14 @@ mod helpers;
 mod init;
 mod recursive;
 mod state;
+mod walk;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::ast::Expr;
 
-pub type Definitions = BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>;
+pub type Definitions = crate::ast::DefinitionMap;
 pub type ResolvedInstances = BTreeMap<Arc<str>, Definitions>;
 
 #[derive(Debug, Clone)]
@@ -46,7 +47,8 @@ pub use self::state::{
     is_action_enabled, make_primed_names, next_states, next_states_with_guards, state_to_env,
 };
 
-pub(crate) use self::ast_utils::contains_prime_ref;
+pub(crate) use self::ast_utils::{contains_prime_ref, expr_references};
+pub use self::walk::{set_allow_unassigned_stutter, set_use_inference_engine};
 
 pub(crate) fn resolve_parameterized_defs(
     param_inst: &ParameterizedInstance,
@@ -487,7 +489,7 @@ mod tests {
         let mut d = defs();
         d.insert(
             var("Double"),
-            (vec![var("n")], add(var_expr("n"), var_expr("n"))),
+            (vec![var("n")], add(var_expr("n"), var_expr("n")).into()),
         );
         let mut env = Env::new();
         let expr = Expr::FnCall(var("Double"), vec![lit_int(5)]);

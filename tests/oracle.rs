@@ -8,6 +8,12 @@ use tla_checker::checker::{CheckResult, CheckerConfig, PrepareSpecError, check};
 use tla_checker::config::{apply_config, parse_cfg};
 use tla_checker::parser::{parse, parse_with_warnings};
 
+/// The suite runs under the walker by default; `TLA_ENGINE=inference` runs the
+/// whole suite under the legacy engine so both can be exercised in CI.
+fn inference_engine_selected() -> bool {
+    std::env::var("TLA_ENGINE").ok().as_deref() == Some("inference")
+}
+
 fn check_spec_file(path: &Path) -> CheckResult {
     check_spec_file_with_config(path, CheckerConfig::default())
 }
@@ -21,6 +27,16 @@ fn check_spec_file_allow_deadlock(path: &Path) -> CheckResult {
 }
 
 fn check_spec_file_with_config(path: &Path, mut config: CheckerConfig) -> CheckResult {
+    if inference_engine_selected() {
+        config.use_inference_engine = true;
+    }
+    check_loaded(path, config)
+}
+
+/// Parse a spec (with its adjacent cfg) and check it under exactly the engine the
+/// caller's config names — no `TLA_ENGINE` override. Used by the differential test
+/// that must exercise both engines in one process.
+fn check_loaded(path: &Path, mut config: CheckerConfig) -> CheckResult {
     let input = fs::read_to_string(path).expect("failed to read spec file");
     let mut spec = match parse(&input) {
         Ok(s) => s,
@@ -55,6 +71,357 @@ fn test_should_pass_counter() {
         "counter.tla should pass, got: {:?}",
         result
     );
+}
+
+/// Differential corpus for the continuation-passing walker. Each of
+/// these is a next-state relation where a primed variable's value depends on
+/// another primed variable, an operator argument, an IF, or a chain — the shapes
+/// the candidate-inference engine under-approximates into a silent false pass.
+/// The walker must reach the violating successor. Asserted only under the walker
+/// engine, since the inference engine reports these as passing.
+#[test]
+fn test_walker_dependent_next_state_probes() {
+    if inference_engine_selected() {
+        return;
+    }
+    for name in [
+        "dep_assign",
+        "reverse_order",
+        "if_rhs",
+        "disj_dep",
+        "seq_index",
+        "quant_wrap",
+        "five_chain",
+    ] {
+        let path = format!("test_cases/walker/{name}.tla");
+        let result = check_spec_file_allow_deadlock(Path::new(&path));
+        assert!(
+            matches!(result, CheckResult::InvariantViolation(_, _)),
+            "{name}.tla must reach the violating successor under the walker, got: {result:?}"
+        );
+    }
+}
+
+/// Indexed-prime assignment is a *constraint* on a repeated key path, not an
+/// overwrite. `f'[1] = 5 /\ f'[1] = 6` is unsatisfiable, and a `\A` that assigns
+/// every index must not be silently overwritten by a later `f'[i] = e`. An
+/// overwriting walker fabricates a successor satisfying neither conjunct. A
+/// distinct-key assignment (`f'[1] = 5 /\ f'[2] = 6`, a tla-rs extension TLC does
+/// not have) must still work. Asserted only under the walker engine.
+#[test]
+fn test_walker_indexed_prime_is_a_constraint() {
+    if inference_engine_selected() {
+        return;
+    }
+    for name in ["indexed_conflict", "indexed_forall_conflict"] {
+        let path = format!("test_cases/walker/{name}.tla");
+        let result = check_spec_file_allow_deadlock(Path::new(&path));
+        assert!(
+            matches!(result, CheckResult::Ok(_)),
+            "{name}.tla: conflicting indexed assignments are unsatisfiable and must \
+             yield no successor, got: {result:?}"
+        );
+    }
+    let distinct =
+        check_spec_file_allow_deadlock(Path::new("test_cases/walker/indexed_distinct.tla"));
+    assert!(
+        matches!(distinct, CheckResult::InvariantViolation(_, _)),
+        "distinct indexed assignments must still combine into one successor, got: {distinct:?}"
+    );
+}
+
+/// Cross-scope variable capture. A continuation conjunct (`z' = i`) pushed under
+/// an outer `\E i` must keep seeing that `i` even when it is discharged inside an
+/// operator body that rebinds `i` (`Pick(a) == \E i \in {5,6} : a = i`). With one
+/// flat env and no scope journal the walker fabricates a bogus counterexample on
+/// a valid spec. Both specs are valid — no violation exists — so this asserts the
+/// walker does *not* report one. Asserted only under the walker engine.
+#[test]
+fn test_walker_no_cross_scope_capture() {
+    if inference_engine_selected() {
+        return;
+    }
+    for name in ["capture_scope", "capture_disjunct"] {
+        let path = format!("test_cases/walker/{name}.tla");
+        let result = check_spec_file_allow_deadlock(Path::new(&path));
+        assert!(
+            matches!(result, CheckResult::Ok(_)),
+            "{name}.tla is valid; the walker must not fabricate a counterexample by \
+             capturing a rebound quantifier variable, got: {result:?}"
+        );
+    }
+}
+
+/// `ENABLED A` is `\E vars' : A`, so an action that does not constrain every
+/// variable is still enabled — a partial assignment is a legitimate witness.
+/// Routed through the walker with a partial-assignment completion rule (the
+/// state-generating rule would wrongly demand totality). Asserted only under the
+/// walker engine.
+#[test]
+fn test_walker_enabled_partial_assignment() {
+    if inference_engine_selected() {
+        return;
+    }
+    let violated =
+        check_spec_file_allow_deadlock(Path::new("test_cases/walker/enabled_partial.tla"));
+    assert!(
+        matches!(violated, CheckResult::InvariantViolation(_, _)),
+        "ENABLED of an action that leaves a variable free must be true, got: {violated:?}"
+    );
+    let holds = check_spec_file_allow_deadlock(Path::new("test_cases/walker/enabled_holds.tla"));
+    assert!(
+        matches!(holds, CheckResult::Ok(_)),
+        "ENABLED must still hold where the action is genuinely enabled, got: {holds:?}"
+    );
+}
+
+/// Init-phase differential corpus. The candidate-inference init collector has no
+/// arms for `\E`/`IF`/`LET`, so an initial state reached only through one of
+/// those is silently dropped (a clean pass, or a bogus "no initial states").
+/// The walker runs the same machine for Init as for Next. Asserted only under
+/// the walker engine.
+#[test]
+fn test_walker_init_probes() {
+    if inference_engine_selected() {
+        return;
+    }
+    for name in ["init_disjunct", "init_exists", "init_if"] {
+        let path = format!("test_cases/walker/{name}.tla");
+        let result = check_spec_file_allow_deadlock(Path::new(&path));
+        assert!(
+            matches!(result, CheckResult::InvariantViolation(_, _)),
+            "{name}.tla: the walker must reach the initial state the inference \
+             collector drops, got: {result:?}"
+        );
+    }
+}
+
+/// A parameterized `LET` operator (`LET Double(n) == n * 2 IN Double(x) < 8`)
+/// used in an invariant must resolve on both engines — the parser encodes it as a
+/// `_params` marker that the evaluator now expands into a definition.
+#[test]
+fn test_should_violate_let_operator_invariant() {
+    let path = Path::new("test_cases/should_violate/let_operator_invariant.tla");
+    assert!(
+        matches!(check_spec_file(path), CheckResult::InvariantViolation(..)),
+        "let_operator_invariant.tla must resolve the parameterized LET operator and violate"
+    );
+}
+
+/// A `LET`-local operator or value must shadow a same-named top-level
+/// definition. `LET G(n) == 0 IN G(x)` with a top-level `G(n) == 1000` must use
+/// the local `0`, not the top-level `1000`. The parser inlines operator
+/// applications from the top-level definitions, so it must skip a name that an
+/// enclosing `LET` binds. Covers both the parameterized and the zero-arg form.
+#[test]
+fn test_should_pass_let_shadows_toplevel() {
+    let path = Path::new("test_cases/should_pass/let_shadows_toplevel.tla");
+    assert!(
+        matches!(check_spec_file_allow_deadlock(path), CheckResult::Ok(_)),
+        "let_shadows_toplevel.tla: LET-local G/c (== 0) must shadow the top-level (== 1000)"
+    );
+}
+
+/// The other direction: a `LET`-local operator whose body *causes* a violation
+/// the top-level definition would not. `LET G(n) == 1000 IN G(x) < 50` with a
+/// top-level `G(n) == 0` must violate — if the top-level `0` were used it would
+/// be a false pass.
+#[test]
+fn test_should_violate_let_shadows_toplevel() {
+    let path = Path::new("test_cases/should_violate/let_shadows_toplevel_violation.tla");
+    assert!(
+        matches!(check_spec_file(path), CheckResult::InvariantViolation(..)),
+        "let_shadows_toplevel_violation.tla: the LET-local G (== 1000) must be used and violate"
+    );
+}
+
+/// A parameterized `LET` operator in a next-state assignment
+/// (`LET Bump(n) == n + 1 IN x' = Bump(x)`). The walker registers the operator as
+/// a definition and enumerates the successor; the inference engine cannot infer a
+/// candidate through the call, so this is asserted only under the walker.
+#[test]
+fn test_walker_let_operator_in_action() {
+    if inference_engine_selected() {
+        return;
+    }
+    let path = Path::new("test_cases/walker/let_operator_action.tla");
+    assert!(
+        matches!(
+            check_spec_file_allow_deadlock(path),
+            CheckResult::InvariantViolation(..)
+        ),
+        "the walker must enumerate `x' = Bump(x)` for a parameterized LET operator"
+    );
+}
+
+/// An indexed assignment in Init with nothing to update — `Init == f[1] = 5`,
+/// where `f` has no prior whole value and Init has no pre-state — cannot build
+/// `f` and must be reported, not silently dropped. Dropping the branch is a
+/// silent false pass when it is one disjunct of an otherwise-satisfiable Init.
+/// Walker only; the legacy engine drops it silently.
+#[test]
+fn test_walker_init_indexed_without_base_is_loud() {
+    if inference_engine_selected() {
+        return;
+    }
+    let result =
+        check_spec_file_allow_deadlock(Path::new("test_cases/walker/init_indexed_no_base.tla"));
+    assert!(
+        matches!(result, CheckResult::InitError(_)),
+        "an indexed Init assignment with no base must be reported, got: {result:?}"
+    );
+}
+
+/// Cliff guard: a wide prime-free guard (`\A i \in 1..24 : ...`) conjoined with a
+/// single assignment. A structural walk of the guard branches on every inner
+/// disjunct — O(2^24) dead work — before pruning. Hoisting prime-free conjuncts
+/// evaluates the guard as one boolean instead, so the check finishes instantly.
+/// Bound is generous to stay stable across machines while still catching a
+/// return to exponential behaviour (which runs for minutes). Walker engine only.
+#[test]
+fn test_walker_hoists_prime_free_guard() {
+    if inference_engine_selected() {
+        return;
+    }
+    let start = std::time::Instant::now();
+    let result = check_spec_file_allow_deadlock(Path::new("test_cases/walker/cliff_guard.tla"));
+    let elapsed = start.elapsed();
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "cliff_guard.tla should pass, got: {result:?}"
+    );
+    assert!(
+        elapsed.as_secs_f64() < 1.0,
+        "cliff_guard.tla must not branch on the prime-free guard; took {elapsed:?}"
+    );
+}
+
+/// The prime-free-guard hoist must still fire when the guard calls a recursive
+/// operator (`Sum`). `contains_prime_ref` bails on the recursive cycle, and if it
+/// bailed to "has a prime" the hoist would be skipped and the wide `\A` would
+/// branch O(2^n). The recursive operator is prime-free, so the cycle contributes
+/// no prime and the guard is hoisted. Walker only.
+#[test]
+fn test_walker_hoists_guard_with_recursive_operator() {
+    if inference_engine_selected() {
+        return;
+    }
+    let start = std::time::Instant::now();
+    let result =
+        check_spec_file_allow_deadlock(Path::new("test_cases/walker/cliff_guard_recursive.tla"));
+    let elapsed = start.elapsed();
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "cliff_guard_recursive.tla should pass, got: {result:?}"
+    );
+    assert!(
+        elapsed.as_secs_f64() < 1.0,
+        "a prime-free guard calling a recursive operator must still hoist; took {elapsed:?}"
+    );
+}
+
+/// A variable an action leaves unassigned is a malformed action: TLC raises a
+/// hard error, and the inference engine silently drops the successor (a false
+/// pass). The walker must fail loudly by default, and `--allow-unassigned-stutter`
+/// must recover the lenient "unassigned means UNCHANGED" behaviour. Walker only.
+#[test]
+fn test_walker_unassigned_variable_is_loud() {
+    if inference_engine_selected() {
+        return;
+    }
+    let path = Path::new("test_cases/walker/unassigned_var.tla");
+
+    let strict = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(strict, CheckResult::NextError(..)),
+        "unassigned_var.tla must fail loudly when Bump leaves y unassigned, got: {strict:?}"
+    );
+
+    let lenient = check_spec_file_with_config(
+        path,
+        CheckerConfig {
+            allow_deadlock: true,
+            allow_unassigned_stutter: true,
+            ..Default::default()
+        },
+    );
+    assert!(
+        matches!(lenient, CheckResult::Ok(_)),
+        "--allow-unassigned-stutter must treat y as UNCHANGED, got: {lenient:?}"
+    );
+}
+
+/// Indexed-prime membership `f'[k] \in S` enumerates the index over the set,
+/// one successor per element — `f'[1] \in {5,6} /\ f'[2] = 0` reaches `[5,0]` and
+/// `[6,0]`, so an invariant `f[1] # 5` is violated. The inference engine has no
+/// arm for an indexed element and drops the successors (a clean pass, a false
+/// pass); asserted only under the walker.
+#[test]
+fn test_walker_indexed_prime_membership() {
+    if inference_engine_selected() {
+        return;
+    }
+    let result = check_spec_file_allow_deadlock(Path::new("test_cases/walker/indexed_in.tla"));
+    assert!(
+        matches!(result, CheckResult::InvariantViolation(_, _)),
+        "the walker must reach the successor `f'[1] \\in {{5,6}}` enumerates, got: {result:?}"
+    );
+}
+
+/// A whole-variable prime assignment followed by an indexed reference to the
+/// same variable is a *constraint* on the value already there, not an overwrite.
+/// `f' = [i \in {1,2} |-> 9] /\ f'[1] = 5` is contradictory (`9 # 5`), so it has
+/// no successor. The walker must not fabricate `[g EXCEPT ![1] = 5]`, which
+/// satisfies the index but violates `f' = g` — a phantom successor and a false
+/// pass. Both engines reach the same verdict here, so it is asserted on either.
+#[test]
+fn test_whole_assignment_then_index_is_a_constraint() {
+    let result = check_spec_file(Path::new("test_cases/walker/whole_then_indexed.tla"));
+    assert!(
+        matches!(result, CheckResult::Deadlock(..)),
+        "a whole assignment then a conflicting indexed constraint must yield no successor, \
+         got: {result:?}"
+    );
+}
+
+/// Engine-equivalence gate for the default flip. On well-formed specs the
+/// inference engine handles correctly, the walker and the inference engine must
+/// agree exactly: same reachable-state count, same transition count, and the same
+/// per-action transition histogram (the "label histogram" — a stronger check than
+/// the state count alone, since it pins which action produced each edge). Runs
+/// both engines explicitly, so it is independent of `TLA_ENGINE`.
+#[test]
+fn test_engines_agree_on_known_correct_specs() {
+    for name in [
+        "official/TwoPhase",
+        "should_pass/counter",
+        "should_pass/two_bit",
+    ] {
+        let owned = format!("test_cases/{name}.tla");
+        let path = Path::new(&owned);
+        let cfg = |use_inference_engine| CheckerConfig {
+            allow_deadlock: true,
+            use_inference_engine,
+            ..Default::default()
+        };
+        let walker = check_loaded(path, cfg(false));
+        let infer = check_loaded(path, cfg(true));
+        let (CheckResult::Ok(w), CheckResult::Ok(i)) = (&walker, &infer) else {
+            panic!("{name}: both engines must complete; walker={walker:?} infer={infer:?}");
+        };
+        assert_eq!(
+            w.states_explored, i.states_explored,
+            "{name}: reachable-state count must match across engines"
+        );
+        assert_eq!(
+            w.transitions, i.transitions,
+            "{name}: transition count must match across engines"
+        );
+        assert_eq!(
+            w.transitions_by_action, i.transitions_by_action,
+            "{name}: per-action transition histogram must match across engines"
+        );
+    }
 }
 
 #[test]
@@ -112,6 +479,72 @@ fn test_membership_in_invariant_uses_shared_dispatch() {
          copy of `\\in` — a bare invariant over SUBSET/Seq/[f: S]/[D -> R] is what \
          exercises that path, got: {:?}",
         result
+    );
+}
+
+/// An equality between two primed variables assigns whichever side is unbound.
+/// `x' = 1 /\ x' = y'` binds `x'` first, then `x' = y'` must bind `y'` to `x'`
+/// (`= 1`), not evaluate the unbound `y'` as a constraint. Both engines and TLC
+/// reach the successor `(1, 1)`, so the run has two states.
+#[test]
+fn test_equality_binds_unbound_prime() {
+    let path = Path::new("test_cases/should_pass/equality_binds_unbound_prime.tla");
+    match check_spec_file_allow_deadlock(path) {
+        CheckResult::Ok(stats) => assert_eq!(
+            stats.states_explored, 2,
+            "x' = 1 /\\ x' = y' must bind y' and reach (1, 1)"
+        ),
+        other => panic!("equality_binds_unbound_prime.tla should pass, got: {other:?}"),
+    }
+}
+
+/// An indexed assignment followed by a whole-variable assignment to the same
+/// variable — `f'[1] = 5 /\ f' = g` — must let the whole assignment be
+/// authoritative: `f' = g` (when `g[1] = 5`), not the partial value the indexed
+/// assignment built from the current state. Building `f'` from the pre-state and
+/// then rejecting the whole assignment as a mismatched constraint drops a valid
+/// successor — a false pass. Both engines must reach the violating `<<5, 9>>`.
+#[test]
+fn test_indexed_then_whole_assignment_is_authoritative() {
+    let path = Path::new("test_cases/should_violate/indexed_then_whole_assignment.tla");
+    assert!(
+        matches!(
+            check_spec_file_allow_deadlock(path),
+            CheckResult::InvariantViolation(..)
+        ),
+        "f'[1] = 5 /\\ f' = g must reach f' = g, not silently drop the successor"
+    );
+}
+
+/// A second whole assignment after an indexed-then-whole override must be a full
+/// equality constraint, not a partial path check: `f'[1] = 5 /\ f' = g /\ f' = h`
+/// with `g # h` is unsatisfiable (no `f'` equals both), so TLC yields no successor
+/// and the invariant holds. Once the first whole assignment makes `f'` authoritative
+/// the walker must compare the second whole value in full, not merely at the earlier
+/// indexed path — otherwise it emits a phantom successor and reports a spurious
+/// violation. Both engines must find no violation.
+#[test]
+fn test_double_whole_after_indexed_is_full_equality() {
+    let path = Path::new("test_cases/should_pass/double_whole_after_indexed.tla");
+    assert!(
+        matches!(check_spec_file_allow_deadlock(path), CheckResult::Ok(_)),
+        "f' = g /\\ f' = h with g # h must yield no successor, not a phantom state"
+    );
+}
+
+/// An indexed constraint on a whole-assigned variable whose index is outside the
+/// value's domain — `f' = g /\ f'[k] = v` with `k` not in `DOMAIN g` — is an
+/// out-of-domain application, which must be reported, not silently pruned as an
+/// unsatisfiable constraint (a swallowed modeling error).
+#[test]
+fn test_indexed_out_of_domain_is_an_error() {
+    let path = Path::new("test_cases/should_error/indexed_out_of_domain.tla");
+    assert!(
+        matches!(
+            check_spec_file_allow_deadlock(path),
+            CheckResult::NextError(..)
+        ),
+        "f'[5] with 5 not in the domain must be reported, not silently dropped"
     );
 }
 
@@ -312,6 +745,21 @@ fn test_negation_in_precedence() {
         matches!(result, CheckResult::Ok(_)),
         "negation_in.tla should pass (~x \\in S parses as ~(x \\in S)), got: {:?}",
         result
+    );
+}
+
+/// Operator-argument capture. `Mutate(c, d)` is called with the `\E`-bound
+/// variable `c`, whose name also binds inside the body (`{c \in S : c # author}`,
+/// `[c \in S |-> ...]`). Inlining the operator must not capture: `c # author`
+/// must stay `c # <the argument>`, not collapse to `c # c`. If it captures,
+/// `recipients` is always empty, no pending diagram is ever produced, and the
+/// reachable violation is missed — a false pass. Must violate on either engine.
+#[test]
+fn test_should_violate_operator_arg_capture() {
+    let path = Path::new("test_cases/should_violate/operator_arg_capture.tla");
+    assert!(
+        matches!(check_spec_file(path), CheckResult::InvariantViolation(..)),
+        "operator_arg_capture.tla must reach the violation; a captured argument hides it"
     );
 }
 
@@ -985,7 +1433,7 @@ fn test_pingpong_action_labels_not_unnamed() {
         .get(&Arc::from("NotFinished") as &str)
         .expect("NotFinished should be defined")
         .clone();
-    spec.invariants = vec![not_finished.1];
+    spec.invariants = vec![(*not_finished.1).clone()];
     spec.invariant_names = vec![Some(Arc::from("NotFinished"))];
 
     let mut config = CheckerConfig {
@@ -1343,6 +1791,24 @@ fn test_parameterized_instance_in_init() {
         "param_instance_init.tla should pass, got: {:?}",
         result
     );
+}
+
+/// A parameterized-instance action in the next-state relation
+/// (`Channel(id)!Send(msg)` under `\E id \in Ids`). The `WITH buffer <-
+/// channels[id]` substitution places `id` under a prime, so resolving the
+/// instance with `id` as a symbolic variable rather than its bound value makes
+/// `prime_expr` produce an undefined `id'`. Both engines must reach the same 9
+/// reachable states.
+#[test]
+fn test_parameterized_instance_in_next() {
+    let path = Path::new("test_cases/should_pass/parameterized_instance.tla");
+    match check_spec_file_allow_deadlock(path) {
+        CheckResult::Ok(stats) => assert_eq!(
+            stats.states_explored, 9,
+            "parameterized_instance.tla should reach 9 states"
+        ),
+        other => panic!("parameterized_instance.tla should pass, got: {other:?}"),
+    }
 }
 
 #[test]

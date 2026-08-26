@@ -302,6 +302,9 @@ fn main() -> ExitCode {
     }
 
     let mut config = CheckerConfig::new();
+    if std::env::var("TLA_ENGINE").ok().as_deref() == Some("inference") {
+        config.use_inference_engine = true;
+    }
     let mut spec_path = None;
     let mut constants: Vec<(Arc<str>, Value)> = Vec::new();
     let mut scenario_input: Option<String> = None;
@@ -417,6 +420,9 @@ fn main() -> ExitCode {
             "--allow-deadlock" => {
                 config.allow_deadlock = true;
                 cli_allow_deadlock = true;
+            }
+            "--allow-unassigned-stutter" => {
+                config.allow_unassigned_stutter = true;
             }
             "--check-liveness" => {
                 config.check_liveness = true;
@@ -604,6 +610,9 @@ fn main() -> ExitCode {
                 );
                 println!("  --replay FILE              Replay a counterexample interactively");
                 println!("  --allow-deadlock           Allow states with no successors");
+                println!(
+                    "  --allow-unassigned-stutter Treat a variable an action leaves unassigned as UNCHANGED"
+                );
                 println!("  --check-liveness           Check liveness and fairness properties");
                 println!("  --quick, -q                Quick exploration (limit: 10,000 states)");
                 println!("  --verbose, -v              Verbose output (show more details)");

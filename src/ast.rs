@@ -361,11 +361,13 @@ pub struct Transition {
     pub action: Option<Arc<str>>,
 }
 
+pub type DefinitionMap = BTreeMap<Arc<str>, (Vec<Arc<str>>, Arc<Expr>)>;
+
 pub struct Spec {
     pub vars: Vec<Arc<str>>,
     pub constants: Vec<Arc<str>>,
     pub extends: Vec<Arc<str>>,
-    pub definitions: BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>,
+    pub definitions: DefinitionMap,
     pub assumes: Vec<Expr>,
     pub instances: Vec<InstanceDecl>,
     pub init: Option<Expr>,

@@ -151,6 +151,7 @@ impl Parser {
                 if *self.peek() == Token::LParen {
                     let is_recursive = self.recursive_names.contains(&name);
                     if !is_recursive
+                        && !self.let_scope.contains(&name)
                         && let Some((params, body)) = self.fn_definitions.get(&name).cloned()
                     {
                         self.advance();
@@ -186,7 +187,9 @@ impl Parser {
                     }
                     self.expect(Token::RParen)?;
                     Ok(Expr::FnCall(name, args))
-                } else if let Some(def) = self.definitions.get(&name) {
+                } else if !self.let_scope.contains(&name)
+                    && let Some(def) = self.definitions.get(&name)
+                {
                     Ok(def.clone())
                 } else {
                     Ok(Expr::Var(name))
@@ -603,6 +606,7 @@ impl Parser {
 
     pub(super) fn parse_let(&mut self) -> Result<Expr> {
         let mut bindings = Vec::new();
+        let scope_start = self.let_scope.len();
 
         loop {
             if *self.peek() == Token::Recursive {
@@ -622,6 +626,7 @@ impl Parser {
                 self.expect(Token::EqEq)?;
                 let body = self.parse_expr()?;
                 let fn_def = Expr::FnDef(param, Box::new(domain), Box::new(body));
+                self.let_scope.push(var.clone());
                 bindings.push((var, fn_def));
             } else if *self.peek() == Token::LParen {
                 self.advance();
@@ -634,6 +639,7 @@ impl Parser {
                 self.expect(Token::EqEq)?;
                 let body = self.parse_expr()?;
                 let fn_val = Expr::TupleLit(params.into_iter().map(Expr::Var).collect());
+                self.let_scope.push(var.clone());
                 bindings.push((
                     var,
                     Expr::Let("_params".into(), Box::new(fn_val), Box::new(body)),
@@ -641,6 +647,7 @@ impl Parser {
             } else {
                 self.expect(Token::EqEq)?;
                 let binding = self.parse_expr()?;
+                self.let_scope.push(var.clone());
                 bindings.push((var, binding));
             }
 
@@ -662,7 +669,9 @@ impl Parser {
         }
 
         self.expect(Token::Def)?;
-        let mut body = self.parse_expr()?;
+        let body_result = self.parse_expr();
+        self.let_scope.truncate(scope_start);
+        let mut body = body_result?;
 
         for (var, binding) in bindings.into_iter().rev() {
             body = Expr::Let(var, Box::new(binding), Box::new(body));
