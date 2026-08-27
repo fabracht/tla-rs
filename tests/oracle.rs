@@ -763,6 +763,23 @@ fn test_should_violate_operator_arg_capture() {
     );
 }
 
+/// A set-image comprehension may bind more than one variable —
+/// `{a * 10 + b : a \in {1, 2}, b \in {3, 4}}` ranges over the product of the
+/// domains, yielding `{13, 14, 23, 24}`. The parser must accept the extra bounds
+/// (not stop at the first comma) and enumerate every combination, so `x = 24` is
+/// reachable and the invariant `x # 24` is violated.
+#[test]
+fn test_should_violate_multi_bound_set_comprehension() {
+    let path = Path::new("test_cases/should_violate/multi_bound_set_comprehension.tla");
+    assert!(
+        matches!(
+            check_spec_file_allow_deadlock(path),
+            CheckResult::InvariantViolation(..)
+        ),
+        "{{e : x \\in S, y \\in T}} must enumerate the product of the domains"
+    );
+}
+
 #[test]
 fn test_should_violate_counter_overflow() {
     let path = Path::new("test_cases/should_violate/counter_overflow.tla");
