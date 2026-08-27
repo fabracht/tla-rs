@@ -100,6 +100,12 @@ impl Parser {
             {
                 break;
             }
+            if self.paren_depth == 0
+                && let Some(&ec) = self.list_col_stack.last()
+                && self.current_column() <= ec
+            {
+                break;
+            }
             self.advance();
             let right = self.parse_comparison()?;
             result = Expr::And(Box::new(result), Box::new(right));
@@ -108,6 +114,13 @@ impl Parser {
     }
 
     pub(super) fn parse_and_item(&mut self, list_col: u32) -> Result<Expr> {
+        self.list_col_stack.push(list_col);
+        let result = self.parse_and_item_inner(list_col);
+        self.list_col_stack.pop();
+        result
+    }
+
+    fn parse_and_item_inner(&mut self, list_col: u32) -> Result<Expr> {
         let start_line = self.current_line();
         let mut item = self.parse_and_conjunct(Some(list_col))?;
         while *self.peek() == Token::Or {
@@ -141,6 +154,12 @@ impl Parser {
         loop {
             match self.peek() {
                 Token::And => {
+                    if self.paren_depth == 0
+                        && let Some(&ec) = self.list_col_stack.last()
+                        && self.current_column() <= ec
+                    {
+                        break;
+                    }
                     if let Some((lc, _)) = list_anchor {
                         if self.paren_depth == 0 && self.current_column() != lc {
                             break;
