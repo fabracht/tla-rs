@@ -792,6 +792,26 @@ fn test_should_violate_let_in_conjunction_list() {
     );
 }
 
+/// An operator imported via `EXTENDS` and applied to a primed variable
+/// (`IsTwice(y', x')`, with `IsTwice(a, b) == a = 2 * b`) must have its
+/// argument treated as prime-bearing even though the operator body has no
+/// prime. A same-file operator is inlined by the parser before use, so this
+/// only surfaces across a module boundary: `contains_prime_ref` must inspect
+/// the call arguments, not just recurse into the definition body, or the
+/// conjunct that binds `y'` is skipped and the reachable violation is missed.
+#[test]
+fn test_should_violate_imported_op_primed_arg() {
+    let path =
+        Path::new("test_cases/should_violate/imported_op_primed_arg/imported_op_primed_arg.tla");
+    assert!(
+        matches!(
+            check_spec_file_allow_deadlock(path),
+            CheckResult::InvariantViolation(..)
+        ),
+        "a primed variable passed to an EXTENDS-imported operator must be visible"
+    );
+}
+
 /// A set-image comprehension may bind more than one variable —
 /// `{a * 10 + b : a \in {1, 2}, b \in {3, 4}}` ranges over the product of the
 /// domains, yielding `{13, 14, 23, 24}`. The parser must accept the extra bounds
