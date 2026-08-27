@@ -1670,6 +1670,21 @@ fn test_should_pass_extends_file_module() {
     );
 }
 
+/// A TLA+ identifier may begin with `_` as long as it contains a letter
+/// (`__n`, `__p`). The lexer must read such a name as one identifier, not as the
+/// standalone `_` placeholder token followed by an identifier — while still
+/// treating a lone `_` and the `[A]_v` / `<<A>>_v` subscripts as `_` tokens.
+#[test]
+fn test_should_pass_underscore_identifiers() {
+    let path = Path::new("test_cases/should_pass/underscore_identifiers.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "leading-underscore identifiers must lex as identifiers, got: {:?}",
+        result
+    );
+}
+
 #[test]
 fn test_should_pass_extends_transitive() {
     let path = Path::new("test_cases/should_pass/extends_transitive/extends_transitive.tla");

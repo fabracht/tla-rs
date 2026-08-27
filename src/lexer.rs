@@ -311,6 +311,23 @@ impl<'a> Lexer<'a> {
         self.input[self.pos..].chars().next()
     }
 
+    /// Whether the `_` at the current position begins an identifier rather than
+    /// a standalone `_` token. A TLA+ identifier is a run of letters, digits and
+    /// `_` containing at least one letter, so `__node` is an identifier while a
+    /// lone `_` is not. The `_` is also standalone in the stuttering-subscript
+    /// forms `[A]_v` and `<<A>>_v`, where it follows `]` or `>>` — there it is
+    /// the subscript operator, not the head of the variable name.
+    fn underscore_begins_ident(&self) -> bool {
+        let before = &self.input[..self.pos];
+        if before.ends_with(']') || before.ends_with(">>") {
+            return false;
+        }
+        self.input[self.pos..]
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .any(char::is_alphabetic)
+    }
+
     fn advance(&mut self) -> Option<char> {
         let c = self.peek_char()?;
         self.pos += c.len_utf8();
@@ -657,7 +674,7 @@ impl<'a> Lexer<'a> {
             self.advance();
             return Ok(Token::Prime);
         }
-        if c == '_' {
+        if c == '_' && !self.underscore_begins_ident() {
             self.advance();
             return Ok(Token::Underscore);
         }
@@ -1135,7 +1152,7 @@ impl<'a> Lexer<'a> {
             self.advance();
             return Ok(Token::Prime);
         }
-        if c == '_' {
+        if c == '_' && !self.underscore_begins_ident() {
             self.advance();
             return Ok(Token::Underscore);
         }
@@ -1375,6 +1392,58 @@ impl From<LexError> for String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lex_leading_underscore_identifier() {
+        let mut lexer = Lexer::new("Bump(__n)");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("Bump".into()),
+                Token::LParen,
+                Token::Ident("__n".into()),
+                Token::RParen,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_bare_underscore_is_placeholder() {
+        let mut lexer = Lexer::new("Op(_, _)");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("Op".into()),
+                Token::LParen,
+                Token::Underscore,
+                Token::Comma,
+                Token::Underscore,
+                Token::RParen,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_box_subscript_keeps_underscore() {
+        let mut lexer = Lexer::new("[][Next]_vars");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Always,
+                Token::LBracket,
+                Token::Ident("Next".into()),
+                Token::RBracket,
+                Token::Underscore,
+                Token::Ident("vars".into()),
+                Token::Eof,
+            ]
+        );
+    }
 
     #[test]
     fn lex_basic() {
