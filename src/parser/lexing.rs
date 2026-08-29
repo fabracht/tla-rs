@@ -28,6 +28,12 @@ pub struct Parser {
     /// scope here must not be inlined from the top-level definitions — the local
     /// `LET` binding shadows it, and inlining would use the wrong (top-level) body.
     pub(super) let_scope: Vec<Arc<str>>,
+    /// Bullet columns of the junction lists whose items are currently being
+    /// parsed, innermost last. A `/\` or `\/` at or left of the innermost column
+    /// ends the current item, so a nested expression — a `LET` body, an `IF`
+    /// branch — stops there instead of swallowing the next bullet of an
+    /// enclosing list. Empty at paren depth, where alignment does not apply.
+    pub(super) list_col_stack: Vec<u32>,
 }
 
 impl Parser {
@@ -52,6 +58,7 @@ impl Parser {
             warnings: Vec::new(),
             fresh_counter: 0,
             let_scope: Vec::new(),
+            list_col_stack: Vec::new(),
         })
     }
 

@@ -282,24 +282,21 @@ impl Parser {
             Token::Colon => {
                 self.advance();
                 let after_colon = self.parse_expr()?;
-                self.expect(Token::RBrace)?;
                 if let Expr::In(var_expr, domain) = &first
                     && let Some(binder) = extract_binder(var_expr)
                 {
+                    self.expect(Token::RBrace)?;
                     let domain = domain.as_ref().clone();
                     let (var, wrapped) = wrap_binder(self, binder, after_colon)?;
                     return Ok(Expr::SetFilter(var, Box::new(domain), Box::new(wrapped)));
                 }
-                if let Expr::In(var_expr, domain) = after_colon
-                    && let Some(binder) = extract_binder(&var_expr)
-                {
-                    let (var, wrapped) = wrap_binder(self, binder, first)?;
-                    return Ok(Expr::SetMap(var, domain, Box::new(wrapped)));
+                let mut bounds = vec![after_colon];
+                while *self.peek() == Token::Comma {
+                    self.advance();
+                    bounds.push(self.parse_expr()?);
                 }
-                Err(ParseError::new(
-                    "expected {x \\in S : P} or {e : x \\in S} in set comprehension",
-                )
-                .with_span(self.current_span()))
+                self.expect(Token::RBrace)?;
+                self.build_set_map(first, bounds)
             }
             Token::RBrace => {
                 self.advance();
@@ -311,6 +308,36 @@ impl Parser {
                 Err(ParseError::new(format!("unexpected {tok} in set literal")).with_span(span))
             }
         }
+    }
+
+    /// Build a set-image comprehension `{e : x \in S, y \in T, ...}` from the
+    /// mapped expression and its bounds. A single bound is one `SetMap`; each
+    /// enclosing bound maps the accumulated set and flattens it, so
+    /// `{e : x \in S, y \in T}` is `UNION {{e : y \in T} : x \in S}`.
+    fn build_set_map(&mut self, body: Expr, bounds: Vec<Expr>) -> Result<Expr> {
+        let mut iter = bounds.into_iter().rev();
+        let (var, domain) = match iter.next() {
+            Some(Expr::In(var_expr, domain)) => (var_expr, domain),
+            _ => return Err(self.set_map_error()),
+        };
+        let binder = extract_binder(&var).ok_or_else(|| self.set_map_error())?;
+        let (var, wrapped) = wrap_binder(self, binder, body)?;
+        let mut result = Expr::SetMap(var, domain, Box::new(wrapped));
+        for bound in iter {
+            let (var, domain) = match bound {
+                Expr::In(var_expr, domain) => (var_expr, domain),
+                _ => return Err(self.set_map_error()),
+            };
+            let binder = extract_binder(&var).ok_or_else(|| self.set_map_error())?;
+            let (var, wrapped) = wrap_binder(self, binder, result)?;
+            result = Expr::BigUnion(Box::new(Expr::SetMap(var, domain, Box::new(wrapped))));
+        }
+        Ok(result)
+    }
+
+    fn set_map_error(&self) -> ParseError {
+        ParseError::new("expected {e : x \\in S, ...} in set comprehension")
+            .with_span(self.current_span())
     }
 
     pub(super) fn parse_record_or_fn(&mut self) -> Result<Expr> {

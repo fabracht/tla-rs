@@ -763,6 +763,52 @@ fn test_should_violate_operator_arg_capture() {
     );
 }
 
+/// A `LET`/`IN` expression as a conjunction-list item must not swallow the next
+/// item: `/\ x = LET f == 6 IN f` followed by `/\ y = 0` is two conjuncts, so
+/// the `LET` body is just `f`. The next bullet, aligned at the list column, ends
+/// the body. Here `x = 6 /\ y = 0`, so the invariant holds.
+#[test]
+fn test_should_pass_let_in_conjunction_list() {
+    let path = Path::new("test_cases/should_pass/let_in_conjunction_list.tla");
+    assert!(
+        matches!(check_spec_file_allow_deadlock(path), CheckResult::Ok(_)),
+        "a LET body must end at the next junction bullet, not swallow it"
+    );
+}
+
+/// The companion to [`test_should_pass_let_in_conjunction_list`]: if the `LET`
+/// body swallowed `/\ y = 0`, `y` would be unconstrained and this invariant
+/// unreachable. Because the bullet ends the body, `y = 0` binds `y`, so `y = 6`
+/// is violated — proving the second conjunct is parsed, not absorbed.
+#[test]
+fn test_should_violate_let_in_conjunction_list() {
+    let path = Path::new("test_cases/should_violate/let_in_conjunction_list_violation.tla");
+    assert!(
+        matches!(
+            check_spec_file_allow_deadlock(path),
+            CheckResult::InvariantViolation(..)
+        ),
+        "the conjunct after a LET body must bind y, making y = 6 violated"
+    );
+}
+
+/// A set-image comprehension may bind more than one variable —
+/// `{a * 10 + b : a \in {1, 2}, b \in {3, 4}}` ranges over the product of the
+/// domains, yielding `{13, 14, 23, 24}`. The parser must accept the extra bounds
+/// (not stop at the first comma) and enumerate every combination, so `x = 24` is
+/// reachable and the invariant `x # 24` is violated.
+#[test]
+fn test_should_violate_multi_bound_set_comprehension() {
+    let path = Path::new("test_cases/should_violate/multi_bound_set_comprehension.tla");
+    assert!(
+        matches!(
+            check_spec_file_allow_deadlock(path),
+            CheckResult::InvariantViolation(..)
+        ),
+        "{{e : x \\in S, y \\in T}} must enumerate the product of the domains"
+    );
+}
+
 #[test]
 fn test_should_violate_counter_overflow() {
     let path = Path::new("test_cases/should_violate/counter_overflow.tla");
@@ -1666,6 +1712,21 @@ fn test_should_pass_extends_file_module() {
     assert!(
         matches!(result, CheckResult::Ok(_)),
         "extends_file_module.tla should pass, got: {:?}",
+        result
+    );
+}
+
+/// A TLA+ identifier may begin with `_` as long as it contains a letter
+/// (`__n`, `__p`). The lexer must read such a name as one identifier, not as the
+/// standalone `_` placeholder token followed by an identifier — while still
+/// treating a lone `_` and the `[A]_v` / `<<A>>_v` subscripts as `_` tokens.
+#[test]
+fn test_should_pass_underscore_identifiers() {
+    let path = Path::new("test_cases/should_pass/underscore_identifiers.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "leading-underscore identifiers must lex as identifiers, got: {:?}",
         result
     );
 }
