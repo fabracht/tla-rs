@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::ast::{Expr, FairnessConstraint, InstanceDecl};
 use crate::lexer::{Lexer, Token};
+use crate::source::Source;
 use crate::span::{Span, Spanned};
 
 use super::error::{ParseError, Result};
@@ -10,7 +11,6 @@ use super::error::{ParseError, Result};
 pub struct Parser {
     pub(super) tokens: Vec<Spanned<Token>>,
     pub(super) pos: usize,
-    pub(super) source: Arc<str>,
     pub(super) paren_depth: u32,
     pub(super) definitions: BTreeMap<Arc<str>, Expr>,
     pub(super) fn_definitions: BTreeMap<Arc<str>, (Vec<Arc<str>>, Expr)>,
@@ -24,6 +24,11 @@ pub struct Parser {
     pub(super) quantified_temporal: Vec<(Arc<str>, Expr, Expr)>,
     pub(super) warnings: Vec<Spanned<String>>,
     pub(super) fresh_counter: u64,
+    /// The source text with its precomputed line-start index, so `line_of` and
+    /// `column_of` resolve a byte offset by binary search instead of rescanning
+    /// from the start on every token — the difference between O(n) and O(n²)
+    /// parsing over a large module.
+    pub(super) source: Source,
     /// Names bound by an enclosing `LET`. An operator reference whose name is in
     /// scope here must not be inlined from the top-level definitions — the local
     /// `LET` binding shadows it, and inlining would use the wrong (top-level) body.
@@ -43,7 +48,7 @@ impl Parser {
         Ok(Self {
             tokens,
             pos: 0,
-            source: Arc::from(input),
+            source: Source::new("", input),
             paren_depth: 0,
             definitions: BTreeMap::new(),
             fn_definitions: BTreeMap::new(),
@@ -77,20 +82,11 @@ impl Parser {
     }
 
     pub(super) fn column_of(&self, byte_offset: u32) -> u32 {
-        let offset = byte_offset as usize;
-        let src = &self.source[..offset.min(self.source.len())];
-        match src.rfind('\n') {
-            Some(nl) => (offset - nl - 1) as u32,
-            None => offset as u32,
-        }
+        self.source.line_col(byte_offset).1 as u32 - 1
     }
 
     pub(super) fn line_of(&self, byte_offset: u32) -> u32 {
-        let offset = byte_offset as usize;
-        self.source[..offset.min(self.source.len())]
-            .bytes()
-            .filter(|&b| b == b'\n')
-            .count() as u32
+        self.source.line_col(byte_offset).0 as u32 - 1
     }
 
     pub(super) fn current_column(&self) -> u32 {
