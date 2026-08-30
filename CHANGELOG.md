@@ -24,6 +24,12 @@
 
 - An indexed next-state constraint whose index is outside the value's domain — `f' = g /\ f'[k] = v` with `k` not in `DOMAIN g` — is reported as an out-of-domain access, not silently pruned as an unsatisfiable constraint.
 
+- An identifier beginning with `_` (`__n`, `Bump(__n)`, `\E __p \in S`) now lexes as an identifier. The lexer had read every `_` as the standalone placeholder token, so a leading-underscore name became a placeholder followed by an identifier and the enclosing definition was discarded. A bare `_` and the `[A]_v` / `<<A>>_v` subscripts (where `_` follows `]` or `>>`) are still the placeholder.
+
+- A `LET`/`IN` expression as an item of a conjunction or disjunction list no longer swallows the next bullet. `/\ x = LET f == 6 IN f` followed by `/\ y = 0` is two conjuncts; the next bullet, aligned at the list column, ends the `LET` body, matching TLA+'s alignment rule. Previously the body absorbed the following item.
+
+- A set-image comprehension may bind more than one variable — `{e : x \in S, y \in T}` — ranging over the product of the domains. The parser previously stopped at the first comma and discarded the operator.
+
 ### Added
 
 - `--allow-unassigned-stutter` treats a variable an action leaves unassigned as `UNCHANGED` instead of raising an error.
