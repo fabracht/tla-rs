@@ -52,6 +52,18 @@ mod tests {
     }
 
     #[test]
+    fn line_and_column_from_byte_offset() {
+        // "ab\ncde\nf": line starts at bytes 0, 3, 7.
+        let parser = Parser::new("ab\ncde\nf").unwrap();
+        let at = |o| (parser.line_of(o), parser.column_of(o));
+        assert_eq!(at(0), (0, 0));
+        assert_eq!(at(1), (0, 1));
+        assert_eq!(at(3), (1, 0));
+        assert_eq!(at(5), (1, 2));
+        assert_eq!(at(7), (2, 0));
+    }
+
+    #[test]
     fn parse_set_enum() {
         let expr = parse_expr("{1, 2, 3}").unwrap();
         if let Expr::SetEnum(elems) = expr {
