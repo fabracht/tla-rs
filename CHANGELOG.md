@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.1] - 2026-09-01
+
+### Added
+
+- Regression coverage for a parameterized `LET` operator defined and called on the right-hand side of a next-state assignment (`x' = LET add10(a) == a + 10 IN add10(10)`, #70). The construct already resolves as of the 0.8.0 walker; this pins the behavior with a dedicated test.
+
 ## [0.8.0] - 2026-08-31
 
 ### Changed
