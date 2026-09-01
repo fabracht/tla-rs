@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.8.0] - 2026-08-13
+## [0.8.0] - 2026-08-31
 
 ### Changed
 
@@ -11,6 +11,8 @@
 - Conjuncts of an `Init` or next-state predicate are now evaluated in order, so a guard that reads a variable before the conjunct that assigns it is an error, matching TLC ("the identifier x is undefined"). `Init == x > 0 /\ x \in 1..3` must be written `x \in 1..3 /\ x > 0`. The previous candidate-inference engine was order-insensitive and accepted the guard-first form; specs that relied on that now report the undefined variable instead. Writing the assignment (`x = e` / `x \in S`, or a primed assignment in `Next`) before any guard that reads the variable works unchanged.
 
 - Operator definition bodies are shared via `Arc`, so resolving a parameterized `LET` or an instance operator no longer deep-clones the whole definition map per call — an ~18-42x speedup on specs with a large definition set and many such calls per state.
+
+- Parsing a large module is no longer quadratic. Line and column for diagnostics were resolved by rescanning the source from the start on every token; a precomputed line-start index (binary search) makes it linear. A ~96k-line module drops from ~26s to ~0.3s in `--validate`.
 
 ### Fixed
 
