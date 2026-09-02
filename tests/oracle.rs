@@ -208,6 +208,26 @@ fn test_should_violate_let_operator_invariant() {
     );
 }
 
+/// A parameterized `LET` operator defined and called on the right-hand side of a
+/// next-state assignment — `x' = LET add10(a) == a + 10 IN add10(10)` — must
+/// resolve, binding `x'` to `20`. The `LET` is the assignment's value expression,
+/// not a wrapper around the action, and the call uses a literal argument.
+#[test]
+fn test_should_violate_let_operator_in_assignment_rhs() {
+    let path = Path::new("test_cases/should_violate/let_operator_in_assignment_rhs.tla");
+    match check_spec_file_allow_deadlock(path) {
+        CheckResult::InvariantViolation(cex, _) => {
+            let x = cex.trace.last().and_then(|s| s.values.first());
+            assert_eq!(
+                x,
+                Some(&Value::Int(20)),
+                "x' = LET add10(a) == a + 10 IN add10(10) must bind x to 20"
+            );
+        }
+        other => panic!("expected InvariantViolation for #70, got {:?}", other),
+    }
+}
+
 /// A `LET`-local operator or value must shadow a same-named top-level
 /// definition. `LET G(n) == 0 IN G(x)` with a top-level `G(n) == 1000` must use
 /// the local `0`, not the top-level `1000`. The parser inlines operator
