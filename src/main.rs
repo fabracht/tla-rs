@@ -681,6 +681,9 @@ fn main() -> ExitCode {
         i += 1;
     }
 
+    tla_checker::eval::set_use_inference_engine(config.use_inference_engine);
+    tla_checker::eval::set_allow_unassigned_stutter(config.allow_unassigned_stutter);
+
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(manifest_path) = present_path {
         if let Some(out) = export_html_path {
