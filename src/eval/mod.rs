@@ -48,7 +48,7 @@ pub use self::state::{
 };
 
 pub(crate) use self::ast_utils::{contains_prime_ref, expr_references};
-pub use self::walk::{set_allow_unassigned_stutter, set_use_inference_engine};
+pub use self::walk::{EngineOverride, set_allow_unassigned_stutter, set_use_inference_engine};
 
 pub(crate) fn resolve_parameterized_defs(
     param_inst: &ParameterizedInstance,
@@ -93,6 +93,23 @@ mod tests {
 
     fn var(name: &str) -> Arc<str> {
         Arc::from(name)
+    }
+
+    #[test]
+    fn engine_override_restores_previous_selection_on_drop() {
+        let before = super::walk::walk_enabled();
+        {
+            let _override = EngineOverride::new(true, false);
+            assert!(
+                !super::walk::walk_enabled(),
+                "an EngineOverride selecting inference must deselect the walker while held"
+            );
+        }
+        assert_eq!(
+            super::walk::walk_enabled(),
+            before,
+            "the previous engine selection must be restored when the override drops"
+        );
     }
 
     fn lit_int(n: i64) -> Expr {

@@ -341,8 +341,10 @@ pub fn prepare_spec(
 }
 
 pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult {
-    crate::eval::set_use_inference_engine(config.use_inference_engine);
-    crate::eval::set_allow_unassigned_stutter(config.allow_unassigned_stutter);
+    let _engine = crate::eval::EngineOverride::new(
+        config.use_inference_engine,
+        config.allow_unassigned_stutter,
+    );
     #[cfg(not(target_arch = "wasm32"))]
     let prep = prepare_spec(spec, domains, config.spec_path.as_ref(), config.quiet);
     #[cfg(target_arch = "wasm32")]

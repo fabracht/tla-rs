@@ -53,6 +53,36 @@ fn allow_unassigned_stutter() -> bool {
     ALLOW_UNASSIGNED_STUTTER.with(std::cell::Cell::get)
 }
 
+/// Applies an engine/stutter selection to the current thread for as long as it is
+/// held, restoring the previous values on drop. The selection lives in
+/// thread-locals read throughout state generation; scoping it here keeps a run
+/// that sets it (a `check()` call, say) from leaking that choice into a later
+/// state generation on the same thread.
+pub struct EngineOverride {
+    prev_inference: bool,
+    prev_stutter: bool,
+}
+
+impl EngineOverride {
+    pub fn new(use_inference: bool, allow_stutter: bool) -> Self {
+        let prev_inference = USE_INFERENCE_ENGINE.with(std::cell::Cell::get);
+        let prev_stutter = ALLOW_UNASSIGNED_STUTTER.with(std::cell::Cell::get);
+        set_use_inference_engine(use_inference);
+        set_allow_unassigned_stutter(allow_stutter);
+        Self {
+            prev_inference,
+            prev_stutter,
+        }
+    }
+}
+
+impl Drop for EngineOverride {
+    fn drop(&mut self) {
+        set_use_inference_engine(self.prev_inference);
+        set_allow_unassigned_stutter(self.prev_stutter);
+    }
+}
+
 /// Whether the walker is generating successors (`x' = e` binds `x'`) or initial
 /// states (`x = e` binds `x`). The machine is otherwise identical, as in TLC.
 #[derive(Clone, Copy, PartialEq, Eq)]
