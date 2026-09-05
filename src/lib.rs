@@ -19,6 +19,7 @@ pub mod mcp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod modules;
 pub mod parser;
+pub mod refinement;
 pub mod scc;
 pub mod scenario;
 pub mod source;

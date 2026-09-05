@@ -72,6 +72,11 @@ thread_local! {
     pub(super) static CHECKER_STATS: RefCell<CheckerStats> = const { RefCell::new(CheckerStats::new()) };
     pub(super) static RESOLVED_INSTANCES: RefCell<ResolvedInstances> = const { RefCell::new(BTreeMap::new()) };
     pub(super) static PARAMETERIZED_INSTANCES: RefCell<ParameterizedInstances> = const { RefCell::new(BTreeMap::new()) };
+    /// The declared variables of each non-parameterized `INSTANCE` alias's
+    /// abstract module — needed by refinement checking to detect a stutter over
+    /// *all* abstract variables, including those left to the implicit same-name
+    /// substitution rather than named in a `WITH` clause.
+    pub(super) static RESOLVED_INSTANCE_VARS: RefCell<BTreeMap<Arc<str>, Vec<Arc<str>>>> = const { RefCell::new(BTreeMap::new()) };
     #[cfg(feature = "profiling")]
     pub(super) static PROFILING_STATS: RefCell<ProfilingStats> = const { RefCell::new(ProfilingStats::new()) };
 }
@@ -99,10 +104,32 @@ pub fn set_resolved_instances(instances: ResolvedInstances) {
 pub fn clear_resolved_instances() {
     RESOLVED_INSTANCES.with(|inst| inst.borrow_mut().clear());
     PARAMETERIZED_INSTANCES.with(|inst| inst.borrow_mut().clear());
+    RESOLVED_INSTANCE_VARS.with(|v| v.borrow_mut().clear());
 }
 
 pub fn set_parameterized_instances(instances: ParameterizedInstances) {
     PARAMETERIZED_INSTANCES.with(|inst| *inst.borrow_mut() = instances);
+}
+
+pub fn set_resolved_instance_vars(vars: BTreeMap<Arc<str>, Vec<Arc<str>>>) {
+    RESOLVED_INSTANCE_VARS.with(|v| *v.borrow_mut() = vars);
+}
+
+/// The definition names resolved for a non-parameterized `INSTANCE` alias, or
+/// `None` if the alias was not resolved. Lets refinement checking discover the
+/// abstract module's `Init`/`Next` operators without re-loading the module.
+pub fn resolved_instance_def_names(alias: &str) -> Option<Vec<Arc<str>>> {
+    RESOLVED_INSTANCES.with(|inst| {
+        inst.borrow()
+            .get(alias)
+            .map(|defs| defs.keys().cloned().collect())
+    })
+}
+
+/// The declared variables of a non-parameterized `INSTANCE` alias's abstract
+/// module, or `None` if the alias was not resolved.
+pub fn resolved_instance_vars(alias: &str) -> Option<Vec<Arc<str>>> {
+    RESOLVED_INSTANCE_VARS.with(|v| v.borrow().get(alias).cloned())
 }
 
 #[cfg(feature = "profiling")]

@@ -35,8 +35,10 @@ pub use self::core::eval;
 pub use self::diagnostics::explain_invariant_failure;
 pub use self::error::EvalError;
 pub use self::global_state::{
-    CheckerStats, EvalContext, clear_resolved_instances, reset_tlc_state, set_checker_level,
-    set_parameterized_instances, set_random_seed, set_resolved_instances, update_checker_stats,
+    CheckerStats, EvalContext, clear_resolved_instances, reset_tlc_state,
+    resolved_instance_def_names, resolved_instance_vars, set_checker_level,
+    set_parameterized_instances, set_random_seed, set_resolved_instance_vars,
+    set_resolved_instances, update_checker_stats,
 };
 #[cfg(feature = "profiling")]
 pub use self::global_state::{

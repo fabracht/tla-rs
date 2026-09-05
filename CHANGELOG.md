@@ -1,8 +1,10 @@
 # Changelog
 
-## [0.8.1] - 2026-09-01
+## [0.9.0] - 2026-09-05
 
 ### Added
+
+- Refinement checking: `--check-refinement ALIAS` verifies `Spec => ALIAS!Spec` for a non-parameterized `INSTANCE` alias (#22). During the concrete BFS, every initial state's abstract image (via the refinement mapping) must satisfy the abstract `Init`, and every concrete transition must satisfy the abstract `Next` or leave the abstract image unchanged (a stutter — an internal step the abstract spec cannot observe). The abstract module's `Init`/`Next` are found by canonical name (`Init`/`Next` or `<Prefix>Init`/`<Prefix>Next`); a violation is reported with a counterexample trace. The stutter comparison covers every abstract variable, including those left to TLA+'s implicit same-name substitution rather than named in a `WITH` clause.
 
 - Regression coverage for a parameterized `LET` operator defined and called on the right-hand side of a next-state assignment (`x' = LET add10(a) == a + 10 IN add10(10)`, #70). The construct already resolves as of the 0.8.0 walker; this pins the behavior with a dedicated test.
 

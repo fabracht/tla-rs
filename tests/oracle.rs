@@ -1771,6 +1771,92 @@ fn test_should_pass_underscore_identifiers() {
     );
 }
 
+/// A concrete spec that refines an abstract counter through
+/// `A == INSTANCE AbsCounter WITH ac <- x` must pass `--check-refinement A`: the
+/// `Begin` step leaves the abstract image unchanged (a stutter) and the `Commit`
+/// step is an abstract `ANext` step (`ac' = ac + 1`).
+#[test]
+fn test_refinement_counter_passes() {
+    let path = Path::new("test_cases/should_pass/refinement_counter/refinement_counter.tla");
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        check_refinement: Some("A".into()),
+        ..Default::default()
+    };
+    assert!(
+        matches!(
+            check_spec_file_with_config(path, config),
+            CheckResult::Ok(_)
+        ),
+        "refinement_counter must refine AbsCounter"
+    );
+}
+
+/// A concrete step that moves the abstract image by two (`x' = x + 2`) is neither
+/// an abstract `ANext` step (`ac' = ac + 1`) nor a stutter, so
+/// `--check-refinement A` must report a refinement violation.
+#[test]
+fn test_refinement_broken_violates() {
+    let path = Path::new("test_cases/should_violate/refinement_broken/refinement_broken.tla");
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        check_refinement: Some("A".into()),
+        ..Default::default()
+    };
+    assert!(
+        matches!(
+            check_spec_file_with_config(path, config),
+            CheckResult::RefinementViolation(..)
+        ),
+        "refinement_broken must be caught as a refinement violation"
+    );
+}
+
+/// An abstract variable omitted from `WITH` takes TLA+'s implicit same-name
+/// substitution (`q <- q`), and a stutter must hold the *whole* abstract image
+/// fixed. A concrete step that changes such an implicitly-mapped variable while
+/// the explicitly-mapped one stays put is not a stutter, and the abstract `Next`
+/// rejects it — so it must be a refinement violation, not a false accept.
+#[test]
+fn test_refinement_implicit_var_violates() {
+    let path =
+        Path::new("test_cases/should_violate/refinement_implicit_var/refinement_implicit_var.tla");
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        check_refinement: Some("A".into()),
+        ..Default::default()
+    };
+    assert!(
+        matches!(
+            check_spec_file_with_config(path, config),
+            CheckResult::RefinementViolation(..)
+        ),
+        "a change to an implicitly-mapped abstract variable must not be a stutter"
+    );
+}
+
+/// Refinement checking runs on the (possibly symmetry-reduced) reachable graph,
+/// so combining it with `--symmetry` could hide a refinement violation on a
+/// pruned symmetric sibling — a false pass for a verification tool. The two must
+/// be rejected as a configuration error rather than silently checked together.
+#[test]
+fn test_refinement_rejects_symmetry_combo() {
+    let path = Path::new("test_cases/should_pass/refinement_counter/refinement_counter.tla");
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        check_refinement: Some("A".into()),
+        symmetric_constants: vec!["Foo".into()],
+        ..Default::default()
+    };
+    assert!(
+        matches!(
+            check_spec_file_with_config(path, config),
+            CheckResult::PrepareError(PrepareSpecError::RefinementConfigError(_))
+        ),
+        "--check-refinement combined with --symmetry must be rejected"
+    );
+}
+
 #[test]
 fn test_should_pass_extends_transitive() {
     let path = Path::new("test_cases/should_pass/extends_transitive/extends_transitive.tla");

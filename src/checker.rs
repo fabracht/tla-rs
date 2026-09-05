@@ -50,6 +50,12 @@ pub struct CheckerConfig {
     pub state_constraints: Vec<Expr>,
     pub allow_unassigned_stutter: bool,
     pub use_inference_engine: bool,
+    /// Verify that the concrete spec refines the abstract spec reached through the
+    /// named non-parameterized `INSTANCE` alias — `Spec => Alias!Spec`. Each
+    /// concrete transition must satisfy the abstract `Next` or leave the abstract
+    /// state unchanged (a stutter), and every initial state must satisfy the
+    /// abstract `Init`.
+    pub check_refinement: Option<Arc<str>>,
 }
 
 impl Default for CheckerConfig {
@@ -77,6 +83,7 @@ impl Default for CheckerConfig {
             state_constraints: Vec::new(),
             allow_unassigned_stutter: false,
             use_inference_engine: false,
+            check_refinement: None,
         }
     }
 }
@@ -92,6 +99,17 @@ pub struct Counterexample {
     pub trace: Vec<State>,
     pub actions: Vec<Option<Arc<str>>>,
     pub violated_invariant: usize,
+}
+
+/// A concrete behavior that breaks the refinement `Spec => Alias!Spec`: either an
+/// initial state whose abstract image fails the abstract `Init`, or a transition
+/// whose abstract image is neither an abstract `Next` step nor a stutter.
+#[derive(Debug)]
+pub struct RefinementViolation {
+    pub trace: Vec<State>,
+    pub actions: Vec<Option<Arc<str>>>,
+    pub alias: Arc<str>,
+    pub at_init: bool,
 }
 
 #[derive(Debug)]
@@ -122,6 +140,7 @@ pub struct PropertyStats {
 pub enum CheckResult {
     Ok(CheckStats),
     InvariantViolation(Counterexample, CheckStats),
+    RefinementViolation(RefinementViolation, CheckStats),
     LivenessViolation(LivenessViolation, CheckStats),
     Deadlock(Vec<State>, Vec<Option<Arc<str>>>, CheckStats),
     InitError(EvalError),
@@ -141,6 +160,7 @@ pub enum PrepareSpecError {
     AssumeViolation(usize),
     AssumeError(usize, EvalError),
     NonModelValueSymmetry(Arc<str>, Vec<String>),
+    RefinementConfigError(String),
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -292,13 +312,14 @@ pub fn prepare_spec(
             }
         }
         match resolve_instances(spec, &registry) {
-            Ok((static_instances, param_instances)) => {
+            Ok((static_instances, param_instances, instance_vars)) => {
                 let total = static_instances.len() + param_instances.len();
                 if total > 0 && !quiet {
                     eprintln!("  Resolved {} instance(s)", total);
                 }
                 set_resolved_instances(static_instances);
                 set_parameterized_instances(param_instances);
+                crate::eval::set_resolved_instance_vars(instance_vars);
             }
             Err(e) => {
                 if !quiet {
@@ -494,6 +515,28 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     let primed_vars = make_primed_names(&spec.vars);
     let mut reusable_env = base_env.clone();
 
+    let refinement = match &config.check_refinement {
+        Some(alias) => {
+            if !config.symmetric_constants.is_empty() {
+                return CheckResult::PrepareError(PrepareSpecError::RefinementConfigError(
+                    "--check-refinement cannot be combined with --symmetry: symmetry reduction \
+                     prunes symmetric transitions, so a refinement violation on a pruned sibling \
+                     could be missed"
+                        .to_string(),
+                ));
+            }
+            match crate::refinement::RefinementSpec::resolve(alias, spec) {
+                Ok(resolved) => Some(resolved),
+                Err(message) => {
+                    return CheckResult::PrepareError(PrepareSpecError::RefinementConfigError(
+                        message,
+                    ));
+                }
+            }
+        }
+        None => None,
+    };
+
     let mut violation_counts_by_inv: Vec<usize> = vec![0; spec.invariants.len()];
     let max_violation_traces: usize = 10;
 
@@ -563,6 +606,24 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             Ok(true) => {}
             Ok(false) => continue,
             Err(e) => return CheckResult::InitError(e),
+        }
+        if let Some(refinement) = &refinement {
+            match refinement.init_holds(&state, &spec.vars, &base_env, &defs) {
+                Ok(true) => {}
+                Ok(false) => {
+                    stats.elapsed_secs = elapsed_secs();
+                    return CheckResult::RefinementViolation(
+                        RefinementViolation {
+                            trace: vec![state.clone()],
+                            actions: vec![None],
+                            alias: refinement.alias(),
+                            at_init: true,
+                        },
+                        stats,
+                    );
+                }
+                Err(e) => return CheckResult::InitError(e),
+            }
         }
         let canonical = symmetry.canonicalize(&state).into_owned();
         let (idx, is_new) = states.insert_full(canonical);
@@ -838,6 +899,39 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                         reconstruct_trace(current_idx, &states, &parent, &parent_action);
                     let dot = do_export(&states, &parent, Some(current_idx), &all_edges);
                     return CheckResult::NextError(e, trace, dot);
+                }
+            }
+            if let Some(refinement) = &refinement {
+                match refinement.step_refines(
+                    &ctx.current_state,
+                    &transition.state,
+                    &spec.vars,
+                    &base_env,
+                    &defs,
+                ) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        let (mut trace, mut actions) =
+                            reconstruct_trace(current_idx, &states, &parent, &parent_action);
+                        trace.push(transition.state.clone());
+                        actions.push(transition.action.clone());
+                        stats.elapsed_secs = elapsed_secs();
+                        return CheckResult::RefinementViolation(
+                            RefinementViolation {
+                                trace,
+                                actions,
+                                alias: refinement.alias(),
+                                at_init: false,
+                            },
+                            stats,
+                        );
+                    }
+                    Err(e) => {
+                        let (trace, _actions) =
+                            reconstruct_trace(current_idx, &states, &parent, &parent_action);
+                        let dot = do_export(&states, &parent, Some(current_idx), &all_edges);
+                        return CheckResult::NextError(e, trace, dot);
+                    }
                 }
             }
             let canonical = symmetry.canonicalize(&transition.state).into_owned();
@@ -1472,6 +1566,19 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                 stats.elapsed_secs
             )
         }
+        CheckResult::RefinementViolation(violation, stats) => {
+            let kind = if violation.at_init { "init" } else { "step" };
+            format!(
+                r#"{{"status": "refinement_violation", "alias": "{}", "at": "{}", "trace": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
+                violation.alias,
+                kind,
+                trace_to_json_with_actions(&violation.trace, &violation.actions, &spec.vars),
+                stats.states_explored,
+                stats.transitions,
+                stats.max_depth_reached,
+                stats.elapsed_secs
+            )
+        }
         CheckResult::Deadlock(trace, actions, stats) => {
             format!(
                 r#"{{"status": "deadlock", "trace": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
@@ -1565,6 +1672,12 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                 r#"{{"status": "non_model_value_symmetry", "constant": "{}", "members": [{}]}}"#,
                 name,
                 quoted.join(", ")
+            )
+        }
+        CheckResult::PrepareError(PrepareSpecError::RefinementConfigError(message)) => {
+            format!(
+                r#"{{"status": "refinement_config_error", "error": "{}"}}"#,
+                message.replace('"', "\\\"")
             )
         }
         CheckResult::LivenessViolation(violation, stats) => {
