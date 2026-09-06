@@ -425,26 +425,27 @@ impl<'a> Lexer<'a> {
         if self.consume("~>") {
             return Ok(Token::LeadsTo);
         }
-        if self.starts_with("<")
-            && self.input[self.pos + 1..]
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_digit())
-        {
-            self.advance();
-            while self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+        if self.starts_with("<") {
+            // A proof-step token is `<level>` with a *mandatory* closing `>`
+            // (e.g. `<3>`, `<3>2.`). Without the `>` this is the less-than
+            // operator applied to a number — `x<5` means `x < 5`, not a proof
+            // step — so require the `>` before committing.
+            let after = &self.input[self.pos + 1..];
+            let after_digits = after.trim_start_matches(|c: char| c.is_ascii_digit());
+            if after_digits.len() < after.len() && after_digits.starts_with('>') {
                 self.advance();
-            }
-            if self.peek_char() == Some('>') {
+                while self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+                    self.advance();
+                }
                 self.advance();
+                while self
+                    .peek_char()
+                    .is_some_and(|c| c.is_alphanumeric() || c == '.')
+                {
+                    self.advance();
+                }
+                return Ok(Token::ProofStep);
             }
-            while self
-                .peek_char()
-                .is_some_and(|c| c.is_alphanumeric() || c == '.')
-            {
-                self.advance();
-            }
-            return Ok(Token::ProofStep);
         }
         if self.consume("<<") {
             return Ok(Token::LAngle);
@@ -904,26 +905,27 @@ impl<'a> Lexer<'a> {
         if self.consume("~>") {
             return Ok(Token::LeadsTo);
         }
-        if self.starts_with("<")
-            && self.input[self.pos + 1..]
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_digit())
-        {
-            self.advance();
-            while self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+        if self.starts_with("<") {
+            // A proof-step token is `<level>` with a *mandatory* closing `>`
+            // (e.g. `<3>`, `<3>2.`). Without the `>` this is the less-than
+            // operator applied to a number — `x<5` means `x < 5`, not a proof
+            // step — so require the `>` before committing.
+            let after = &self.input[self.pos + 1..];
+            let after_digits = after.trim_start_matches(|c: char| c.is_ascii_digit());
+            if after_digits.len() < after.len() && after_digits.starts_with('>') {
                 self.advance();
-            }
-            if self.peek_char() == Some('>') {
+                while self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+                    self.advance();
+                }
                 self.advance();
+                while self
+                    .peek_char()
+                    .is_some_and(|c| c.is_alphanumeric() || c == '.')
+                {
+                    self.advance();
+                }
+                return Ok(Token::ProofStep);
             }
-            while self
-                .peek_char()
-                .is_some_and(|c| c.is_alphanumeric() || c == '.')
-            {
-                self.advance();
-            }
-            return Ok(Token::ProofStep);
         }
         if self.consume("<<") {
             return Ok(Token::LAngle);
@@ -1406,6 +1408,38 @@ mod tests {
                 Token::RParen,
                 Token::Eof,
             ]
+        );
+    }
+
+    #[test]
+    fn lex_less_than_before_digit_is_comparison() {
+        // `x<5` is the less-than operator applied to a number, not a proof step.
+        let mut lexer = Lexer::new("x<5");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("x".into()),
+                Token::Lt,
+                Token::Int(5),
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_proof_step_requires_closing_angle() {
+        // A real proof step keeps its mandatory `>` (and trailing label).
+        let mut lexer = Lexer::new("<3>2.");
+        assert_eq!(
+            lexer.tokenize().unwrap(),
+            vec![Token::ProofStep, Token::Eof]
+        );
+        // Bare `<3>` too.
+        let mut lexer = Lexer::new("<1>");
+        assert_eq!(
+            lexer.tokenize().unwrap(),
+            vec![Token::ProofStep, Token::Eof]
         );
     }
 

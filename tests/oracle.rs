@@ -849,6 +849,23 @@ fn test_should_violate_multi_bound_set_comprehension() {
     );
 }
 
+/// `<` immediately followed by a digit is the less-than operator, not a proof
+/// step: `Val == x<3` is `x < 3`, a Bool. Previously the lexer mis-tokenized it
+/// as a proof step (its closing `>` was optional), silently truncating `Val` to
+/// `x` — then `y' = Val` assigned an Int, `y` never became TRUE, and the reachable
+/// violation of `y # TRUE` was hidden as a silent pass. It must now be caught.
+#[test]
+fn test_should_violate_less_than_before_digit() {
+    let path = Path::new("test_cases/should_violate/less_than_before_digit.tla");
+    assert!(
+        matches!(
+            check_spec_file_allow_deadlock(path),
+            CheckResult::InvariantViolation(..)
+        ),
+        "x<3 must lex as x < 3, so the reachable y = TRUE violates y # TRUE"
+    );
+}
+
 #[test]
 fn test_should_violate_counter_overflow() {
     let path = Path::new("test_cases/should_violate/counter_overflow.tla");
