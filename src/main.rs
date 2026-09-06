@@ -427,6 +427,14 @@ fn main() -> ExitCode {
             "--check-liveness" => {
                 config.check_liveness = true;
             }
+            "--check-refinement" => {
+                i += 1;
+                if missing_value(&args, i) {
+                    eprintln!("--check-refinement requires an INSTANCE alias");
+                    return ExitCode::FAILURE;
+                }
+                config.check_refinement = Some(args[i].clone().into());
+            }
             "--quick" | "-q" => {
                 config.max_states = 10_000;
                 config.quick_mode = true;
@@ -614,6 +622,9 @@ fn main() -> ExitCode {
                     "  --allow-unassigned-stutter Treat a variable an action leaves unassigned as UNCHANGED"
                 );
                 println!("  --check-liveness           Check liveness and fairness properties");
+                println!(
+                    "  --check-refinement ALIAS   Verify Spec => ALIAS!Spec for an INSTANCE alias"
+                );
                 println!("  --quick, -q                Quick exploration (limit: 10,000 states)");
                 println!("  --verbose, -v              Verbose output (show more details)");
                 println!("  -vv                        Debug output (show all details)");
@@ -1145,6 +1156,32 @@ fn main() -> ExitCode {
             println!("  Time: {:.3}s", stats.elapsed_secs);
             ExitCode::FAILURE
         }
+        CheckResult::RefinementViolation(violation, stats) => {
+            if violation.at_init {
+                println!(
+                    "Refinement violated: an initial state does not satisfy {}!Init",
+                    violation.alias
+                );
+            } else {
+                println!(
+                    "Refinement violated: a transition is neither a {}!Next step nor a stutter",
+                    violation.alias
+                );
+            }
+            println!();
+            println!("Counterexample trace ({} states):", violation.trace.len());
+            println!("  (* marks changed variables)");
+            println!();
+            print!(
+                "{}",
+                format_trace_with_actions(&violation.trace, &violation.actions, &spec.vars)
+            );
+            println!();
+            println!("  States explored: {}", stats.states_explored);
+            println!("  Transitions: {}", stats.transitions);
+            println!("  Time: {:.3}s", stats.elapsed_secs);
+            ExitCode::FAILURE
+        }
         CheckResult::LivenessViolation(violation, stats) => {
             println!("Liveness property violated: {}", violation.property);
             println!();
@@ -1346,6 +1383,13 @@ fn main() -> ExitCode {
                 name
             ));
             eprintln!("{}", diag.render_colored(&source, &colors));
+            ExitCode::FAILURE
+        }
+        CheckResult::PrepareError(PrepareSpecError::RefinementConfigError(message)) => {
+            eprintln!(
+                "{}",
+                Diagnostic::error(message).render_colored(&source, &colors)
+            );
             ExitCode::FAILURE
         }
     }

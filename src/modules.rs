@@ -88,12 +88,20 @@ impl Default for ModuleRegistry {
     }
 }
 
+type InstanceVars = BTreeMap<Arc<str>, Vec<Arc<str>>>;
+type ResolvedInstances = (
+    BTreeMap<Arc<str>, Definitions>,
+    ParameterizedInstances,
+    InstanceVars,
+);
+
 pub fn resolve_instances(
     spec: &Spec,
     registry: &ModuleRegistry,
-) -> std::result::Result<(BTreeMap<Arc<str>, Definitions>, ParameterizedInstances), ModuleError> {
+) -> std::result::Result<ResolvedInstances, ModuleError> {
     let mut resolved = BTreeMap::new();
     let mut parameterized = BTreeMap::new();
+    let mut instance_vars = BTreeMap::new();
 
     for inst in &spec.instances {
         let alias = match &inst.alias {
@@ -104,7 +112,8 @@ pub fn resolve_instances(
         if let Some(module) = registry.get(&inst.module_name) {
             if inst.params.is_empty() {
                 let substituted = apply_substitutions(&module.definitions, &inst.substitutions);
-                resolved.insert(alias, substituted);
+                resolved.insert(alias.clone(), substituted);
+                instance_vars.insert(alias, module.vars.clone());
             } else {
                 parameterized.insert(
                     alias,
@@ -118,7 +127,7 @@ pub fn resolve_instances(
         }
     }
 
-    Ok((resolved, parameterized))
+    Ok((resolved, parameterized, instance_vars))
 }
 
 #[cfg(test)]
@@ -282,7 +291,7 @@ mod tests {
             quantified_temporal: vec![],
         };
 
-        let (resolved, parameterized) = resolve_instances(&spec, &registry).unwrap();
+        let (resolved, parameterized, _vars) = resolve_instances(&spec, &registry).unwrap();
 
         assert_eq!(resolved.len(), 1);
         let s_defs = resolved.get(&Arc::from("S") as &Arc<str>).unwrap();

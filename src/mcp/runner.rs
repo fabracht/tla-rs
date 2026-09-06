@@ -310,6 +310,21 @@ fn map_check_result(result: CheckResult, spec: &Spec, source: &Source) -> CheckO
                 stats: summarize_stats(&stats),
             }
         }
+        CheckResult::RefinementViolation(violation, stats) => {
+            let where_ = if violation.at_init {
+                "an initial state does not satisfy the abstract Init"
+            } else {
+                "a transition is neither an abstract Next step nor a stutter"
+            };
+            CheckOutcome::Error {
+                phase: ErrorPhase::Init,
+                error: StructuredError::internal(format!(
+                    "refinement violation ({}!Spec): {}",
+                    violation.alias, where_
+                )),
+                partial_stats: Some(summarize_stats(&stats)),
+            }
+        }
         CheckResult::Deadlock(trace, actions, stats) => CheckOutcome::Deadlock {
             trace: trace
                 .iter()
@@ -419,6 +434,9 @@ fn map_prepare_error(err: PrepareSpecError, source: &Source) -> CheckOutcome {
                 name
             )),
         ),
+        PrepareSpecError::RefinementConfigError(message) => {
+            (ErrorPhase::Config, StructuredError::internal(message))
+        }
     };
     CheckOutcome::Error {
         phase: outcome.0,

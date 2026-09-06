@@ -343,6 +343,23 @@ fn result_to_wasm(
             Some(vec![format_trace(&ce.trace, vars)]),
             warnings,
         ),
+        CheckResult::RefinementViolation(violation, stats) => WasmCheckResult::err_with_stats(
+            "RefinementViolation",
+            if violation.at_init {
+                format!(
+                    "Refinement violated: an initial state does not satisfy {}!Init",
+                    violation.alias
+                )
+            } else {
+                format!(
+                    "Refinement violated: a transition is neither a {}!Next step nor a stutter",
+                    violation.alias
+                )
+            },
+            stats,
+            Some(vec![format_trace(&violation.trace, vars)]),
+            warnings,
+        ),
         CheckResult::LivenessViolation(violation, stats) => WasmCheckResult::err_with_stats(
             "LivenessViolation",
             format!("Liveness property violated: {}", violation.property),
@@ -440,6 +457,9 @@ fn result_to_wasm(
                 ),
                 warnings,
             )
+        }
+        CheckResult::PrepareError(PrepareSpecError::RefinementConfigError(message)) => {
+            WasmCheckResult::err("RefinementConfigError", message, warnings)
         }
     }
 }
