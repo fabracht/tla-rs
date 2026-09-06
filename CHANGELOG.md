@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.9.0] - 2026-09-05
+## [0.9.0] - 2026-09-06
 
 ### Added
 
@@ -9,6 +9,8 @@
 - Regression coverage for a parameterized `LET` operator defined and called on the right-hand side of a next-state assignment (`x' = LET add10(a) == a + 10 IN add10(10)`, #70). The construct already resolves as of the 0.8.0 walker; this pins the behavior with a dedicated test.
 
 ### Fixed
+
+- `<` immediately followed by a digit is now the less-than operator, not a proof-step token (#89). The lexer recognised `<digits` as a proof step with an *optional* closing `>`, so `x<5` (valid TLA+ for `x < 5`) was mis-tokenized and the comparison silently dropped — which could hide a real invariant violation as a clean pass. A proof step now requires its mandatory closing `>` (`<3>`); `x<5` lexes as `x < 5`.
 
 - `TLA_ENGINE=inference` now applies in the scenario, interactive, and validate paths, not only in `check()` — the engine selection is set once from configuration before any mode runs (#79). The selection is also scoped so a run that sets it no longer leaks the choice into a later state generation on the same thread.
 
