@@ -15,9 +15,29 @@ command = "cargo"
 args = ["rustc", "--lib", "--release", "--target", "wasm32-unknown-unknown", "--features", "wasm", "--crate-type", "cdylib"]
 
 [tasks.wasm-bindgen]
-command = "wasm-bindgen"
-args = ["--target", "web", "--out-dir", "pkg", "target/wasm32-unknown-unknown/release/tla_checker.wasm"]
+description = "Run wasm-bindgen with the CLI version pinned to the wasm-bindgen crate in Cargo.lock"
 dependencies = ["wasm-build"]
+script = [
+    '''
+    set -e
+    VERSION=$(awk '/^name = "wasm-bindgen"$/{getline; print; exit}' Cargo.lock | sed 's/.*"\(.*\)".*/\1/')
+    if [ -z "$VERSION" ]; then
+        echo "could not determine the wasm-bindgen version from Cargo.lock"
+        exit 1
+    fi
+    BIN=$(command -v wasm-bindgen || true)
+    if [ -z "$BIN" ] || [ "$("$BIN" --version | awk '{print $2}')" != "$VERSION" ]; then
+        LOCAL="$PWD/.wasm-tools/bin/wasm-bindgen"
+        if [ ! -x "$LOCAL" ] || [ "$("$LOCAL" --version 2>/dev/null | awk '{print $2}')" != "$VERSION" ]; then
+            echo "installing wasm-bindgen-cli $VERSION to match Cargo.lock (project-local)..."
+            cargo install wasm-bindgen-cli --version "$VERSION" --root "$PWD/.wasm-tools" --force
+        fi
+        BIN="$LOCAL"
+    fi
+    echo "using $("$BIN" --version)"
+    "$BIN" --target web --out-dir pkg target/wasm32-unknown-unknown/release/tla_checker.wasm
+    '''
+]
 
 [tasks.wasm-package]
 description = "Generate package.json and copy README into pkg"
