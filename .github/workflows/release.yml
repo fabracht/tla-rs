@@ -31,7 +31,20 @@ jobs:
           fi
 
       - name: Publish to crates.io
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Version already published, skipping"
+        run: |
+          set +e
+          output=$(cargo publish --token "${{ secrets.CARGO_REGISTRY_TOKEN }}" 2>&1)
+          status=$?
+          echo "$output"
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          fi
+          if echo "$output" | grep -qiE "already uploaded"; then
+            echo "This version is already on crates.io; skipping."
+            exit 0
+          fi
+          echo "::error::cargo publish failed (not an already-published skip); see output above"
+          exit "$status"
 
   build-wasm:
     name: Build WASM engine
