@@ -13,5 +13,6 @@ trace.json
 .local_only/
 GEMINI.md
 pkg/
+.wasm-tools/
 ARCHITECTURE.md
 REVIEW_ANALYSIS.md
