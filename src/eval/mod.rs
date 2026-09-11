@@ -194,6 +194,55 @@ mod tests {
         assert_eq!(result, Value::Int(7));
     }
 
+    fn div(l: Expr, r: Expr) -> Expr {
+        Expr::Div(Box::new(l), Box::new(r))
+    }
+
+    fn modulo(l: Expr, r: Expr) -> Expr {
+        Expr::Mod(Box::new(l), Box::new(r))
+    }
+
+    #[test]
+    fn eval_floored_div_and_mod() {
+        let d = defs();
+        let mut env = Env::new();
+        let cases = [
+            (div(lit_int(-7), lit_int(2)), -4),
+            (modulo(lit_int(-7), lit_int(2)), 1),
+            (div(lit_int(7), lit_int(-2)), -4),
+            (modulo(lit_int(7), lit_int(-2)), -1),
+            (div(lit_int(7), lit_int(2)), 3),
+            (modulo(lit_int(7), lit_int(2)), 1),
+        ];
+        for (expr, expected) in cases {
+            assert_eq!(eval(&expr, &mut env, &d).unwrap(), Value::Int(expected));
+        }
+    }
+
+    #[test]
+    fn eval_division_by_zero_errors() {
+        let d = defs();
+        let mut env = Env::new();
+        assert!(eval(&div(lit_int(1), lit_int(0)), &mut env, &d).is_err());
+        assert!(eval(&modulo(lit_int(1), lit_int(0)), &mut env, &d).is_err());
+    }
+
+    #[test]
+    fn eval_arithmetic_overflow_errors() {
+        let d = defs();
+        let mut env = Env::new();
+        let overflowing = [
+            add(lit_int(i64::MAX), lit_int(1)),
+            Expr::Mul(Box::new(lit_int(i64::MAX)), Box::new(lit_int(2))),
+            Expr::Exp(Box::new(lit_int(2)), Box::new(lit_int(100))),
+            Expr::Neg(Box::new(lit_int(i64::MIN))),
+            div(lit_int(i64::MIN), lit_int(-1)),
+        ];
+        for expr in overflowing {
+            assert!(eval(&expr, &mut env, &d).is_err());
+        }
+    }
+
     #[test]
     fn eval_variable_lookup() {
         let d = defs();
