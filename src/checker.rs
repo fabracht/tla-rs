@@ -1486,7 +1486,12 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
     match result {
         CheckResult::Ok(stats) => {
             let mut parts = Vec::new();
-            parts.push(r#""status": "ok""#.to_string());
+            let status = if stats.violation_count > 0 {
+                "invariant_violation"
+            } else {
+                "ok"
+            };
+            parts.push(format!(r#""status": "{}""#, status));
 
             let mut stat_parts = Vec::new();
             stat_parts.push(format!(r#""states_explored": {}"#, stats.states_explored));
@@ -1854,6 +1859,47 @@ mod tests {
             }
             other => panic!("expected Ok, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn json_status_reflects_violations_under_continue() {
+        let spec = Spec {
+            vars: vec![var("count")],
+            constants: vec![],
+            extends: vec![],
+            definitions: BTreeMap::new(),
+            assumes: vec![],
+            instances: vec![],
+            init: Some(eq(var_expr("count"), lit_int(0))),
+            next: Some(and(
+                in_set(var_expr("count"), set_range(lit_int(0), lit_int(2))),
+                eq(prime_expr("count"), add(var_expr("count"), lit_int(1))),
+            )),
+            invariants: vec![le(var_expr("count"), lit_int(1))],
+            invariant_names: vec![None],
+            fairness: vec![],
+            liveness_properties: vec![],
+            quantified_temporal: vec![],
+        };
+
+        let domains = Env::new();
+        let config = CheckerConfig {
+            allow_deadlock: true,
+            continue_on_violation: true,
+            ..CheckerConfig::default()
+        };
+        let result = check(&spec, &domains, &config);
+
+        match &result {
+            CheckResult::Ok(stats) => assert!(stats.violation_count > 0),
+            other => panic!("expected Ok with recorded violations, got {:?}", other),
+        }
+
+        let json = check_result_to_json(&result, &spec);
+        assert!(
+            json.contains(r#""status": "invariant_violation""#),
+            "status must reflect the recorded violations, got: {json}"
+        );
     }
 
     #[test]
