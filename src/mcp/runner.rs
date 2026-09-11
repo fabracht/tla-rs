@@ -258,12 +258,23 @@ pub fn check_spec(input: &CheckSpecInput) -> CheckSpecOutput {
     }
 
     let advisories = collect_advisories(input);
+    let predicate_warning = crate::checker::unchecked_predicate_warning(
+        &loaded.spec,
+        !loaded.checker_config.count_properties.is_empty(),
+    );
 
     let result = check(&loaded.spec, &loaded.domains, &loaded.checker_config);
     let outcome = map_check_result(result, &loaded.spec, &loaded.source);
+    let mut warnings = loaded.warnings;
+    if let Some(message) = predicate_warning {
+        warnings.push(ParseWarning {
+            message,
+            span: None,
+        });
+    }
     CheckSpecOutput::new(outcome)
         .with_advisories(advisories)
-        .with_warnings(loaded.warnings)
+        .with_warnings(warnings)
 }
 
 fn collect_advisories(input: &CheckSpecInput) -> Vec<String> {
