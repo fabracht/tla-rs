@@ -20,7 +20,9 @@ use super::Definitions;
 use super::ast_utils::{collect_disjuncts_with_labels, contains_prime_ref, parameterized_let_op};
 use super::core::{eval, expand_unchanged_vars};
 use super::error::{EvalError, Result};
-use super::helpers::{eval_bool, eval_set, get_nested, update_nested_value};
+use super::helpers::{
+    eval_bool, eval_set, get_nested, is_non_enumerable_set_expr, update_nested_value,
+};
 use super::state::env_to_next_state;
 use crate::ast::{Env, Expr, Transition, Value};
 use crate::intern::primed_name;
@@ -167,6 +169,10 @@ struct Run<'r> {
     /// the value already there, not an overwrite — `f' = g /\ f'[1] = 5` requires
     /// `g[1] = 5`, it does not rebind index 1 to 5.
     fully_assigned: Vec<Arc<str>>,
+    /// Membership constraints (`x' \in S`) over a non-enumerable set that could
+    /// not assign the variable and were deferred until a sibling conjunct binds
+    /// it. Checked as boolean guards when the state is emitted.
+    deferred_guards: Vec<Expr>,
 }
 
 /// Walk one action (a top-level disjunct, already labelled by the caller) and
@@ -184,6 +190,7 @@ pub(crate) fn walk_next(
         journal: Vec::new(),
         assigned_paths: Vec::new(),
         fully_assigned: Vec::new(),
+        deferred_guards: Vec::new(),
     };
     walk(action_expr, &Cont::Nil, env, ctx, &mut run)
 }
@@ -212,6 +219,7 @@ pub(crate) fn walk_init(
             journal: Vec::new(),
             assigned_paths: Vec::new(),
             fully_assigned: Vec::new(),
+            deferred_guards: Vec::new(),
         };
         walk(init, &Cont::Nil, env, &ctx, &mut run)?;
     }
@@ -246,6 +254,7 @@ pub(crate) fn walk_action_enabled(
         journal: Vec::new(),
         assigned_paths: Vec::new(),
         fully_assigned: Vec::new(),
+        deferred_guards: Vec::new(),
     };
     walk(action, &Cont::Nil, env, &ctx, &mut run)?;
     Ok(!results.is_empty())
@@ -439,8 +448,20 @@ fn advance(cont: &Cont<'_>, env: &mut Env, ctx: &WalkCtx<'_>, run: &mut Run<'_>)
 /// variable the action left unbound is a malformed action and a hard error,
 /// unless `--allow-unassigned-stutter` opts into treating it as an implicit
 /// `UNCHANGED` — only possible in `Next`, where the current value exists.
+fn deferred_guards_hold(env: &mut Env, ctx: &WalkCtx<'_>, run: &Run<'_>) -> Result<bool> {
+    for guard in &run.deferred_guards {
+        if !eval_bool(guard, env, ctx.defs)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 fn emit(env: &mut Env, ctx: &WalkCtx<'_>, run: &mut Run<'_>) -> Result<()> {
     if !ctx.require_total {
+        if !deferred_guards_hold(env, ctx, run)? {
+            return Ok(());
+        }
         run.results.push(Transition {
             state: env_to_next_state(env, ctx.vars, ctx.state_keys),
             action: run.action.clone(),
@@ -453,6 +474,9 @@ fn emit(env: &mut Env, ctx: &WalkCtx<'_>, run: &mut Run<'_>) -> Result<()> {
         .collect();
 
     if missing.is_empty() {
+        if !deferred_guards_hold(env, ctx, run)? {
+            return Ok(());
+        }
         run.results.push(Transition {
             state: env_to_next_state(env, ctx.vars, ctx.state_keys),
             action: run.action.clone(),
@@ -466,7 +490,9 @@ fn emit(env: &mut Env, ctx: &WalkCtx<'_>, run: &mut Run<'_>) -> Result<()> {
                 env.insert(ctx.state_keys[i].clone(), current);
             }
         }
-        if ctx.state_keys.iter().all(|k| env.get(k).is_some()) {
+        if ctx.state_keys.iter().all(|k| env.get(k).is_some())
+            && deferred_guards_hold(env, ctx, run)?
+        {
             run.results.push(Transition {
                 state: env_to_next_state(env, ctx.vars, ctx.state_keys),
                 action: run.action.clone(),
@@ -570,6 +596,47 @@ fn walk_eq(
     walk_bool(node, cont, env, ctx, run)
 }
 
+/// Whether a conjunct binds state variable `name` in this phase — a direct
+/// assignment (`name' = e`, `name' \in S`), an `UNCHANGED name`, or one inside a
+/// conjunction/disjunction/`IF` branch. Used to decide whether a membership over
+/// a non-enumerable set can be deferred: it can only be deferred if some sibling
+/// will actually bind the variable, otherwise the membership is the sole (and
+/// unusable) source and must error where it stands.
+fn action_assigns_var(expr: &Expr, name: &Arc<str>, ctx: &WalkCtx<'_>) -> bool {
+    let is_target = |e: &Expr| ctx.assign_target(e).is_some_and(|(n, _)| &n == name);
+    match expr {
+        Expr::Eq(l, r) => is_target(l) || is_target(r),
+        Expr::In(e, _) => is_target(e),
+        Expr::And(l, r) | Expr::Or(l, r) => {
+            action_assigns_var(l, name, ctx) || action_assigns_var(r, name, ctx)
+        }
+        Expr::If(_, t, e) => action_assigns_var(t, name, ctx) || action_assigns_var(e, name, ctx),
+        Expr::Unchanged(names) => ctx.phase == Phase::Next && names.iter().any(|n| n == name),
+        _ => false,
+    }
+}
+
+fn cont_assigns_var(cont: &Cont<'_>, name: &Arc<str>, ctx: &WalkCtx<'_>) -> bool {
+    let mut current = cont;
+    loop {
+        match current {
+            Cont::Nil => return false,
+            Cont::Cons(head, _, tail) => {
+                if action_assigns_var(head, name, ctx) {
+                    return true;
+                }
+                current = tail;
+            }
+            Cont::Slice(items, _, tail) => {
+                if items.iter().any(|e| action_assigns_var(e, name, ctx)) {
+                    return true;
+                }
+                current = tail;
+            }
+        }
+    }
+}
+
 fn walk_in(
     node: &Expr,
     elem: &Expr,
@@ -583,6 +650,14 @@ fn walk_in(
         if keys.is_empty() {
             let key = ctx.key_for(&name);
             if env.get(&key).is_none() {
+                if cont_assigns_var(cont, &name, ctx)
+                    && is_non_enumerable_set_expr(set, env, ctx.defs)?
+                {
+                    run.deferred_guards.push(node.clone());
+                    let result = advance(cont, env, ctx, run);
+                    run.deferred_guards.pop();
+                    return result;
+                }
                 let dom = eval_set(set, env, ctx.defs)?;
                 run.fully_assigned.push(key.clone());
                 let mut result = Ok(());

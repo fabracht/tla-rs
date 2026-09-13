@@ -205,8 +205,8 @@ Stdlib modules (Naturals, Sequences, TLC, etc.) can be used with `LOCAL INSTANCE
 ### Standard Library Modules
 | Module | Status |
 |--------|--------|
-| `Naturals` | ✓ Nat set (bounded 0..100), arithmetic operators built-in |
-| `Integers` | ✓ Int set (bounded -100..100), includes Nat |
+| `Naturals` | ✓ Nat set (bounded 0..100 by default; infinite symbolic set with `--symbolic-integers`), arithmetic operators built-in |
+| `Integers` | ✓ Int set (bounded -100..100 by default; infinite symbolic set with `--symbolic-integers`), includes Nat |
 | `Sequences` | ✓ All 8 operators: Len, Head, Tail, Append, \o, SubSeq, SelectSeq, Seq(S) |
 | `FiniteSets` | ✓ Cardinality, IsFiniteSet |
 | `TLC` | ✓ All 13 operators |
@@ -360,7 +360,8 @@ Temporal properties may be quantified over a constant set (requires `--check-liv
 | SimpleAllocator | ✓ | 64 states |
 | TCommit | ✓ | Transaction commit (12 states) |
 | TwoPhase | ✓ | Two-phase commit (56 states, RM=2) |
-| Voting | ✓ | Needs bounded Nat |
+| Voting | ✓ | Bounded via `MaxBallot` constant (599 states) |
+| Paxos | ✓ | Bounded via `MaxBallot` constant (3921 states) |
 
 ---
 

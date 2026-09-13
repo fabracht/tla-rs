@@ -424,6 +424,9 @@ fn main() -> ExitCode {
             "--allow-unassigned-stutter" => {
                 config.allow_unassigned_stutter = true;
             }
+            "--symbolic-integers" => {
+                config.symbolic_integers = true;
+            }
             "--check-liveness" => {
                 config.check_liveness = true;
             }
@@ -621,6 +624,9 @@ fn main() -> ExitCode {
                 println!(
                     "  --allow-unassigned-stutter Treat a variable an action leaves unassigned as UNCHANGED"
                 );
+                println!(
+                    "  --symbolic-integers        Treat Nat/Int as infinite sets (membership only; enumeration errors)"
+                );
                 println!("  --check-liveness           Check liveness and fairness properties");
                 println!(
                     "  --check-refinement ALIAS   Verify Spec => ALIAS!Spec for an INSTANCE alias"
@@ -694,6 +700,7 @@ fn main() -> ExitCode {
 
     tla_checker::eval::set_use_inference_engine(config.use_inference_engine);
     tla_checker::eval::set_allow_unassigned_stutter(config.allow_unassigned_stutter);
+    tla_checker::eval::set_symbolic_integers(config.symbolic_integers);
 
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(manifest_path) = present_path {

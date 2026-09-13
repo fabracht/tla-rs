@@ -105,7 +105,8 @@ impl SymmetryConfig {
                     self.collect_elements_in_order(elem, sym_set, seen, ordering);
                 }
             }
-            Value::Bool(_) | Value::Int(_) | Value::Str(_) | Value::Model(_) => {}
+            Value::Bool(_) | Value::Int(_) | Value::Str(_) | Value::Model(_) | Value::IntSet(_) => {
+            }
         }
     }
 
@@ -124,7 +125,9 @@ impl SymmetryConfig {
         }
 
         match value {
-            Value::Bool(_) | Value::Int(_) | Value::Str(_) | Value::Model(_) => value.clone(),
+            Value::Bool(_) | Value::Int(_) | Value::Str(_) | Value::Model(_) | Value::IntSet(_) => {
+                value.clone()
+            }
             Value::Set(s) => {
                 let mapped: BTreeSet<_> = s
                     .iter()

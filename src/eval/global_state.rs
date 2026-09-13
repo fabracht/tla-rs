@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -79,6 +79,18 @@ thread_local! {
     pub(super) static RESOLVED_INSTANCE_VARS: RefCell<BTreeMap<Arc<str>, Vec<Arc<str>>>> = const { RefCell::new(BTreeMap::new()) };
     #[cfg(feature = "profiling")]
     pub(super) static PROFILING_STATS: RefCell<ProfilingStats> = const { RefCell::new(ProfilingStats::new()) };
+}
+
+thread_local! {
+    static SYMBOLIC_INTEGERS: Cell<bool> = const { Cell::new(false) };
+}
+
+pub fn set_symbolic_integers(on: bool) {
+    SYMBOLIC_INTEGERS.with(|c| c.set(on));
+}
+
+pub fn symbolic_integers() -> bool {
+    SYMBOLIC_INTEGERS.with(|c| c.get())
 }
 
 pub fn set_random_seed(seed: u64) {

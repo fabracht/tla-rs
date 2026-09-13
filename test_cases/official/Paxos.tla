@@ -1,12 +1,12 @@
 -------------------------------- MODULE Paxos -------------------------------
 EXTENDS Integers
 
-CONSTANT Value, Acceptor, Quorum
+CONSTANT Value, Acceptor, Quorum, MaxBallot
 
 ASSUME QuorumAssumption == /\ \A Q \in Quorum : Q \subseteq Acceptor
                            /\ \A Q1, Q2 \in Quorum : Q1 \cap Q2 # {}
 
-Ballot ==  Nat
+Ballot ==  0..MaxBallot
 
 None == CHOOSE v : v \notin Value
 

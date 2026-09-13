@@ -11,7 +11,7 @@ use super::global_state::{
 };
 use super::helpers::{
     apply_fn_value, cartesian_product_records, eval_bool, eval_fn, eval_int, eval_record, eval_set,
-    eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_structural_set_expr,
+    eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_symbolic_set_expr,
     update_nested_value,
 };
 use super::recursive::eval_fn_def_recursive;
@@ -403,7 +403,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Subset(l, r) => {
-            if is_structural_set_expr(r) {
+            if is_symbolic_set_expr(r, env, defs)? {
                 let ls = eval_set(l, env, defs)?;
                 for elem in &ls {
                     if !in_set_symbolic(elem, r, env, defs)? {
@@ -451,26 +451,36 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             Ok(Value::Int(s.len() as i64))
         }
 
-        Expr::IsFiniteSet(e) => {
-            let _ = eval_set(e, env, defs)?;
-            Ok(Value::Bool(true))
-        }
+        Expr::IsFiniteSet(e) => match eval(e, env, defs)? {
+            Value::IntSet(_) => Ok(Value::Bool(false)),
+            Value::Set(_) => Ok(Value::Bool(true)),
+            other => Err(EvalError::type_mismatch("Set", other)),
+        },
 
         Expr::BigUnion(e) => {
             let outer = eval_set(e, env, defs)?;
             let mut result = BTreeSet::new();
             for val in outer {
-                if let Value::Set(inner) = val {
-                    for v in Arc::unwrap_or_clone(inner) {
-                        result.insert(v);
+                match val {
+                    Value::Set(inner) => {
+                        for v in Arc::unwrap_or_clone(inner) {
+                            result.insert(v);
+                        }
                     }
-                } else {
-                    return Err(EvalError::TypeMismatch {
-                        expected: "Set",
-                        got: val,
-                        context: Some("UNION element"),
-                        span: None,
-                    });
+                    Value::IntSet(d) => {
+                        return Err(EvalError::domain_error(format!(
+                            "cannot enumerate the infinite set {}",
+                            d.name()
+                        )));
+                    }
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "Set",
+                            got: other,
+                            context: Some("UNION element"),
+                            span: None,
+                        });
+                    }
                 }
             }
             Ok(Value::set(result))

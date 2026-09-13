@@ -9,6 +9,7 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         Value::Int(n) => serde_json::Value::Number((*n).into()),
         Value::Str(s) => serde_json::Value::String(s.to_string()),
         Value::Model(m) => serde_json::json!({ "__model": m.to_string() }),
+        Value::IntSet(d) => serde_json::json!({ "__symbolic_set": d.name() }),
         Value::Set(set) => serde_json::Value::Array(set.iter().map(value_to_json).collect()),
         Value::Fn(map) => {
             let entries: Vec<serde_json::Value> = map

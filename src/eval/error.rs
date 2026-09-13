@@ -186,7 +186,7 @@ pub(crate) fn value_type_name(val: &Value) -> &'static str {
         Value::Int(_) => "Int",
         Value::Str(_) => "Str",
         Value::Model(_) => "ModelValue",
-        Value::Set(_) => "Set",
+        Value::Set(_) | Value::IntSet(_) => "Set",
         Value::Fn(_) => "Function",
         Value::Record(_) => "Record",
         Value::Tuple(_) => "Sequence",
