@@ -419,6 +419,12 @@ fn value_to_json(value: &Value) -> serde_json::Value {
             obj.insert("name".into(), J::String(m.to_string()));
             J::Object(obj)
         }
+        Value::IntSet(d) => {
+            let mut obj = Map::new();
+            obj.insert("kind".into(), J::String("symbolic_set".into()));
+            obj.insert("name".into(), J::String(d.name().to_string()));
+            J::Object(obj)
+        }
         Value::Set(elems) => {
             let arr = elems.iter().map(value_to_json).collect();
             let mut obj = Map::new();

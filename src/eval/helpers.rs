@@ -114,6 +114,60 @@ pub(crate) fn is_structural_set_expr(expr: &Expr) -> bool {
     )
 }
 
+pub(crate) fn is_symbolic_set_expr(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<bool> {
+    Ok(match expr {
+        Expr::Any => true,
+        e if is_structural_set_expr(e) => true,
+        Expr::Union(l, r)
+        | Expr::Intersect(l, r)
+        | Expr::SetMinus(l, r)
+        | Expr::Cartesian(l, r) => {
+            is_symbolic_set_expr(l, env, defs)? || is_symbolic_set_expr(r, env, defs)?
+        }
+        Expr::Var(_) => matches!(eval(expr, env, defs)?, Value::IntSet(_)),
+        _ => false,
+    })
+}
+
+fn set_op_is_symbolic(l: &Expr, r: &Expr, env: &mut Env, defs: &Definitions) -> Result<bool> {
+    Ok(is_symbolic_set_expr(l, env, defs)? || is_symbolic_set_expr(r, env, defs)?)
+}
+
+/// Whether `eval_set` cannot enumerate this set because it denotes an infinite
+/// set (`Nat`/`Int`, `Seq(S)`, or a set-op/structural set built over one). Unlike
+/// `is_symbolic_set_expr`, a finite structural set (`SUBSET {1,2}`, `[D -> {0,1}]`)
+/// is enumerable, so this recurses into structural contents rather than treating
+/// every structural set as symbolic. Mirrors what `eval_set` can actually build.
+pub(crate) fn is_non_enumerable_set_expr(
+    expr: &Expr,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<bool> {
+    Ok(match expr {
+        Expr::SeqSet(_) => true,
+        Expr::Var(_) => matches!(eval(expr, env, defs)?, Value::IntSet(_)),
+        Expr::Powerset(e) => is_non_enumerable_set_expr(e, env, defs)?,
+        Expr::FunctionSet(d, c) => {
+            is_non_enumerable_set_expr(d, env, defs)? || is_non_enumerable_set_expr(c, env, defs)?
+        }
+        Expr::RecordSet(fields) => {
+            for (_, ty) in fields {
+                if is_non_enumerable_set_expr(ty, env, defs)? {
+                    return Ok(true);
+                }
+            }
+            false
+        }
+        Expr::Union(l, r)
+        | Expr::Intersect(l, r)
+        | Expr::SetMinus(l, r)
+        | Expr::Cartesian(l, r) => {
+            is_non_enumerable_set_expr(l, env, defs)? || is_non_enumerable_set_expr(r, env, defs)?
+        }
+        _ => false,
+    })
+}
+
 enum ResolvedDomain<'a> {
     Concrete(BTreeSet<Value>),
     Symbolic(&'a Expr),
@@ -121,7 +175,7 @@ enum ResolvedDomain<'a> {
 
 impl<'a> ResolvedDomain<'a> {
     fn resolve(expr: &'a Expr, env: &mut Env, defs: &Definitions) -> Result<Self> {
-        if matches!(expr, Expr::Any) || is_structural_set_expr(expr) {
+        if is_symbolic_set_expr(expr, env, defs)? {
             Ok(ResolvedDomain::Symbolic(expr))
         } else {
             Ok(ResolvedDomain::Concrete(eval_set(expr, env, defs)?))
@@ -198,16 +252,36 @@ pub(crate) fn in_set_symbolic(
                 Ok(false)
             }
         }
-        _ => {
-            let set = eval_set(set_expr, env, defs)?;
-            Ok(set.contains(val))
+        Expr::Union(l, r) if set_op_is_symbolic(l, r, env, defs)? => {
+            Ok(in_set_symbolic(val, l, env, defs)? || in_set_symbolic(val, r, env, defs)?)
         }
+        Expr::Intersect(l, r) if set_op_is_symbolic(l, r, env, defs)? => {
+            Ok(in_set_symbolic(val, l, env, defs)? && in_set_symbolic(val, r, env, defs)?)
+        }
+        Expr::SetMinus(l, r) if set_op_is_symbolic(l, r, env, defs)? => {
+            Ok(in_set_symbolic(val, l, env, defs)? && !in_set_symbolic(val, r, env, defs)?)
+        }
+        Expr::Cartesian(l, r) if set_op_is_symbolic(l, r, env, defs)? => match val {
+            Value::Tuple(t) if t.len() == 2 => {
+                Ok(in_set_symbolic(&t[0], l, env, defs)? && in_set_symbolic(&t[1], r, env, defs)?)
+            }
+            _ => Ok(false),
+        },
+        _ => match eval(set_expr, env, defs)? {
+            Value::Set(s) => Ok(s.contains(val)),
+            Value::IntSet(d) => Ok(matches!(val, Value::Int(n) if d.contains(*n))),
+            other => Err(EvalError::type_mismatch("Set", other)),
+        },
     }
 }
 
 pub(crate) fn eval_set(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<BTreeSet<Value>> {
     match eval(expr, env, defs)? {
         Value::Set(s) => Ok(Arc::unwrap_or_clone(s)),
+        Value::IntSet(d) => Err(EvalError::domain_error(format!(
+            "cannot enumerate the infinite set {}",
+            d.name()
+        ))),
         other => Err(EvalError::TypeMismatch {
             expected: "Set",
             got: other,

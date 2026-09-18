@@ -16,3 +16,7 @@ pkg/
 .wasm-tools/
 ARCHITECTURE.md
 REVIEW_ANALYSIS.md
+
+# TLC metadir output (fingerprint/state files)
+states/
+**/states/

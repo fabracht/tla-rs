@@ -50,6 +50,9 @@ pub struct CheckerConfig {
     pub state_constraints: Vec<Expr>,
     pub allow_unassigned_stutter: bool,
     pub use_inference_engine: bool,
+    /// Treat `Nat` and `Int` as symbolic infinite sets (membership works,
+    /// enumeration errors) instead of the bounded finite approximation.
+    pub symbolic_integers: bool,
     /// Verify that the concrete spec refines the abstract spec reached through the
     /// named non-parameterized `INSTANCE` alias — `Spec => Alias!Spec`. Each
     /// concrete transition must satisfy the abstract `Next` or leave the abstract
@@ -83,6 +86,7 @@ impl Default for CheckerConfig {
             state_constraints: Vec::new(),
             allow_unassigned_stutter: false,
             use_inference_engine: false,
+            symbolic_integers: false,
             check_refinement: None,
         }
     }
@@ -366,6 +370,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         config.use_inference_engine,
         config.allow_unassigned_stutter,
     );
+    crate::eval::set_symbolic_integers(config.symbolic_integers);
     #[cfg(not(target_arch = "wasm32"))]
     let prep = prepare_spec(spec, domains, config.spec_path.as_ref(), config.quiet);
     #[cfg(target_arch = "wasm32")]
@@ -1275,6 +1280,7 @@ pub fn format_value(val: &Value) -> String {
         Value::Int(i) => i.to_string(),
         Value::Str(s) => format!("\"{}\"", s),
         Value::Model(m) => m.to_string(),
+        Value::IntSet(d) => d.name().to_string(),
         Value::Set(s) => {
             let elems: Vec<_> = s.iter().map(format_value).collect();
             format!("{{{}}}", elems.join(", "))
@@ -1343,7 +1349,7 @@ fn value_type_name(val: &Value) -> &'static str {
         Value::Int(_) => "Int",
         Value::Str(_) => "Str",
         Value::Model(_) => "ModelValue",
-        Value::Set(_) => "Set",
+        Value::Set(_) | Value::IntSet(_) => "Set",
         Value::Fn(_) => "Function",
         Value::Record(_) => "Record",
         Value::Tuple(_) => "Sequence",
@@ -1408,6 +1414,7 @@ pub fn value_to_json(val: &Value) -> String {
             "{{\"model_value\": \"{}\"}}",
             m.replace('\\', "\\\\").replace('"', "\\\"")
         ),
+        Value::IntSet(d) => format!("{{\"symbolic_set\": \"{}\"}}", d.name()),
         Value::Set(s) => {
             let elems: Vec<_> = s.iter().map(value_to_json).collect();
             format!("[{}]", elems.join(", "))

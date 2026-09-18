@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use crate::ast::{Env, Value};
+use crate::ast::{Env, IntDomain, Value};
 
 pub fn load_builtins(env: &mut Env) {
     let boolean: BTreeSet<Value> = [Value::Bool(false), Value::Bool(true)]
@@ -31,14 +31,22 @@ pub fn load_module(name: &str, env: &mut Env) {
 }
 
 fn load_naturals(env: &mut Env) {
-    let nat: BTreeSet<Value> = (0..=100).map(Value::Int).collect();
-    env.insert(Arc::from("Nat"), Value::set(nat));
+    if crate::eval::symbolic_integers() {
+        env.insert(Arc::from("Nat"), Value::IntSet(IntDomain::Nat));
+    } else {
+        let nat: BTreeSet<Value> = (0..=100).map(Value::Int).collect();
+        env.insert(Arc::from("Nat"), Value::set(nat));
+    }
 }
 
 fn load_integers(env: &mut Env) {
     load_naturals(env);
-    let int: BTreeSet<Value> = (-100..=100).map(Value::Int).collect();
-    env.insert(Arc::from("Int"), Value::set(int));
+    if crate::eval::symbolic_integers() {
+        env.insert(Arc::from("Int"), Value::IntSet(IntDomain::Int));
+    } else {
+        let int: BTreeSet<Value> = (-100..=100).map(Value::Int).collect();
+        env.insert(Arc::from("Int"), Value::set(int));
+    }
 }
 
 fn load_sequences(_env: &mut Env) {}

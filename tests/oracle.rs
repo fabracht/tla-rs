@@ -2075,3 +2075,41 @@ fn test_should_pass_fr_list_lin() {
         );
     });
 }
+
+#[test]
+fn test_official_voting_bounded() {
+    let path = Path::new("test_cases/official/Voting.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "Voting.tla (bounded Ballot) should pass, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_official_paxos_bounded() {
+    let path = Path::new("test_cases/official/Paxos.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "Paxos.tla (bounded Ballot) should pass, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_should_pass_symbolic_nat() {
+    let path = Path::new("test_cases/should_pass/symbolic_nat.tla");
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        symbolic_integers: true,
+        ..Default::default()
+    };
+    let result = check_spec_file_with_config(path, config);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "symbolic_nat.tla should pass under --symbolic-integers, got: {:?}",
+        result
+    );
+}

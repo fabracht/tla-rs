@@ -1,6 +1,28 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum IntDomain {
+    Nat,
+    Int,
+}
+
+impl IntDomain {
+    pub fn name(self) -> &'static str {
+        match self {
+            IntDomain::Nat => "Nat",
+            IntDomain::Int => "Int",
+        }
+    }
+
+    pub fn contains(self, n: i64) -> bool {
+        match self {
+            IntDomain::Nat => n >= 0,
+            IntDomain::Int => true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Value {
     Bool(bool),
@@ -11,6 +33,7 @@ pub enum Value {
     Fn(Arc<BTreeMap<Value, Value>>),
     Record(Arc<BTreeMap<Arc<str>, Value>>),
     Tuple(Arc<Vec<Value>>),
+    IntSet(IntDomain),
 }
 
 impl Value {

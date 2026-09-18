@@ -53,4 +53,4 @@ The standard type-invariant idiom `vars \subseteq [f1: T1, f2: T2, ...]` (and th
 
 ## Limitations
 
-`Nat` and `Int` are bounded (-100 to 100 by default). Temporal operators `[]`, `<>`, `~>` are parsed but cannot be evaluated directly — use `--check-liveness` for fairness/liveness properties via SCC analysis. Unbounded quantifiers (`\E x : P` without `\in S`) and `Seq(S)` enumeration are not supported. Recursive operators must be declared with `RECURSIVE`.
+By default `Nat` and `Int` are bounded (-100 to 100). With `--symbolic-integers` they become infinite symbolic sets matching TLC: membership (`x \in Nat`) and set-op membership (`x \in (Nat \ {0})`) work, `IsFiniteSet(Nat)` is `FALSE`, and any attempt to enumerate them (unbounded `\A`/`\E`, `{x \in Nat : P}`, `Cardinality`, `CHOOSE x \in Nat`, `[Nat -> T]`, `SUBSET Nat`) errors loudly. Temporal operators `[]`, `<>`, `~>` are parsed but cannot be evaluated directly — use `--check-liveness` for fairness/liveness properties via SCC analysis. Unbounded quantifiers (`\E x : P` without `\in S`) and `Seq(S)` enumeration are not supported. Recursive operators must be declared with `RECURSIVE`.

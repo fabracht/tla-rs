@@ -38,7 +38,7 @@ pub use self::global_state::{
     CheckerStats, EvalContext, clear_resolved_instances, reset_tlc_state,
     resolved_instance_def_names, resolved_instance_vars, set_checker_level,
     set_parameterized_instances, set_random_seed, set_resolved_instance_vars,
-    set_resolved_instances, update_checker_stats,
+    set_resolved_instances, set_symbolic_integers, symbolic_integers, update_checker_stats,
 };
 #[cfg(feature = "profiling")]
 pub use self::global_state::{
@@ -89,7 +89,7 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Arc;
 
-    use crate::ast::{Env, Expr, State, Value};
+    use crate::ast::{Env, Expr, IntDomain, State, Value};
 
     use super::*;
 
@@ -225,6 +225,87 @@ mod tests {
         let mut env = Env::new();
         assert!(eval(&div(lit_int(1), lit_int(0)), &mut env, &d).is_err());
         assert!(eval(&modulo(lit_int(1), lit_int(0)), &mut env, &d).is_err());
+    }
+
+    fn symbolic_int_env() -> Env {
+        let mut env = Env::new();
+        env.insert(var("Nat"), Value::IntSet(IntDomain::Nat));
+        env.insert(var("Int"), Value::IntSet(IntDomain::Int));
+        env
+    }
+
+    #[test]
+    fn symbolic_int_membership() {
+        let d = defs();
+        let mut env = symbolic_int_env();
+        let cases = [
+            (in_set(lit_int(5), var_expr("Nat")), true),
+            (in_set(lit_int(-3), var_expr("Nat")), false),
+            (in_set(lit_int(-3), var_expr("Int")), true),
+            (in_set(lit_int(150), var_expr("Nat")), true),
+            (in_set(lit_int(-150), var_expr("Int")), true),
+            (
+                in_set(
+                    lit_int(4),
+                    Expr::SetMinus(
+                        Box::new(var_expr("Nat")),
+                        Box::new(set_enum(vec![lit_int(0)])),
+                    ),
+                ),
+                true,
+            ),
+            (
+                in_set(
+                    lit_int(0),
+                    Expr::SetMinus(
+                        Box::new(var_expr("Nat")),
+                        Box::new(set_enum(vec![lit_int(0)])),
+                    ),
+                ),
+                false,
+            ),
+            (
+                in_set(
+                    lit_int(-1),
+                    Expr::Union(
+                        Box::new(var_expr("Nat")),
+                        Box::new(set_enum(vec![lit_int(-1)])),
+                    ),
+                ),
+                true,
+            ),
+        ];
+        for (expr, expected) in cases {
+            assert_eq!(eval(&expr, &mut env, &d).unwrap(), Value::Bool(expected));
+        }
+    }
+
+    #[test]
+    fn symbolic_int_is_finite_set_false() {
+        let d = defs();
+        let mut env = symbolic_int_env();
+        let nat = Expr::IsFiniteSet(Box::new(var_expr("Nat")));
+        let int = Expr::IsFiniteSet(Box::new(var_expr("Int")));
+        assert_eq!(eval(&nat, &mut env, &d).unwrap(), Value::Bool(false));
+        assert_eq!(eval(&int, &mut env, &d).unwrap(), Value::Bool(false));
+    }
+
+    #[test]
+    fn symbolic_int_enumeration_errors() {
+        let d = defs();
+        let mut env = symbolic_int_env();
+        let enumerating = [
+            Expr::Cardinality(Box::new(var_expr("Nat"))),
+            Expr::Forall(
+                var("n"),
+                Box::new(var_expr("Nat")),
+                Box::new(lit_bool(true)),
+            ),
+            Expr::Powerset(Box::new(var_expr("Nat"))),
+        ];
+        for expr in enumerating {
+            assert!(eval(&expr, &mut env, &d).is_err());
+        }
     }
 
     #[test]
