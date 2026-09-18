@@ -1482,11 +1482,75 @@ pub fn trace_to_json_with_actions(
     format!("[{}]", states.join(", "))
 }
 
+fn is_boolean_shaped(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Lit(Value::Bool(_))
+            | Expr::And(_, _)
+            | Expr::Or(_, _)
+            | Expr::Not(_)
+            | Expr::Implies(_, _)
+            | Expr::Equiv(_, _)
+            | Expr::Eq(_, _)
+            | Expr::Neq(_, _)
+            | Expr::Lt(_, _)
+            | Expr::Le(_, _)
+            | Expr::Gt(_, _)
+            | Expr::Ge(_, _)
+            | Expr::In(_, _)
+            | Expr::NotIn(_, _)
+            | Expr::Subset(_, _)
+            | Expr::ProperSubset(_, _)
+            | Expr::SqSubseteq(_, _)
+            | Expr::BagIn(_, _)
+            | Expr::IsABag(_)
+            | Expr::IsFiniteSet(_)
+            | Expr::Forall(_, _, _)
+            | Expr::Exists(_, _, _)
+    )
+}
+
+pub fn unchecked_predicate_warning(spec: &Spec, has_count_properties: bool) -> Option<String> {
+    if !spec.invariants.is_empty()
+        || !spec.liveness_properties.is_empty()
+        || !spec.quantified_temporal.is_empty()
+        || has_count_properties
+    {
+        return None;
+    }
+
+    let candidates: Vec<&str> = spec
+        .definitions
+        .iter()
+        .filter(|(_, (params, body))| {
+            params.is_empty()
+                && is_boolean_shaped(body)
+                && spec.init.as_ref() != Some(body.as_ref())
+                && spec.next.as_ref() != Some(body.as_ref())
+        })
+        .map(|(name, _)| name.as_ref())
+        .collect();
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "no invariants are being checked, but these definitions look like boolean predicates and may have been intended as invariants: {}. Name one with an Inv or TypeOK prefix, or list it under INVARIANT in the cfg.",
+        candidates.join(", ")
+    ))
+}
+
 pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
     match result {
         CheckResult::Ok(stats) => {
             let mut parts = Vec::new();
-            parts.push(r#""status": "ok""#.to_string());
+            let status = if stats.violation_count > 0 {
+                "invariant_violation"
+            } else {
+                "ok"
+            };
+            parts.push(format!(r#""status": "{}""#, status));
 
             let mut stat_parts = Vec::new();
             stat_parts.push(format!(r#""states_explored": {}"#, stats.states_explored));
@@ -1854,6 +1918,90 @@ mod tests {
             }
             other => panic!("expected Ok, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn json_status_reflects_violations_under_continue() {
+        let spec = Spec {
+            vars: vec![var("count")],
+            constants: vec![],
+            extends: vec![],
+            definitions: BTreeMap::new(),
+            assumes: vec![],
+            instances: vec![],
+            init: Some(eq(var_expr("count"), lit_int(0))),
+            next: Some(and(
+                in_set(var_expr("count"), set_range(lit_int(0), lit_int(2))),
+                eq(prime_expr("count"), add(var_expr("count"), lit_int(1))),
+            )),
+            invariants: vec![le(var_expr("count"), lit_int(1))],
+            invariant_names: vec![None],
+            fairness: vec![],
+            liveness_properties: vec![],
+            quantified_temporal: vec![],
+        };
+
+        let domains = Env::new();
+        let config = CheckerConfig {
+            allow_deadlock: true,
+            continue_on_violation: true,
+            ..CheckerConfig::default()
+        };
+        let result = check(&spec, &domains, &config);
+
+        match &result {
+            CheckResult::Ok(stats) => assert!(stats.violation_count > 0),
+            other => panic!("expected Ok with recorded violations, got {:?}", other),
+        }
+
+        let json = check_result_to_json(&result, &spec);
+        assert!(
+            json.contains(r#""status": "invariant_violation""#),
+            "status must reflect the recorded violations, got: {json}"
+        );
+    }
+
+    fn spec_with(invariants: Vec<Expr>) -> Spec {
+        let init = eq(var_expr("x"), lit_int(0));
+        let safety = le(var_expr("x"), lit_int(1));
+        let mut definitions = BTreeMap::new();
+        definitions.insert(var("Init"), (vec![], Arc::new(init.clone())));
+        definitions.insert(var("Safety"), (vec![], Arc::new(safety)));
+        let invariant_names = invariants.iter().map(|_| None).collect();
+        Spec {
+            vars: vec![var("x")],
+            constants: vec![],
+            extends: vec![],
+            definitions,
+            assumes: vec![],
+            instances: vec![],
+            init: Some(init),
+            next: None,
+            invariants,
+            invariant_names,
+            fairness: vec![],
+            liveness_properties: vec![],
+            quantified_temporal: vec![],
+        }
+    }
+
+    #[test]
+    fn warns_for_boolean_def_when_nothing_checked() {
+        let msg = unchecked_predicate_warning(&spec_with(vec![]), false)
+            .expect("should warn when nothing is checked");
+        assert!(msg.contains("Safety"), "got: {msg}");
+        assert!(!msg.contains("Init"), "init must be excluded: {msg}");
+    }
+
+    #[test]
+    fn no_warning_when_an_invariant_is_present() {
+        let spec = spec_with(vec![le(var_expr("x"), lit_int(1))]);
+        assert!(unchecked_predicate_warning(&spec, false).is_none());
+    }
+
+    #[test]
+    fn no_warning_when_count_properties_present() {
+        assert!(unchecked_predicate_warning(&spec_with(vec![]), true).is_none());
     }
 
     #[test]

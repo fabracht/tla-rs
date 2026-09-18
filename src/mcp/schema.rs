@@ -184,6 +184,8 @@ pub struct CheckSpecOutput {
     pub schema_version: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub advisories: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<ParseWarning>,
     #[serde(flatten)]
     pub outcome: CheckOutcome,
 }
@@ -193,12 +195,18 @@ impl CheckSpecOutput {
         Self {
             schema_version: schema_version_default(),
             advisories: Vec::new(),
+            warnings: Vec::new(),
             outcome,
         }
     }
 
     pub fn with_advisories(mut self, advisories: Vec<String>) -> Self {
         self.advisories = advisories;
+        self
+    }
+
+    pub fn with_warnings(mut self, warnings: Vec<ParseWarning>) -> Self {
+        self.warnings = warnings;
         self
     }
 }

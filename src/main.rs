@@ -13,7 +13,7 @@ use tla_checker::ast::{Env, Spec, Value};
 use tla_checker::checker::{
     CheckResult, CheckStats, CheckerConfig, PrepareSpecError, check, check_result_to_json,
     eval_error_to_diagnostic, format_eval_error, format_trace, format_trace_with_actions,
-    format_trace_with_diffs, write_trace_json,
+    format_trace_with_diffs, unchecked_predicate_warning, write_trace_json,
 };
 use tla_checker::config::{apply_config, parse_cfg, parse_constant_value, split_top_level};
 #[cfg(not(target_arch = "wasm32"))]
@@ -979,6 +979,10 @@ fn main() -> ExitCode {
 
     if let Some((sweep_name, sweep_values)) = sweep {
         return run_sweep(&spec, &domains, &config, &sweep_name, &sweep_values);
+    }
+
+    if let Some(message) = unchecked_predicate_warning(&spec, !config.count_properties.is_empty()) {
+        eprintln!("Warning: {message}");
     }
 
     let result = check(&spec, &domains, &config);

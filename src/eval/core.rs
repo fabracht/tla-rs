@@ -24,6 +24,25 @@ pub fn eval(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, || eval_inner(expr, env, defs))
 }
 
+fn floor_div(a: i64, b: i64) -> Option<i64> {
+    let q = a.checked_div(b)?;
+    let r = a % b;
+    if r != 0 && (r < 0) != (b < 0) {
+        Some(q - 1)
+    } else {
+        Some(q)
+    }
+}
+
+fn floor_mod(a: i64, b: i64) -> i64 {
+    let r = a.checked_rem(b).unwrap_or(0);
+    if r != 0 && (r < 0) != (b < 0) {
+        r + b
+    } else {
+        r
+    }
+}
+
 pub(crate) fn expand_unchanged_vars(vars: &[Arc<str>], defs: &Definitions) -> Vec<Arc<str>> {
     let mut result = Vec::new();
     for var in vars {
@@ -133,19 +152,25 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         Expr::Add(l, r) => {
             let lv = eval_int(l, env, defs)?;
             let rv = eval_int(r, env, defs)?;
-            Ok(Value::Int(lv + rv))
+            lv.checked_add(rv)
+                .map(Value::Int)
+                .ok_or_else(|| EvalError::domain_error("integer overflow in addition"))
         }
 
         Expr::Sub(l, r) => {
             let lv = eval_int(l, env, defs)?;
             let rv = eval_int(r, env, defs)?;
-            Ok(Value::Int(lv - rv))
+            lv.checked_sub(rv)
+                .map(Value::Int)
+                .ok_or_else(|| EvalError::domain_error("integer overflow in subtraction"))
         }
 
         Expr::Mul(l, r) => {
             let lv = eval_int(l, env, defs)?;
             let rv = eval_int(r, env, defs)?;
-            Ok(Value::Int(lv * rv))
+            lv.checked_mul(rv)
+                .map(Value::Int)
+                .ok_or_else(|| EvalError::domain_error("integer overflow in multiplication"))
         }
 
         Expr::Div(l, r) => {
@@ -154,7 +179,9 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if rv == 0 {
                 return Err(EvalError::division_by_zero());
             }
-            Ok(Value::Int(lv / rv))
+            floor_div(lv, rv)
+                .map(Value::Int)
+                .ok_or_else(|| EvalError::domain_error("integer overflow in division"))
         }
 
         Expr::Mod(l, r) => {
@@ -163,7 +190,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if rv == 0 {
                 return Err(EvalError::division_by_zero());
             }
-            Ok(Value::Int(lv % rv))
+            Ok(Value::Int(floor_mod(lv, rv)))
         }
 
         Expr::BitwiseAnd(l, r) => {
@@ -242,12 +269,18 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if e < 0 {
                 return Err(EvalError::domain_error("negative exponent"));
             }
-            Ok(Value::Int(b.pow(e as u32)))
+            let exponent = u32::try_from(e)
+                .map_err(|_| EvalError::domain_error("integer overflow in exponentiation"))?;
+            b.checked_pow(exponent)
+                .map(Value::Int)
+                .ok_or_else(|| EvalError::domain_error("integer overflow in exponentiation"))
         }
 
         Expr::Neg(e) => {
             let v = eval_int(e, env, defs)?;
-            Ok(Value::Int(-v))
+            v.checked_neg()
+                .map(Value::Int)
+                .ok_or_else(|| EvalError::domain_error("integer overflow in negation"))
         }
 
         Expr::Lt(l, r) => {

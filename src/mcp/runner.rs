@@ -258,10 +258,23 @@ pub fn check_spec(input: &CheckSpecInput) -> CheckSpecOutput {
     }
 
     let advisories = collect_advisories(input);
+    let predicate_warning = crate::checker::unchecked_predicate_warning(
+        &loaded.spec,
+        !loaded.checker_config.count_properties.is_empty(),
+    );
 
     let result = check(&loaded.spec, &loaded.domains, &loaded.checker_config);
-    CheckSpecOutput::new(map_check_result(result, &loaded.spec, &loaded.source))
+    let outcome = map_check_result(result, &loaded.spec, &loaded.source);
+    let mut warnings = loaded.warnings;
+    if let Some(message) = predicate_warning {
+        warnings.push(ParseWarning {
+            message,
+            span: None,
+        });
+    }
+    CheckSpecOutput::new(outcome)
         .with_advisories(advisories)
+        .with_warnings(warnings)
 }
 
 fn collect_advisories(input: &CheckSpecInput) -> Vec<String> {
@@ -805,5 +818,51 @@ pub fn export_demo_html(input: &ExportDemoHtmlInput) -> ExportDemoHtmlOutput {
                 input.out_path, e
             ))),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_spec(dir_name: &str, body: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(dir_name);
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("Spec.tla");
+        let mut f = std::fs::File::create(&path).expect("create spec");
+        f.write_all(body.as_bytes()).expect("write spec");
+        path
+    }
+
+    fn check_input(path: &std::path::Path) -> CheckSpecInput {
+        CheckSpecInput {
+            spec_path: path.to_string_lossy().into_owned(),
+            max_states: 1000,
+            max_depth: 100,
+            max_seconds: 30,
+            constants: BTreeMap::new(),
+            symmetry: None,
+            allow_deadlock: Some(true),
+            check_liveness: None,
+            count_satisfying: Vec::new(),
+            continue_on_violation: false,
+            state_constraint: None,
+            config_path: None,
+        }
+    }
+
+    #[test]
+    fn check_spec_surfaces_parse_warning_for_dropped_invariant() {
+        let dir_name = "tlc_test_check_spec_warnings";
+        let spec = "---- MODULE Dropped ----\nVARIABLES x\nInit == x = 0\nNext == x' = x\nInvBad == IF x\nInvType == x = 0\n====\n";
+        let path = write_spec(dir_name, spec);
+        let out = check_spec(&check_input(&path));
+        assert!(
+            !out.warnings.is_empty(),
+            "check_spec must surface the dropped-invariant parse warning; got {:?}",
+            out.warnings
+        );
+        let _ = std::fs::remove_dir_all(std::env::temp_dir().join(dir_name));
     }
 }
