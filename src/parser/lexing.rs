@@ -127,17 +127,6 @@ impl Parser {
             .unwrap_or(Span::empty())
     }
 
-    pub(super) fn prev_span(&self) -> Span {
-        if self.pos > 0 {
-            self.tokens
-                .get(self.pos - 1)
-                .map(|t| t.span)
-                .unwrap_or(Span::empty())
-        } else {
-            Span::empty()
-        }
-    }
-
     pub(super) fn is_module_prefix(s: &str) -> bool {
         !s.is_empty() && (s.chars().all(|c| c.is_ascii_uppercase()) || s.ends_with('_'))
     }

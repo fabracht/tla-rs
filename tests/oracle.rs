@@ -2126,3 +2126,16 @@ fn test_should_pass_symbolic_nat_via_cfg_directive() {
         result
     );
 }
+
+#[test]
+fn test_should_pass_prime_defined_op() {
+    // `NonNegative'` must distribute the prime to `x' >= 0`; a regression that
+    // dropped the prime would let x = -5 become reachable and violate Inv.
+    let path = Path::new("test_cases/should_pass/prime_defined_op.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "priming a defined operator should distribute over its body, got: {:?}",
+        result
+    );
+}

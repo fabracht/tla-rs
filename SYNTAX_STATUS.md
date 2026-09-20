@@ -128,7 +128,7 @@ Cross-checked against:
 ### State Operators
 | ASCII | Description |
 |-------|-------------|
-| `x'` | Primed variable (next state) |
+| `x'` | Primed variable (next state); prime distributes over expressions and defined operators, so `Op'` and `(f[i])'` prime every state variable within |
 | `UNCHANGED <<x, y>>` | Variables unchanged |
 
 ### Relation Operators
