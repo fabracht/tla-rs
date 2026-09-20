@@ -14,6 +14,7 @@ pub struct TlcConfig {
     pub properties: Vec<Arc<str>>,
     pub symmetry: Option<Arc<str>>,
     pub check_deadlock: Option<bool>,
+    pub symbolic_integers: Option<bool>,
     pub constraints: Vec<Arc<str>>,
     pub action_constraints: Vec<Arc<str>>,
 }
@@ -29,6 +30,7 @@ impl TlcConfig {
             properties: Vec::new(),
             symmetry: None,
             check_deadlock: None,
+            symbolic_integers: None,
             constraints: Vec::new(),
             action_constraints: Vec::new(),
         }
@@ -228,6 +230,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                     | "PROPERTIES"
                     | "SYMMETRY"
                     | "CHECK_DEADLOCK"
+                    | "SYMBOLIC_INTEGERS"
                     | "CONSTRAINT"
                     | "CONSTRAINTS"
                     | "ACTION_CONSTRAINT"
@@ -578,6 +581,20 @@ pub fn parse_cfg(input: &str) -> Result<TlcConfig, String> {
                         }
                     }
                 }
+                "SYMBOLIC_INTEGERS" => {
+                    pos += 1;
+                    let name = expect_ident(&tokens, &mut pos)?;
+                    match name.as_str() {
+                        "TRUE" => cfg.symbolic_integers = Some(true),
+                        "FALSE" => cfg.symbolic_integers = Some(false),
+                        other => {
+                            return Err(format!(
+                                "SYMBOLIC_INTEGERS expects TRUE or FALSE, got '{}'",
+                                other
+                            ));
+                        }
+                    }
+                }
                 "CONSTRAINT" | "CONSTRAINTS" => {
                     pos += 1;
                     while pos < tokens.len() && !is_keyword(&tokens[pos]) {
@@ -768,6 +785,10 @@ pub fn apply_config(
         && !cli_allow_deadlock
     {
         checker_config.allow_deadlock = !check_dl;
+    }
+
+    if let Some(symbolic_integers) = cfg.symbolic_integers {
+        checker_config.symbolic_integers = symbolic_integers;
     }
 
     for c in &cfg.constraints {
@@ -976,6 +997,23 @@ mod tests {
         let input = "CHECK_DEADLOCK FALSE";
         let cfg = parse_cfg(input).unwrap();
         assert_eq!(cfg.check_deadlock, Some(false));
+    }
+
+    #[test]
+    fn parse_symbolic_integers_true() {
+        let cfg = parse_cfg("SYMBOLIC_INTEGERS TRUE").unwrap();
+        assert_eq!(cfg.symbolic_integers, Some(true));
+    }
+
+    #[test]
+    fn parse_symbolic_integers_false() {
+        let cfg = parse_cfg("SYMBOLIC_INTEGERS FALSE").unwrap();
+        assert_eq!(cfg.symbolic_integers, Some(false));
+    }
+
+    #[test]
+    fn error_invalid_symbolic_integers() {
+        assert!(parse_cfg("SYMBOLIC_INTEGERS MAYBE").is_err());
     }
 
     #[test]

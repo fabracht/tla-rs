@@ -169,6 +169,8 @@ pub struct CheckSpecInput {
     #[serde(default)]
     pub check_liveness: Option<bool>,
     #[serde(default)]
+    pub symbolic_integers: Option<bool>,
+    #[serde(default)]
     pub count_satisfying: Vec<String>,
     #[serde(default)]
     pub continue_on_violation: bool,
