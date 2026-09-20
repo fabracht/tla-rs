@@ -53,6 +53,12 @@ pub struct CheckerConfig {
     /// Treat `Nat` and `Int` as symbolic infinite sets (membership works,
     /// enumeration errors) instead of the bounded finite approximation.
     pub symbolic_integers: bool,
+    /// Maximum enumerable sizes for the eager set-enumeration operators
+    /// (`SUBSET`, `Permutations`, `SubBag`); raising them trades safety against
+    /// state/space blowup.
+    pub max_powerset: usize,
+    pub max_permutations: usize,
+    pub max_subbag_copies: usize,
     /// Verify that the concrete spec refines the abstract spec reached through the
     /// named non-parameterized `INSTANCE` alias — `Spec => Alias!Spec`. Each
     /// concrete transition must satisfy the abstract `Next` or leave the abstract
@@ -87,6 +93,9 @@ impl Default for CheckerConfig {
             allow_unassigned_stutter: false,
             use_inference_engine: false,
             symbolic_integers: false,
+            max_powerset: 20,
+            max_permutations: 10,
+            max_subbag_copies: 20,
             check_refinement: None,
         }
     }
@@ -371,6 +380,11 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         config.allow_unassigned_stutter,
     );
     crate::eval::set_symbolic_integers(config.symbolic_integers);
+    crate::eval::set_enum_caps(crate::eval::EnumCaps {
+        powerset: config.max_powerset,
+        permutations: config.max_permutations,
+        subbag: config.max_subbag_copies,
+    });
     #[cfg(not(target_arch = "wasm32"))]
     let prep = prepare_spec(spec, domains, config.spec_path.as_ref(), config.quiet);
     #[cfg(target_arch = "wasm32")]

@@ -218,6 +218,9 @@ pub fn check_spec(input: &CheckSpecInput) -> CheckSpecOutput {
     if let Some(check_liveness) = input.check_liveness {
         loaded.checker_config.check_liveness = check_liveness;
     }
+    if let Some(symbolic_integers) = input.symbolic_integers {
+        loaded.checker_config.symbolic_integers = symbolic_integers;
+    }
     loaded.checker_config.continue_on_violation = input.continue_on_violation;
     loaded.checker_config.count_properties = input
         .count_satisfying
@@ -845,6 +848,7 @@ mod tests {
             symmetry: None,
             allow_deadlock: Some(true),
             check_liveness: None,
+            symbolic_integers: None,
             count_satisfying: Vec::new(),
             continue_on_violation: false,
             state_constraint: None,

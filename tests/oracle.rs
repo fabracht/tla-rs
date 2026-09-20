@@ -2113,3 +2113,16 @@ fn test_should_pass_symbolic_nat() {
         result
     );
 }
+
+#[test]
+fn test_should_pass_symbolic_nat_via_cfg_directive() {
+    // No manual config: the adjacent .cfg's `SYMBOLIC_INTEGERS TRUE` alone must
+    // enable symbolic Nat/Int.
+    let path = Path::new("test_cases/should_pass/symbolic_nat.tla");
+    let result = check_spec_file(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "symbolic_nat.tla should pass via the SYMBOLIC_INTEGERS cfg directive, got: {:?}",
+        result
+    );
+}
