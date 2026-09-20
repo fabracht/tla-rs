@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::ast::{Expr, Value};
 use crate::lexer::Token;
 
-use super::error::{ParseError, Result};
+use super::error::Result;
 use super::lexing::Parser;
 
 impl Parser {
@@ -879,18 +879,246 @@ impl Parser {
         }
     }
 
+    /// Distribute a prime over an expression: `(x >= 0)'` becomes `x' >= 0`.
+    /// Every state-variable leaf is primed; constants and quantifier/`LET`-bound
+    /// names are left rigid. Zero-arg operators are already inlined at their use
+    /// sites, so `NonNegative'` reaches here as its body and primes correctly.
+    fn prime_distribute(&self, expr: &Expr, bound: &mut Vec<Arc<str>>) -> Expr {
+        use Expr::*;
+        let un = |e: &Expr, b: &mut Vec<Arc<str>>| Box::new(self.prime_distribute(e, b));
+        let binder = |s: &Self, n: &Arc<str>, dom: &Expr, body: &Expr, b: &mut Vec<Arc<str>>| {
+            let d = Box::new(s.prime_distribute(dom, b));
+            b.push(n.clone());
+            let body = Box::new(s.prime_distribute(body, b));
+            b.pop();
+            (d, body)
+        };
+        match expr {
+            Var(v) => {
+                if bound.iter().any(|x| x == v) || self.constants.iter().any(|c| c == v) {
+                    Var(v.clone())
+                } else {
+                    Prime(v.clone())
+                }
+            }
+            Prime(v) => Prime(v.clone()),
+            Lit(x) => Lit(x.clone()),
+            OldValue => OldValue,
+            JavaTime => JavaTime,
+            SystemTime => SystemTime,
+            Any => Any,
+            EmptyBag => EmptyBag,
+            Unchanged(vs) => Unchanged(vs.clone()),
+
+            Not(e) => Not(un(e, bound)),
+            Neg(e) => Neg(un(e, bound)),
+            TransitiveClosure(e) => TransitiveClosure(un(e, bound)),
+            ReflexiveTransitiveClosure(e) => ReflexiveTransitiveClosure(un(e, bound)),
+            Powerset(e) => Powerset(un(e, bound)),
+            Cardinality(e) => Cardinality(un(e, bound)),
+            IsFiniteSet(e) => IsFiniteSet(un(e, bound)),
+            BigUnion(e) => BigUnion(un(e, bound)),
+            Domain(e) => Domain(un(e, bound)),
+            Len(e) => Len(un(e, bound)),
+            Head(e) => Head(un(e, bound)),
+            Tail(e) => Tail(un(e, bound)),
+            SeqSet(e) => SeqSet(un(e, bound)),
+            PrintT(e) => PrintT(un(e, bound)),
+            Permutations(e) => Permutations(un(e, bound)),
+            TLCToString(e) => TLCToString(un(e, bound)),
+            RandomElement(e) => RandomElement(un(e, bound)),
+            TLCGet(e) => TLCGet(un(e, bound)),
+            TLCEval(e) => TLCEval(un(e, bound)),
+            IsABag(e) => IsABag(un(e, bound)),
+            BagToSet(e) => BagToSet(un(e, bound)),
+            SetToBag(e) => SetToBag(un(e, bound)),
+            BagUnion(e) => BagUnion(un(e, bound)),
+            SubBag(e) => SubBag(un(e, bound)),
+            BagCardinality(e) => BagCardinality(un(e, bound)),
+            Always(e) => Always(un(e, bound)),
+            Eventually(e) => Eventually(un(e, bound)),
+            EnabledOp(e) => EnabledOp(un(e, bound)),
+
+            And(l, r) => And(un(l, bound), un(r, bound)),
+            Or(l, r) => Or(un(l, bound), un(r, bound)),
+            Implies(l, r) => Implies(un(l, bound), un(r, bound)),
+            Equiv(l, r) => Equiv(un(l, bound), un(r, bound)),
+            Eq(l, r) => Eq(un(l, bound), un(r, bound)),
+            Neq(l, r) => Neq(un(l, bound), un(r, bound)),
+            In(l, r) => In(un(l, bound), un(r, bound)),
+            NotIn(l, r) => NotIn(un(l, bound), un(r, bound)),
+            Add(l, r) => Add(un(l, bound), un(r, bound)),
+            Sub(l, r) => Sub(un(l, bound), un(r, bound)),
+            Mul(l, r) => Mul(un(l, bound), un(r, bound)),
+            Div(l, r) => Div(un(l, bound), un(r, bound)),
+            Mod(l, r) => Mod(un(l, bound), un(r, bound)),
+            Exp(l, r) => Exp(un(l, bound), un(r, bound)),
+            BitwiseAnd(l, r) => BitwiseAnd(un(l, bound), un(r, bound)),
+            ActionCompose(l, r) => ActionCompose(un(l, bound), un(r, bound)),
+            Lt(l, r) => Lt(un(l, bound), un(r, bound)),
+            Le(l, r) => Le(un(l, bound), un(r, bound)),
+            Gt(l, r) => Gt(un(l, bound), un(r, bound)),
+            Ge(l, r) => Ge(un(l, bound), un(r, bound)),
+            SetRange(l, r) => SetRange(un(l, bound), un(r, bound)),
+            Union(l, r) => Union(un(l, bound), un(r, bound)),
+            Intersect(l, r) => Intersect(un(l, bound), un(r, bound)),
+            SetMinus(l, r) => SetMinus(un(l, bound), un(r, bound)),
+            Cartesian(l, r) => Cartesian(un(l, bound), un(r, bound)),
+            Subset(l, r) => Subset(un(l, bound), un(r, bound)),
+            ProperSubset(l, r) => ProperSubset(un(l, bound), un(r, bound)),
+            FnApp(l, r) => FnApp(un(l, bound), un(r, bound)),
+            FnMerge(l, r) => FnMerge(un(l, bound), un(r, bound)),
+            SingleFn(l, r) => SingleFn(un(l, bound), un(r, bound)),
+            FunctionSet(l, r) => FunctionSet(un(l, bound), un(r, bound)),
+            Append(l, r) => Append(un(l, bound), un(r, bound)),
+            Concat(l, r) => Concat(un(l, bound), un(r, bound)),
+            SelectSeq(l, r) => SelectSeq(un(l, bound), un(r, bound)),
+            Print(l, r) => Print(un(l, bound), un(r, bound)),
+            Assert(l, r) => Assert(un(l, bound), un(r, bound)),
+            TLCSet(l, r) => TLCSet(un(l, bound), un(r, bound)),
+            SortSeq(l, r) => SortSeq(un(l, bound), un(r, bound)),
+            BagIn(l, r) => BagIn(un(l, bound), un(r, bound)),
+            BagAdd(l, r) => BagAdd(un(l, bound), un(r, bound)),
+            BagSub(l, r) => BagSub(un(l, bound), un(r, bound)),
+            SqSubseteq(l, r) => SqSubseteq(un(l, bound), un(r, bound)),
+            BagOfAll(l, r) => BagOfAll(un(l, bound), un(r, bound)),
+            CopiesIn(l, r) => CopiesIn(un(l, bound), un(r, bound)),
+            LeadsTo(l, r) => LeadsTo(un(l, bound), un(r, bound)),
+
+            If(c, t, e) => If(un(c, bound), un(t, bound), un(e, bound)),
+            SubSeq(a, b, c) => SubSeq(un(a, bound), un(b, bound), un(c, bound)),
+
+            Exists(n, d, b) => {
+                let (d, b) = binder(self, n, d, b, bound);
+                Exists(n.clone(), d, b)
+            }
+            Forall(n, d, b) => {
+                let (d, b) = binder(self, n, d, b, bound);
+                Forall(n.clone(), d, b)
+            }
+            Choose(n, d, b) => {
+                let (d, b) = binder(self, n, d, b, bound);
+                Choose(n.clone(), d, b)
+            }
+            FnDef(n, d, b) => {
+                let (d, b) = binder(self, n, d, b, bound);
+                FnDef(n.clone(), d, b)
+            }
+            SetFilter(n, d, b) => {
+                let (d, b) = binder(self, n, d, b, bound);
+                SetFilter(n.clone(), d, b)
+            }
+            SetMap(n, d, b) => {
+                let (d, b) = binder(self, n, d, b, bound);
+                SetMap(n.clone(), d, b)
+            }
+            CustomOp(n, d, b) => {
+                let (d, b) = binder(self, n, d, b, bound);
+                CustomOp(n.clone(), d, b)
+            }
+            ChooseUnbounded(n, b) => {
+                bound.push(n.clone());
+                let body = Box::new(self.prime_distribute(b, bound));
+                bound.pop();
+                ChooseUnbounded(n.clone(), body)
+            }
+            Lambda(params, b) => {
+                for p in params {
+                    bound.push(p.clone());
+                }
+                let body = Box::new(self.prime_distribute(b, bound));
+                for _ in params {
+                    bound.pop();
+                }
+                Lambda(params.clone(), body)
+            }
+            Let(n, binding, body) => {
+                let binding = un(binding, bound);
+                bound.push(n.clone());
+                let body = Box::new(self.prime_distribute(body, bound));
+                bound.pop();
+                Let(n.clone(), binding, body)
+            }
+
+            SetEnum(elems) => SetEnum(
+                elems
+                    .iter()
+                    .map(|e| self.prime_distribute(e, bound))
+                    .collect(),
+            ),
+            TupleLit(elems) => TupleLit(
+                elems
+                    .iter()
+                    .map(|e| self.prime_distribute(e, bound))
+                    .collect(),
+            ),
+            RecordLit(fields) => RecordLit(
+                fields
+                    .iter()
+                    .map(|(k, e)| (k.clone(), self.prime_distribute(e, bound)))
+                    .collect(),
+            ),
+            RecordSet(fields) => RecordSet(
+                fields
+                    .iter()
+                    .map(|(k, e)| (k.clone(), self.prime_distribute(e, bound)))
+                    .collect(),
+            ),
+            RecordAccess(e, f) => RecordAccess(un(e, bound), f.clone()),
+            TupleAccess(e, i) => TupleAccess(un(e, bound), *i),
+            Except(base, updates) => Except(
+                un(base, bound),
+                updates
+                    .iter()
+                    .map(|(path, val)| {
+                        (
+                            path.iter()
+                                .map(|p| self.prime_distribute(p, bound))
+                                .collect(),
+                            self.prime_distribute(val, bound),
+                        )
+                    })
+                    .collect(),
+            ),
+            FnCall(name, args) => FnCall(
+                name.clone(),
+                args.iter()
+                    .map(|a| self.prime_distribute(a, bound))
+                    .collect(),
+            ),
+            QualifiedCall(inst, op, args) => QualifiedCall(
+                un(inst, bound),
+                op.clone(),
+                args.iter()
+                    .map(|a| self.prime_distribute(a, bound))
+                    .collect(),
+            ),
+            Case(branches) => Case(
+                branches
+                    .iter()
+                    .map(|(c, r)| {
+                        (
+                            self.prime_distribute(c, bound),
+                            self.prime_distribute(r, bound),
+                        )
+                    })
+                    .collect(),
+            ),
+            LabeledAction(n, a) => LabeledAction(n.clone(), un(a, bound)),
+            WeakFairness(v, e) => WeakFairness(v.clone(), un(e, bound)),
+            StrongFairness(v, e) => StrongFairness(v.clone(), un(e, bound)),
+            BoxAction(e, v) => BoxAction(un(e, bound), v.clone()),
+            DiamondAction(e, v) => DiamondAction(un(e, bound), v.clone()),
+        }
+    }
+
     fn parse_postfix(&mut self) -> Result<Expr> {
         let mut expr = self.parse_primary()?;
         loop {
             match self.peek() {
                 Token::Prime => {
                     self.advance();
-                    if let Expr::Var(name) = expr {
-                        expr = Expr::Prime(name);
-                    } else {
-                        return Err(ParseError::new("prime can only be applied to variable")
-                            .with_span(self.prev_span()));
-                    }
+                    expr = self.prime_distribute(&expr, &mut Vec::new());
                 }
                 Token::LBracket => {
                     self.advance();
