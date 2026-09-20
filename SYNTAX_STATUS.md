@@ -146,7 +146,7 @@ Cross-checked against:
 | `ToString(v)` | Convert value to string |
 | `SystemTime` | Current time in ms since epoch |
 | `JavaTime` | Errors (use SystemTime instead) |
-| `Permutations(S)` | All permutations of set (max 10 elements) |
+| `Permutations(S)` | All permutations of set (max 10 elements by default; `--max-permutations`) |
 | `SortSeq(s, cmp)` | Sort sequence with comparator LAMBDA |
 | `RandomElement(S)` | Random element from set (deterministic with seed) |
 | `TLCGet(i)` | Get TLC state value at index i, or stats with string keys |
@@ -168,7 +168,7 @@ Cross-checked against:
 | `B1 \ominus B2` | ⊖ | Bag subtraction (subtract counts) |
 | `BagUnion(S)` | | Union of all bags in set S |
 | `B1 \sqsubseteq B2` | ⊑ | Bag subset (counts in B1 <= counts in B2) |
-| `SubBag(B)` | | Set of all sub-bags of B (max 20 total copies) |
+| `SubBag(B)` | | Set of all sub-bags of B (max 20 total copies by default; `--max-subbag`) |
 | `BagOfAll(F, B)` | | Map function over bag |
 | `BagCardinality(B)` | | Sum of all counts |
 | `CopiesIn(e, B)` | | Number of copies of e in B |

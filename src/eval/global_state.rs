@@ -93,6 +93,44 @@ pub fn symbolic_integers() -> bool {
     SYMBOLIC_INTEGERS.with(|c| c.get())
 }
 
+/// Maximum sizes for the eager set-enumeration operators that would otherwise
+/// blow up. Configurable so a spec that legitimately needs a larger powerset,
+/// permutation set, or sub-bag enumeration can raise them.
+#[derive(Clone, Copy)]
+pub struct EnumCaps {
+    pub powerset: usize,
+    pub permutations: usize,
+    pub subbag: usize,
+}
+
+impl Default for EnumCaps {
+    fn default() -> Self {
+        Self {
+            powerset: 20,
+            permutations: 10,
+            subbag: 20,
+        }
+    }
+}
+
+thread_local! {
+    static ENUM_CAPS: Cell<EnumCaps> = const {
+        Cell::new(EnumCaps {
+            powerset: 20,
+            permutations: 10,
+            subbag: 20,
+        })
+    };
+}
+
+pub fn set_enum_caps(caps: EnumCaps) {
+    ENUM_CAPS.with(|c| c.set(caps));
+}
+
+pub fn enum_caps() -> EnumCaps {
+    ENUM_CAPS.with(Cell::get)
+}
+
 pub fn set_random_seed(seed: u64) {
     RNG.with(|rng| *rng.borrow_mut() = fastrand::Rng::with_seed(seed));
 }

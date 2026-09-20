@@ -427,10 +427,11 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             let s = eval_set(e, env, defs)?;
             let elements: Vec<_> = s.into_iter().collect();
             let n = elements.len();
-            if n > 20 {
+            let max = crate::eval::enum_caps().powerset;
+            if n > max {
                 return Err(EvalError::domain_error(format!(
-                    "SUBSET of set with {} elements is too large (max 20)",
-                    n
+                    "SUBSET of set with {} elements is too large (max {})",
+                    n, max
                 )));
             }
             let mut result = BTreeSet::new();
@@ -1035,10 +1036,11 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             let set = eval_set(set_expr, env, defs)?;
             let elements: Vec<Value> = set.into_iter().collect();
             let n = elements.len();
-            if n > 10 {
+            let max = crate::eval::enum_caps().permutations;
+            if n > max {
                 return Err(EvalError::domain_error(format!(
-                    "Permutations of set with {} elements is too large (max 10)",
-                    n
+                    "Permutations of set with {} elements is too large (max {})",
+                    n, max
                 )));
             }
             let perms = permutations(&elements);
@@ -1303,10 +1305,12 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     }
                 })
                 .collect();
-            if elements.iter().map(|(_, c)| *c).sum::<i64>() > 20 {
-                return Err(EvalError::domain_error(
-                    "SubBag of bag with more than 20 total copies is too large",
-                ));
+            let max = crate::eval::enum_caps().subbag;
+            if elements.iter().map(|(_, c)| *c).sum::<i64>() > max as i64 {
+                return Err(EvalError::domain_error(format!(
+                    "SubBag of bag with more than {} total copies is too large",
+                    max
+                )));
             }
             let mut result_set = BTreeSet::new();
             enumerate_subbags(&elements, 0, BTreeMap::new(), &mut result_set);

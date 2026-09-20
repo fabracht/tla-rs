@@ -385,6 +385,39 @@ fn main() -> ExitCode {
                     std::process::exit(1);
                 });
             }
+            "--max-powerset" => {
+                i += 1;
+                if missing_value(&args, i) {
+                    eprintln!("--max-powerset requires a value");
+                    return ExitCode::FAILURE;
+                }
+                config.max_powerset = args[i].parse().unwrap_or_else(|_| {
+                    eprintln!("invalid value for --max-powerset");
+                    std::process::exit(1);
+                });
+            }
+            "--max-permutations" => {
+                i += 1;
+                if missing_value(&args, i) {
+                    eprintln!("--max-permutations requires a value");
+                    return ExitCode::FAILURE;
+                }
+                config.max_permutations = args[i].parse().unwrap_or_else(|_| {
+                    eprintln!("invalid value for --max-permutations");
+                    std::process::exit(1);
+                });
+            }
+            "--max-subbag" => {
+                i += 1;
+                if missing_value(&args, i) {
+                    eprintln!("--max-subbag requires a value");
+                    return ExitCode::FAILURE;
+                }
+                config.max_subbag_copies = args[i].parse().unwrap_or_else(|_| {
+                    eprintln!("invalid value for --max-subbag");
+                    std::process::exit(1);
+                });
+            }
             "--symmetry" | "-s" => {
                 i += 1;
                 if missing_value(&args, i) {
@@ -611,6 +644,15 @@ fn main() -> ExitCode {
                     "  --max-states N             Maximum states to explore (default: 1000000)"
                 );
                 println!("  --max-depth N              Maximum trace depth (default: 100)");
+                println!(
+                    "  --max-powerset N           Max set size for SUBSET enumeration (default: 20)"
+                );
+                println!(
+                    "  --max-permutations N       Max set size for Permutations (default: 10)"
+                );
+                println!(
+                    "  --max-subbag N             Max total copies for SubBag enumeration (default: 20)"
+                );
                 println!("  --export-dot FILE          Export state graph to DOT format");
                 println!(
                     "  --dot-mode MODE            DOT mode: full, trace, clean (default), choices"

@@ -35,8 +35,8 @@ pub use self::core::eval;
 pub use self::diagnostics::explain_invariant_failure;
 pub use self::error::EvalError;
 pub use self::global_state::{
-    CheckerStats, EvalContext, clear_resolved_instances, reset_tlc_state,
-    resolved_instance_def_names, resolved_instance_vars, set_checker_level,
+    CheckerStats, EnumCaps, EvalContext, clear_resolved_instances, enum_caps, reset_tlc_state,
+    resolved_instance_def_names, resolved_instance_vars, set_checker_level, set_enum_caps,
     set_parameterized_instances, set_random_seed, set_resolved_instance_vars,
     set_resolved_instances, set_symbolic_integers, symbolic_integers, update_checker_stats,
 };
@@ -306,6 +306,30 @@ mod tests {
         for expr in enumerating {
             assert!(eval(&expr, &mut env, &d).is_err());
         }
+    }
+
+    #[test]
+    fn eval_enum_caps_configurable() {
+        let d = defs();
+        let mut env = Env::new();
+        let four = Expr::Powerset(Box::new(set_range(lit_int(1), lit_int(4))));
+        set_enum_caps(EnumCaps {
+            powerset: 3,
+            ..EnumCaps::default()
+        });
+        assert!(
+            eval(&four, &mut env, &d).is_err(),
+            "cap 3 must reject a 4-element powerset"
+        );
+        set_enum_caps(EnumCaps {
+            powerset: 4,
+            ..EnumCaps::default()
+        });
+        assert!(
+            eval(&four, &mut env, &d).is_ok(),
+            "cap 4 must allow a 4-element powerset"
+        );
+        set_enum_caps(EnumCaps::default());
     }
 
     #[test]
