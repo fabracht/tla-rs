@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use super::Definitions;
 use super::ast_utils::{collect_disjuncts_with_labels, contains_prime_ref, parameterized_let_op};
-use super::core::{eval, expand_unchanged_vars};
+use super::core::{STACK_GROWTH, STACK_RED_ZONE, eval, expand_unchanged_vars};
 use super::error::{EvalError, Result};
 use super::helpers::{
     eval_bool, eval_set, get_nested, is_non_enumerable_set_expr, update_nested_value,
@@ -261,6 +261,18 @@ pub(crate) fn walk_action_enabled(
 }
 
 fn walk(
+    node: &Expr,
+    cont: &Cont<'_>,
+    env: &mut Env,
+    ctx: &WalkCtx<'_>,
+    run: &mut Run<'_>,
+) -> Result<()> {
+    stacker::maybe_grow(STACK_RED_ZONE, STACK_GROWTH, || {
+        walk_inner(node, cont, env, ctx, run)
+    })
+}
+
+fn walk_inner(
     node: &Expr,
     cont: &Cont<'_>,
     env: &mut Env,

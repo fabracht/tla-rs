@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::ast::{Env, Expr, Value};
 
 use super::Definitions;
-use super::core::eval;
+use super::core::{STACK_GROWTH, STACK_RED_ZONE, eval};
 use super::error::{EvalError, Result, value_type_name};
 use super::helpers::apply_fn_value;
 
@@ -40,8 +40,22 @@ pub(crate) fn eval_fn_def_recursive(
     Ok(memo.into_inner())
 }
 
-#[allow(clippy::only_used_in_recursion)]
 pub(crate) fn eval_with_memo(
+    expr: &Expr,
+    env: &mut Env,
+    defs: &Definitions,
+    fn_name: &Arc<str>,
+    fn_param: &Arc<str>,
+    fn_domain: &[Value],
+    memo: &RefCell<BTreeMap<Value, Value>>,
+) -> Result<Value> {
+    stacker::maybe_grow(STACK_RED_ZONE, STACK_GROWTH, || {
+        eval_with_memo_inner(expr, env, defs, fn_name, fn_param, fn_domain, memo)
+    })
+}
+
+#[allow(clippy::only_used_in_recursion)]
+fn eval_with_memo_inner(
     expr: &Expr,
     env: &mut Env,
     defs: &Definitions,
