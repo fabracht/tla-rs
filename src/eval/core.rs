@@ -20,8 +20,11 @@ use crate::checker::format_value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+const STACK_RED_ZONE: usize = 512 * 1024;
+const STACK_GROWTH: usize = 8 * 1024 * 1024;
+
 pub fn eval(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
-    stacker::maybe_grow(32 * 1024, 1024 * 1024, || eval_inner(expr, env, defs))
+    stacker::maybe_grow(STACK_RED_ZONE, STACK_GROWTH, || eval_inner(expr, env, defs))
 }
 
 fn floor_div(a: i64, b: i64) -> Option<i64> {
