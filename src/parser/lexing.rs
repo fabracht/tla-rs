@@ -39,6 +39,9 @@ pub struct Parser {
     /// branch — stops there instead of swallowing the next bullet of an
     /// enclosing list. Empty at paren depth, where alignment does not apply.
     pub(super) list_col_stack: Vec<u32>,
+    /// Whether the `/`-is-integer-division warning has already been emitted, so a
+    /// spec with many `/` uses gets one warning, not one per occurrence.
+    pub(super) warned_slash: bool,
 }
 
 impl Parser {
@@ -64,6 +67,7 @@ impl Parser {
             fresh_counter: 0,
             let_scope: Vec::new(),
             list_col_stack: Vec::new(),
+            warned_slash: false,
         })
     }
 

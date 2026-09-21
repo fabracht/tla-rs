@@ -35,6 +35,7 @@ pub enum Token {
     Minus,
     Star,
     Div,
+    Slash,
     Mod,
     DotDot,
     MapsTo,
@@ -179,6 +180,7 @@ impl std::fmt::Display for Token {
             Token::Minus => write!(f, "`-`"),
             Token::Star => write!(f, "`*`"),
             Token::Div => write!(f, "`\\div`"),
+            Token::Slash => write!(f, "`/`"),
             Token::Mod => write!(f, "`%`"),
             Token::DotDot => write!(f, "`..`"),
             Token::MapsTo => write!(f, "`|->`"),
@@ -735,7 +737,7 @@ impl<'a> Lexer<'a> {
         }
         if c == '/' {
             self.advance();
-            return Ok(Token::Div);
+            return Ok(Token::Slash);
         }
         if c == '!' {
             self.advance();
@@ -1214,7 +1216,7 @@ impl<'a> Lexer<'a> {
         }
         if c == '/' {
             self.advance();
-            return Ok(Token::Div);
+            return Ok(Token::Slash);
         }
         if c == '!' {
             self.advance();

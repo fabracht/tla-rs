@@ -46,6 +46,42 @@ mod tests {
     }
 
     #[test]
+    fn prime_distributes_over_defined_operator() {
+        // `NN'` (a zero-arg op inlined to `x >= 0`) primes to `x' >= 0`.
+        let (spec, _) =
+            parse_with_warnings("---- MODULE M ----\nVARIABLES x\nNN == x >= 0\nP == NN'\n====\n")
+                .unwrap();
+        let body = spec.definitions.get("P").map(|(_, b)| (**b).clone());
+        match body {
+            Some(Expr::Ge(l, r)) => {
+                assert!(
+                    matches!(*l, Expr::Prime(_)),
+                    "state var must be primed: {l:?}"
+                );
+                assert!(matches!(*r, Expr::Lit(_)));
+            }
+            other => panic!("expected `x' >= 0`, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn slash_division_warns_but_div_does_not() {
+        let (_, warnings) =
+            parse_with_warnings("---- MODULE M ----\nVARIABLES x\nA == (7 / 2) + (9 / 4)\n====\n")
+                .unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "two `/` uses must yield exactly one warning: {warnings:?}"
+        );
+        assert!(warnings[0].value.contains("integer division"));
+
+        let (_, none) =
+            parse_with_warnings("---- MODULE M ----\nVARIABLES x\nA == 7 \\div 2\n====\n").unwrap();
+        assert!(none.is_empty(), "`\\div` must not warn: {none:?}");
+    }
+
+    #[test]
     fn parse_set_range() {
         let expr = parse_expr("1..5").unwrap();
         assert!(matches!(expr, Expr::SetRange(_, _)));

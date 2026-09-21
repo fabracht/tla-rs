@@ -527,7 +527,21 @@ impl Parser {
                     let right = self.parse_exponential()?;
                     left = Expr::Mul(Box::new(left), Box::new(right));
                 }
-                Token::Div => {
+                Token::Slash if !self.warned_slash => {
+                    self.warned_slash = true;
+                    let span = self.current_span();
+                    self.warnings.push(crate::span::Spanned::new(
+                        "`/` is treated as integer division (like `\\div`); TLA+/TLC uses `/` \
+                         for real division, which tla-rs does not support — use `\\div` for \
+                         integer division to silence this"
+                            .to_string(),
+                        span,
+                    ));
+                    self.advance();
+                    let right = self.parse_exponential()?;
+                    left = Expr::Div(Box::new(left), Box::new(right));
+                }
+                Token::Div | Token::Slash => {
                     self.advance();
                     let right = self.parse_exponential()?;
                     left = Expr::Div(Box::new(left), Box::new(right));
