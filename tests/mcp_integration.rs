@@ -225,6 +225,41 @@ fn check_spec_passes_for_safe_spec() {
 }
 
 #[test]
+fn check_spec_warns_about_misnamed_invariant_alongside_a_checked_one() {
+    let dir = std::env::temp_dir().join("tla_mcp_misnamed_inv");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("Mixed.tla");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE Mixed ----\nVARIABLES x\nInit == x = 0\nNext == x' = x + 1 /\\ x < 5\nTypeOK == x \\in 0..10\nSafety == x < 2\n====\n",
+    )
+    .unwrap();
+    let input = CheckSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        max_states: 100,
+        max_depth: 50,
+        max_seconds: 30,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: Some(true),
+        check_liveness: None,
+        symbolic_integers: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        config_path: None,
+    };
+    let out = runner::check_spec(&input);
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.message.contains("Safety") && w.message.contains("intended as invariants")),
+        "expected a misnamed-invariant warning for Safety, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
 fn check_spec_honors_cfg_check_deadlock_false_when_input_unset() {
     let dir = std::env::temp_dir().join("tla_mcp_cfg_deadlock");
     std::fs::create_dir_all(&dir).unwrap();
