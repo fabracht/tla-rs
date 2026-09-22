@@ -474,6 +474,135 @@ pub(crate) fn expr_references(expr: &Expr, name: &Arc<str>) -> bool {
     }
 }
 
+pub(crate) fn expr_contains(haystack: &Expr, needle: &Expr) -> bool {
+    if haystack == needle {
+        return true;
+    }
+    match haystack {
+        Expr::Lit(_)
+        | Expr::Var(_)
+        | Expr::Prime(_)
+        | Expr::OldValue
+        | Expr::Any
+        | Expr::EmptyBag
+        | Expr::JavaTime
+        | Expr::SystemTime
+        | Expr::Unchanged(_) => false,
+        Expr::Not(e)
+        | Expr::Neg(e)
+        | Expr::Cardinality(e)
+        | Expr::IsFiniteSet(e)
+        | Expr::Powerset(e)
+        | Expr::BigUnion(e)
+        | Expr::Domain(e)
+        | Expr::Len(e)
+        | Expr::Head(e)
+        | Expr::Tail(e)
+        | Expr::TransitiveClosure(e)
+        | Expr::ReflexiveTransitiveClosure(e)
+        | Expr::SeqSet(e)
+        | Expr::PrintT(e)
+        | Expr::Permutations(e)
+        | Expr::TLCToString(e)
+        | Expr::RandomElement(e)
+        | Expr::TLCGet(e)
+        | Expr::TLCEval(e)
+        | Expr::IsABag(e)
+        | Expr::BagToSet(e)
+        | Expr::SetToBag(e)
+        | Expr::BagUnion(e)
+        | Expr::SubBag(e)
+        | Expr::BagCardinality(e)
+        | Expr::Always(e)
+        | Expr::Eventually(e)
+        | Expr::EnabledOp(e) => expr_contains(e, needle),
+        Expr::And(l, r)
+        | Expr::Or(l, r)
+        | Expr::Implies(l, r)
+        | Expr::Equiv(l, r)
+        | Expr::Eq(l, r)
+        | Expr::Neq(l, r)
+        | Expr::Lt(l, r)
+        | Expr::Le(l, r)
+        | Expr::Gt(l, r)
+        | Expr::Ge(l, r)
+        | Expr::Add(l, r)
+        | Expr::Sub(l, r)
+        | Expr::Mul(l, r)
+        | Expr::Div(l, r)
+        | Expr::Mod(l, r)
+        | Expr::Exp(l, r)
+        | Expr::BitwiseAnd(l, r)
+        | Expr::ActionCompose(l, r)
+        | Expr::In(l, r)
+        | Expr::NotIn(l, r)
+        | Expr::Union(l, r)
+        | Expr::Intersect(l, r)
+        | Expr::SetMinus(l, r)
+        | Expr::Cartesian(l, r)
+        | Expr::Subset(l, r)
+        | Expr::ProperSubset(l, r)
+        | Expr::Concat(l, r)
+        | Expr::Append(l, r)
+        | Expr::SetRange(l, r)
+        | Expr::FnApp(l, r)
+        | Expr::FnMerge(l, r)
+        | Expr::SingleFn(l, r)
+        | Expr::FunctionSet(l, r)
+        | Expr::Print(l, r)
+        | Expr::Assert(l, r)
+        | Expr::TLCSet(l, r)
+        | Expr::SortSeq(l, r)
+        | Expr::SelectSeq(l, r)
+        | Expr::BagIn(l, r)
+        | Expr::BagAdd(l, r)
+        | Expr::BagSub(l, r)
+        | Expr::BagOfAll(l, r)
+        | Expr::CopiesIn(l, r)
+        | Expr::SqSubseteq(l, r)
+        | Expr::LeadsTo(l, r) => expr_contains(l, needle) || expr_contains(r, needle),
+        Expr::If(c, t, e) | Expr::SubSeq(c, t, e) => {
+            expr_contains(c, needle) || expr_contains(t, needle) || expr_contains(e, needle)
+        }
+        Expr::Forall(_, d, b)
+        | Expr::Exists(_, d, b)
+        | Expr::Choose(_, d, b)
+        | Expr::FnDef(_, d, b)
+        | Expr::SetFilter(_, d, b)
+        | Expr::SetMap(_, d, b)
+        | Expr::CustomOp(_, d, b) => expr_contains(d, needle) || expr_contains(b, needle),
+        Expr::ChooseUnbounded(_, b) => expr_contains(b, needle),
+        Expr::SetEnum(elems) | Expr::TupleLit(elems) => {
+            elems.iter().any(|e| expr_contains(e, needle))
+        }
+        Expr::RecordLit(fields) | Expr::RecordSet(fields) => {
+            fields.iter().any(|(_, e)| expr_contains(e, needle))
+        }
+        Expr::RecordAccess(r, _) | Expr::TupleAccess(r, _) => expr_contains(r, needle),
+        Expr::Except(b, u) => {
+            expr_contains(b, needle)
+                || u.iter().any(|(path, val)| {
+                    path.iter().any(|p| expr_contains(p, needle)) || expr_contains(val, needle)
+                })
+        }
+        Expr::FnCall(_, args) | Expr::QualifiedCall(_, _, args) => {
+            args.iter().any(|a| expr_contains(a, needle))
+        }
+        Expr::Lambda(_, body) => expr_contains(body, needle),
+        Expr::Let(_, binding, body) => {
+            expr_contains(binding, needle) || expr_contains(body, needle)
+        }
+        Expr::Case(branches) => branches
+            .iter()
+            .any(|(c, r)| expr_contains(c, needle) || expr_contains(r, needle)),
+        Expr::LabeledAction(_, a) => expr_contains(a, needle),
+        Expr::WeakFairness(_, e)
+        | Expr::StrongFairness(_, e)
+        | Expr::BoxAction(e, _)
+        | Expr::DiamondAction(e, _) => expr_contains(e, needle),
+    }
+}
+
 #[cfg(test)]
 mod prime_ref_tests {
     use super::contains_prime_ref;

@@ -12,8 +12,9 @@ use indexmap::IndexSet;
 
 use crate::ast::{Env, Expr, Spec, State, Value};
 use crate::eval::{
-    CheckerStats as EvalCheckerStats, Definitions, EvalContext, EvalError, eval, eval_with_context,
-    init_states, make_primed_names, next_states, update_checker_stats,
+    CheckerStats as EvalCheckerStats, Definitions, EvalContext, EvalError, contains_prime_ref,
+    eval, eval_with_context, expr_contains, expr_references, init_states, make_primed_names,
+    next_states, update_checker_stats,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::eval::{set_parameterized_instances, set_resolved_instances};
@@ -1531,11 +1532,40 @@ fn is_boolean_shaped(expr: &Expr) -> bool {
     )
 }
 
+fn predicate_is_used(spec: &Spec, name: &Arc<str>, def_body: &Expr) -> bool {
+    let uses = |e: &Expr| expr_references(e, name) || expr_contains(e, def_body);
+    if let Some(init) = &spec.init
+        && uses(init)
+    {
+        return true;
+    }
+    if let Some(next) = &spec.next
+        && uses(next)
+    {
+        return true;
+    }
+    if spec.invariants.iter().any(&uses) {
+        return true;
+    }
+    if spec.liveness_properties.iter().any(&uses) {
+        return true;
+    }
+    if spec
+        .quantified_temporal
+        .iter()
+        .any(|(_, l, r)| uses(l) || uses(r))
+    {
+        return true;
+    }
+    spec.definitions
+        .iter()
+        .any(|(other, (_, body))| other != name && uses(body))
+}
+
 pub fn unchecked_predicate_warning(spec: &Spec, has_count_properties: bool) -> Option<String> {
-    if !spec.invariants.is_empty()
+    if has_count_properties
         || !spec.liveness_properties.is_empty()
         || !spec.quantified_temporal.is_empty()
-        || has_count_properties
     {
         return None;
     }
@@ -1543,13 +1573,19 @@ pub fn unchecked_predicate_warning(spec: &Spec, has_count_properties: bool) -> O
     let candidates: Vec<&str> = spec
         .definitions
         .iter()
-        .filter(|(_, (params, body))| {
-            params.is_empty()
+        .filter_map(|(name, (params, body))| {
+            let body: &Expr = body;
+            let looks_unchecked = params.is_empty()
                 && is_boolean_shaped(body)
-                && spec.init.as_ref() != Some(body.as_ref())
-                && spec.next.as_ref() != Some(body.as_ref())
+                && spec.vars.iter().any(|v| expr_references(body, v))
+                && !crate::ast::expr_contains_temporal(body)
+                && !contains_prime_ref(body, &spec.definitions)
+                && spec.init.as_ref() != Some(body)
+                && spec.next.as_ref() != Some(body)
+                && !spec.invariant_names.iter().flatten().any(|n| n == name)
+                && !predicate_is_used(spec, name, body);
+            looks_unchecked.then_some(name.as_ref())
         })
-        .map(|(name, _)| name.as_ref())
         .collect();
 
     if candidates.is_empty() {
@@ -1557,7 +1593,7 @@ pub fn unchecked_predicate_warning(spec: &Spec, has_count_properties: bool) -> O
     }
 
     Some(format!(
-        "no invariants are being checked, but these definitions look like boolean predicates and may have been intended as invariants: {}. Name one with an Inv or TypeOK prefix, or list it under INVARIANT in the cfg.",
+        "these definitions look like boolean predicates that may have been intended as invariants but are not being checked: {}. Name one with an Inv or TypeOK prefix, or list it under INVARIANT in the cfg.",
         candidates.join(", ")
     ))
 }
@@ -2023,6 +2059,80 @@ mod tests {
     #[test]
     fn no_warning_when_count_properties_present() {
         assert!(unchecked_predicate_warning(&spec_with(vec![]), true).is_none());
+    }
+
+    #[test]
+    fn warns_for_misnamed_invariant_even_when_another_is_checked() {
+        let spec = spec_with(vec![le(var_expr("x"), lit_int(3))]);
+        let msg = unchecked_predicate_warning(&spec, false)
+            .expect("a dangling misnamed invariant should warn even alongside a checked one");
+        assert!(msg.contains("Safety"), "got: {msg}");
+    }
+
+    #[test]
+    fn no_warning_for_helper_predicate_inlined_into_next() {
+        let init = eq(var_expr("x"), lit_int(0));
+        let guard = lt(var_expr("x"), lit_int(5));
+        let next = and(
+            eq(prime_expr("x"), add(var_expr("x"), lit_int(1))),
+            guard.clone(),
+        );
+        let mut definitions = BTreeMap::new();
+        definitions.insert(var("Init"), (vec![], Arc::new(init.clone())));
+        definitions.insert(var("Next"), (vec![], Arc::new(next.clone())));
+        definitions.insert(var("Guard"), (vec![], Arc::new(guard)));
+        let spec = Spec {
+            vars: vec![var("x")],
+            constants: vec![],
+            extends: vec![],
+            definitions,
+            assumes: vec![],
+            instances: vec![],
+            init: Some(init),
+            next: Some(next),
+            invariants: vec![le(var_expr("x"), lit_int(10))],
+            invariant_names: vec![None],
+            fairness: vec![],
+            liveness_properties: vec![],
+            quantified_temporal: vec![],
+        };
+        assert!(
+            unchecked_predicate_warning(&spec, false).is_none(),
+            "an inlined helper predicate must not be flagged as an unchecked invariant"
+        );
+    }
+
+    #[test]
+    fn no_warning_for_temporal_spec_formula() {
+        let init = eq(var_expr("x"), lit_int(0));
+        let next = eq(prime_expr("x"), add(var_expr("x"), lit_int(1)));
+        let temporal = and(
+            init.clone(),
+            Expr::BoxAction(Box::new(next.clone()), var("x")),
+        );
+        let mut definitions = BTreeMap::new();
+        definitions.insert(var("Init"), (vec![], Arc::new(init.clone())));
+        definitions.insert(var("Next"), (vec![], Arc::new(next.clone())));
+        definitions.insert(var("Spec"), (vec![], Arc::new(temporal)));
+        let spec = Spec {
+            vars: vec![var("x")],
+            constants: vec![],
+            extends: vec![],
+            definitions,
+            assumes: vec![],
+            instances: vec![],
+            init: Some(init),
+            next: Some(next),
+            invariants: vec![le(var_expr("x"), lit_int(10))],
+            invariant_names: vec![None],
+            fairness: vec![],
+            liveness_properties: vec![],
+            quantified_temporal: vec![],
+        };
+        assert!(
+            unchecked_predicate_warning(&spec, false).is_none(),
+            "a temporal specification formula must not be flagged as an unchecked invariant"
+        );
     }
 
     #[test]
