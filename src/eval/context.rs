@@ -1,4 +1,4 @@
-use super::core::eval;
+use super::core::{STACK_GROWTH, STACK_RED_ZONE, eval};
 use super::error::{EvalError, Result};
 use super::global_state::EvalContext;
 use super::helpers::{apply_fn_value, eval_set, in_set_symbolic};
@@ -66,6 +66,17 @@ pub fn eval_with_instances(
 }
 
 pub fn eval_with_context(
+    expr: &Expr,
+    env: &mut Env,
+    defs: &Definitions,
+    ctx: &EvalContext,
+) -> Result<Value> {
+    stacker::maybe_grow(STACK_RED_ZONE, STACK_GROWTH, || {
+        eval_with_context_inner(expr, env, defs, ctx)
+    })
+}
+
+fn eval_with_context_inner(
     expr: &Expr,
     env: &mut Env,
     defs: &Definitions,

@@ -4,6 +4,7 @@ use super::ast_utils::{
     infer_action_name,
 };
 use super::candidates::{action_needs_refinement, infer_all_candidates};
+use super::core::{STACK_GROWTH, STACK_RED_ZONE};
 use super::error::Result;
 #[cfg(feature = "profiling")]
 use super::global_state::PROFILING_STATS;
@@ -195,6 +196,18 @@ fn resolve_next<'a>(expr: &'a Expr, defs: &'a Definitions) -> &'a Expr {
 }
 
 fn expand_and_enumerate(
+    expr: &Expr,
+    env: &mut Env,
+    ctx: &EnumCtx<'_>,
+    action: Option<Arc<str>>,
+    results: &mut Vec<Transition>,
+) -> Result<()> {
+    stacker::maybe_grow(STACK_RED_ZONE, STACK_GROWTH, || {
+        expand_and_enumerate_inner(expr, env, ctx, action, results)
+    })
+}
+
+fn expand_and_enumerate_inner(
     expr: &Expr,
     env: &mut Env,
     ctx: &EnumCtx<'_>,
