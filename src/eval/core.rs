@@ -761,10 +761,40 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             Ok(Value::func(f))
         }
 
-        Expr::CustomOp(name, _left, _right) => Err(EvalError::domain_error(format!(
-            "undefined custom operator: \\{}",
-            name
-        ))),
+        Expr::CustomOp(name, left, right) => {
+            if let Some((params, body)) = defs.get(name) {
+                if params.len() != 2 {
+                    return Err(EvalError::domain_error(format!(
+                        "infix operator \\{} is defined with {} parameters, expected 2",
+                        name,
+                        params.len()
+                    )));
+                }
+                let lv = eval(left, env, defs)?;
+                let rv = eval(right, env, defs)?;
+                let mut prevs = Vec::with_capacity(2);
+                for (param, val) in params.iter().zip([lv, rv]) {
+                    prevs.push((param.clone(), env.insert(param.clone(), val)));
+                }
+                let result = eval(body, env, defs);
+                for (param, prev) in prevs {
+                    match prev {
+                        Some(old) => {
+                            env.insert(param, old);
+                        }
+                        None => {
+                            env.remove(&param);
+                        }
+                    }
+                }
+                result
+            } else {
+                Err(EvalError::domain_error(format!(
+                    "undefined custom operator: \\{}",
+                    name
+                )))
+            }
+        }
 
         Expr::Except(f, updates) => {
             let base = eval(f, env, defs)?;

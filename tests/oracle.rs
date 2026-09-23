@@ -73,6 +73,17 @@ fn test_should_pass_counter() {
     );
 }
 
+#[test]
+fn test_should_pass_user_infix_ops() {
+    let path = Path::new("test_cases/should_pass/user_infix_ops.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "user_infix_ops.tla should pass, got: {:?}",
+        result
+    );
+}
+
 /// Differential corpus for the continuation-passing walker. Each of
 /// these is a next-state relation where a primed variable's value depends on
 /// another primed variable, an operator argument, an IF, or a chain — the shapes

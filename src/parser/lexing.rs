@@ -42,6 +42,10 @@ pub struct Parser {
     /// Whether the `/`-is-integer-division warning has already been emitted, so a
     /// spec with many `/` uses gets one warning, not one per occurrence.
     pub(super) warned_slash: bool,
+    /// Canonical names of infix operators the module defines itself (e.g. `oplus`
+    /// from `a \oplus b == ...`). A use of such a symbol resolves to the user
+    /// definition instead of the built-in, shadowing it within the module.
+    pub(super) user_infix_ops: BTreeSet<Arc<str>>,
 }
 
 impl Parser {
@@ -68,6 +72,7 @@ impl Parser {
             let_scope: Vec::new(),
             list_col_stack: Vec::new(),
             warned_slash: false,
+            user_infix_ops: BTreeSet::new(),
         })
     }
 
