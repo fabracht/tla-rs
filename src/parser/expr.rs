@@ -494,7 +494,11 @@ impl Parser {
                 Token::Concat => {
                     self.advance();
                     let right = self.parse_multiplicative()?;
-                    left = Expr::Concat(Box::new(left), Box::new(right));
+                    left = if self.user_infix_ops.contains("o") {
+                        Expr::CustomOp(Arc::from("o"), Box::new(left), Box::new(right))
+                    } else {
+                        Expr::Concat(Box::new(left), Box::new(right))
+                    };
                 }
                 Token::CustomOp(op_name) => {
                     let op_name = op_name.clone();
@@ -505,12 +509,20 @@ impl Parser {
                 Token::BagAdd => {
                     self.advance();
                     let right = self.parse_multiplicative()?;
-                    left = Expr::BagAdd(Box::new(left), Box::new(right));
+                    left = if self.user_infix_ops.contains("oplus") {
+                        Expr::CustomOp(Arc::from("oplus"), Box::new(left), Box::new(right))
+                    } else {
+                        Expr::BagAdd(Box::new(left), Box::new(right))
+                    };
                 }
                 Token::BagSub => {
                     self.advance();
                     let right = self.parse_multiplicative()?;
-                    left = Expr::BagSub(Box::new(left), Box::new(right));
+                    left = if self.user_infix_ops.contains("ominus") {
+                        Expr::CustomOp(Arc::from("ominus"), Box::new(left), Box::new(right))
+                    } else {
+                        Expr::BagSub(Box::new(left), Box::new(right))
+                    };
                 }
                 _ => break,
             }

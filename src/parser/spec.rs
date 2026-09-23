@@ -7,6 +7,16 @@ use super::error::{ParseError, Result};
 use super::lexing::Parser;
 
 impl Parser {
+    fn infix_op_name(tok: &Token) -> Option<Arc<str>> {
+        match tok {
+            Token::CustomOp(n) => Some(n.clone()),
+            Token::BagAdd => Some(Arc::from("oplus")),
+            Token::BagSub => Some(Arc::from("ominus")),
+            Token::Concat => Some(Arc::from("o")),
+            _ => None,
+        }
+    }
+
     pub fn parse_spec(&mut self) -> Result<Spec> {
         let mut vars = Vec::new();
         let mut init = None;
@@ -126,16 +136,29 @@ impl Parser {
                     let name = name.clone();
                     self.advance();
 
-                    if let Token::CustomOp(_) = self.peek() {
+                    if let Some(sym) = Self::infix_op_name(self.peek())
+                        && matches!(self.peek_n(1), Token::Ident(_))
+                        && *self.peek_n(2) == Token::EqEq
+                    {
                         self.advance();
-                        if let Token::Ident(_) = self.peek() {
-                            self.advance();
+                        let rhs = self.expect_ident()?;
+                        self.expect(Token::EqEq)?;
+                        match self.parse_expr() {
+                            Ok(body) => {
+                                self.user_infix_ops.insert(sym.clone());
+                                self.fn_definitions.insert(sym, (vec![name, rhs], body));
+                            }
+                            Err(e) => {
+                                let message = format!(
+                                    "failed to parse infix operator '\\{}': {}",
+                                    sym, e.message
+                                );
+                                let span = e.span.unwrap_or_default();
+                                self.warnings.push(crate::span::Spanned::new(message, span));
+                                self.skip_to_next_definition();
+                            }
                         }
-                        if *self.peek() == Token::EqEq {
-                            self.advance();
-                            self.skip_to_next_definition();
-                            continue;
-                        }
+                        continue;
                     }
 
                     let params = if *self.peek() == Token::LParen {
