@@ -543,9 +543,9 @@ impl Parser {
                     self.warned_slash = true;
                     let span = self.current_span();
                     self.warnings.push(crate::span::Spanned::new(
-                        "`/` is treated as integer division (like `\\div`); TLA+/TLC uses `/` \
-                         for real division, which tla-rs does not support — use `\\div` for \
-                         integer division to silence this"
+                        "`/` is treated as integer division (like `\\div`); in TLA+ `/` is real \
+                         division from the Reals module, which TLC cannot evaluate and tla-rs \
+                         does not support — use `\\div` for integer division to silence this"
                             .to_string(),
                         span,
                     ));

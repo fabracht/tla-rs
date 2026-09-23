@@ -38,7 +38,7 @@ Cross-checked against:
 | `+` | | Addition |
 | `-` | | Subtraction / Negation |
 | `*` | | Multiplication |
-| `/` | | Integer division (aliased to `\div`; warns once — TLA+/TLC uses `/` for real division, which is unsupported, so use `\div`) |
+| `/` | | Integer division (aliased to `\div`; warns once — in TLA+ `/` is real division from the Reals module, which TLC cannot evaluate and tla-rs does not support; use `\div`) |
 | `\div` | | Integer division |
 | `%` | | Modulo |
 | `^` | | Exponentiation |
