@@ -158,8 +158,83 @@ mod tests {
         Expr::SetEnum(elems)
     }
 
+    fn cartesian(l: Expr, r: Expr) -> Expr {
+        Expr::Cartesian(Box::new(l), Box::new(r))
+    }
+
+    fn tuple_lit(elems: Vec<Expr>) -> Expr {
+        Expr::TupleLit(elems)
+    }
+
     fn defs() -> Definitions {
         BTreeMap::new()
+    }
+
+    #[test]
+    fn cartesian_three_way_yields_flat_triples() {
+        let d = defs();
+        let mut env = Env::new();
+        let expr = cartesian(
+            cartesian(set_enum(vec![lit_int(1)]), set_enum(vec![lit_int(2)])),
+            set_enum(vec![lit_int(3)]),
+        );
+        let result = eval(&expr, &mut env, &d).unwrap();
+        let expected = Value::set(
+            [Value::tuple(vec![
+                Value::Int(1),
+                Value::Int(2),
+                Value::Int(3),
+            ])]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn cartesian_flat_triple_is_a_member() {
+        let d = defs();
+        let mut env = Env::new();
+        let set = cartesian(
+            cartesian(set_enum(vec![lit_int(1)]), set_enum(vec![lit_int(2)])),
+            set_enum(vec![lit_int(3)]),
+        );
+        let member = in_set(tuple_lit(vec![lit_int(1), lit_int(2), lit_int(3)]), set);
+        assert_eq!(eval(&member, &mut env, &d).unwrap(), Value::Bool(true));
+    }
+
+    #[test]
+    fn cartesian_right_paren_stays_nested() {
+        let d = defs();
+        let mut env = Env::new();
+        let expr = cartesian(
+            set_enum(vec![lit_int(1)]),
+            cartesian(set_enum(vec![lit_int(2)]), set_enum(vec![lit_int(3)])),
+        );
+        let result = eval(&expr, &mut env, &d).unwrap();
+        let expected = Value::set(
+            [Value::tuple(vec![
+                Value::Int(1),
+                Value::tuple(vec![Value::Int(2), Value::Int(3)]),
+            ])]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn cartesian_two_way_unchanged() {
+        let d = defs();
+        let mut env = Env::new();
+        let expr = cartesian(set_enum(vec![lit_int(1)]), set_enum(vec![lit_int(2)]));
+        let result = eval(&expr, &mut env, &d).unwrap();
+        let expected = Value::set(
+            [Value::tuple(vec![Value::Int(1), Value::Int(2)])]
+                .into_iter()
+                .collect(),
+        );
+        assert_eq!(result, expected);
     }
 
     #[test]

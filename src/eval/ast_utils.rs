@@ -347,6 +347,22 @@ pub(crate) fn expr_is_var(expr: &Expr, name: &Arc<str>) -> bool {
     matches!(expr, Expr::Var(n) if n == name)
 }
 
+pub(crate) fn cartesian_operands<'a>(l: &'a Expr, r: &'a Expr) -> Vec<&'a Expr> {
+    fn walk_left<'a>(e: &'a Expr, out: &mut Vec<&'a Expr>) {
+        match e {
+            Expr::Cartesian(ll, lr) => {
+                walk_left(ll, out);
+                out.push(lr);
+            }
+            _ => out.push(e),
+        }
+    }
+    let mut out = Vec::new();
+    walk_left(l, &mut out);
+    out.push(r);
+    out
+}
+
 pub(crate) fn expr_references(expr: &Expr, name: &Arc<str>) -> bool {
     match expr {
         Expr::Var(n) => n == name,

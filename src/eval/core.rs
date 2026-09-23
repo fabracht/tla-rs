@@ -394,15 +394,24 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Cartesian(l, r) => {
-            let ls = eval_set(l, env, defs)?;
-            let rs = eval_set(r, env, defs)?;
-            let mut result = BTreeSet::new();
-            for lv in &ls {
-                for rv in &rs {
-                    result.insert(Value::tuple(vec![lv.clone(), rv.clone()]));
+            let operands = super::ast_utils::cartesian_operands(l, r);
+            let sets: Vec<BTreeSet<Value>> = operands
+                .iter()
+                .map(|op| eval_set(op, env, defs))
+                .collect::<Result<_>>()?;
+            let mut acc: Vec<Vec<Value>> = vec![Vec::new()];
+            for s in &sets {
+                let mut next = Vec::with_capacity(acc.len() * s.len());
+                for prefix in &acc {
+                    for v in s {
+                        let mut t = prefix.clone();
+                        t.push(v.clone());
+                        next.push(t);
+                    }
                 }
+                acc = next;
             }
-            Ok(Value::set(result))
+            Ok(Value::set(acc.into_iter().map(Value::tuple).collect()))
         }
 
         Expr::Subset(l, r) => {
