@@ -261,12 +261,20 @@ pub(crate) fn in_set_symbolic(
         Expr::SetMinus(l, r) if set_op_is_symbolic(l, r, env, defs)? => {
             Ok(in_set_symbolic(val, l, env, defs)? && !in_set_symbolic(val, r, env, defs)?)
         }
-        Expr::Cartesian(l, r) if set_op_is_symbolic(l, r, env, defs)? => match val {
-            Value::Tuple(t) if t.len() == 2 => {
-                Ok(in_set_symbolic(&t[0], l, env, defs)? && in_set_symbolic(&t[1], r, env, defs)?)
+        Expr::Cartesian(l, r) if set_op_is_symbolic(l, r, env, defs)? => {
+            let operands = super::ast_utils::cartesian_operands(l, r);
+            match val {
+                Value::Tuple(t) if t.len() == operands.len() => {
+                    for (elem, op) in t.iter().zip(operands.iter()) {
+                        if !in_set_symbolic(elem, op, env, defs)? {
+                            return Ok(false);
+                        }
+                    }
+                    Ok(true)
+                }
+                _ => Ok(false),
             }
-            _ => Ok(false),
-        },
+        }
         _ => match eval(set_expr, env, defs)? {
             Value::Set(s) => Ok(s.contains(val)),
             Value::IntSet(d) => Ok(matches!(val, Value::Int(n) if d.contains(*n))),
