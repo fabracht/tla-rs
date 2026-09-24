@@ -6,6 +6,7 @@ use std::sync::Arc;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use tla_checker::ast::{Env, Expr, State, Value};
 use tla_checker::checker::{CheckResult, CheckerConfig, check};
+use tla_checker::config::{apply_config, parse_cfg};
 use tla_checker::eval::{Definitions, eval};
 use tla_checker::parser::parse;
 use tla_checker::symmetry::SymmetryConfig;
@@ -447,7 +448,30 @@ fn bench_enabled(c: &mut Criterion) {
 
 fn bench_liveness_edge_reuse(c: &mut Criterion) {
     let spec_text = include_str!("../test_cases/benchmark/liveness_edge_reuse.tla");
-    let spec = parse(spec_text).expect("failed to parse liveness_edge_reuse.tla");
+    let mut spec = parse(spec_text).expect("failed to parse liveness_edge_reuse.tla");
+    let cfg = parse_cfg("SPECIFICATION Spec\nPROPERTY MaxRecedes\n")
+        .expect("failed to parse liveness_edge_reuse cfg");
+    apply_config(
+        &cfg,
+        &mut spec,
+        &mut Env::new(),
+        &mut quiet_config(),
+        &[],
+        &[],
+        false,
+    )
+    .expect("failed to apply liveness_edge_reuse cfg");
+    assert!(
+        !spec.liveness_properties.is_empty() && !spec.fairness.is_empty(),
+        "liveness_edge_reuse must register a property and fairness, or liveness never runs"
+    );
+
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        check_liveness: true,
+        max_depth: 1_000,
+        ..quiet_config()
+    };
 
     let mut group = c.benchmark_group("liveness_edge_reuse");
 
@@ -455,15 +479,13 @@ fn bench_liveness_edge_reuse(c: &mut Criterion) {
         let mut env = Env::new();
         env.insert(Arc::from("Max"), Value::Int(max));
 
+        assert!(
+            matches!(check(&spec, &env, &config), CheckResult::Ok(_)),
+            "MaxRecedes holds under WF_x(Next); the benchmark must time a full liveness pass"
+        );
+
         group.bench_with_input(BenchmarkId::new("max", max), &env, |b, env| {
-            b.iter(|| {
-                let config = CheckerConfig {
-                    allow_deadlock: true,
-                    check_liveness: true,
-                    ..quiet_config()
-                };
-                check(&spec, env, &config)
-            });
+            b.iter(|| check(&spec, env, &config));
         });
     }
 

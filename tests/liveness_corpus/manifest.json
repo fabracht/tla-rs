@@ -1,0 +1,914 @@
+[
+  {
+    "id": "C1",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C1.cfg",
+    "specification": "SpecF",
+    "property": "PropC1",
+    "property_text": "<>(x = 1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "1b",
+    "note": "<>P is checked as []<>P: the fair behavior 0,1,2,2,... visits x=1 once, but tla-rs flags the x=2 terminal cycle as a violation (false alarm)."
+  },
+  {
+    "id": "C2",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C2.cfg",
+    "specification": "SpecF",
+    "property": "PropC2",
+    "property_text": "<>(x = 1) \\/ <>(x = 5)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "2",
+    "note": "Disjunction of temporal formulas is split into two separate obligations; <>(x=5) alone fails, so tla-rs reports a false alarm."
+  },
+  {
+    "id": "C3",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C3.cfg",
+    "specification": "SpecF",
+    "property": "PropC3",
+    "property_text": "[](x < 5)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "1a",
+    "note": "State-level [](P) PROPERTY is rejected with an eval error ('temporal operator [] reached eval'); TLC checks it as an invariant."
+  },
+  {
+    "id": "C4",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C4.cfg",
+    "specification": "SpecF",
+    "property": "PropC4",
+    "property_text": "[](x = 2 => [](x = 2))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "Nested [](P => []Q) is rejected with an eval error."
+  },
+  {
+    "id": "C5",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C5.cfg",
+    "specification": "SpecF",
+    "property": "PropC5",
+    "property_text": "[](x < 2)",
+    "expected": "violated",
+    "kind": "invariant",
+    "tlc": {
+      "verdict_raw": "Error: Invariant PropC5 is violated.",
+      "exit_code": 12,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "1a",
+    "note": "TLC checks the state-level [](x<2) PROPERTY as an invariant (reports 'Invariant PropC5 is violated', exit 12); tla-rs rejects it with an eval error. TLC classifies this as an invariant violation, not a temporal one."
+  },
+  {
+    "id": "C6",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C6.cfg",
+    "specification": "SpecF",
+    "property": "PropC6",
+    "property_text": "x = 1",
+    "expected": "violated",
+    "kind": "init",
+    "tlc": {
+      "verdict_raw": "Error: Property PropC6 is violated by the initial state:",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "1a",
+    "note": "A state-level PROPERTY is checked by TLC on initial states only ('violated by the initial state'); tla-rs reports the right verdict for the wrong reason: it checks x=1 as a liveness []<>(x=1) obligation (kind liveness, expected init)."
+  },
+  {
+    "id": "C7",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C7.cfg",
+    "specification": "SpecF",
+    "property": "PropC7",
+    "property_text": "[]<>(x = 1)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC7 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C8",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C8.cfg",
+    "specification": "SpecF",
+    "property": "PropC8",
+    "property_text": "<>[](x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C9",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C9.cfg",
+    "specification": "SpecF",
+    "property": "PropC9",
+    "property_text": "(x = 0) ~> (x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C10",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C10.cfg",
+    "specification": "SpecF",
+    "property": "PropC10",
+    "property_text": "[](x = 1 => <>[](x = 2))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "Nested [](P => <>[]Q) is rejected with an eval error."
+  },
+  {
+    "id": "C11",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C11.cfg",
+    "specification": "SpecF",
+    "property": "PropC11",
+    "property_text": "<>(x = 1 /\\ <>(x = 2))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "2",
+    "note": "Nested <>(P /\\ <>Q) is evaluated as <>-of-a-state-predicate over SCCs; tla-rs reports a false alarm."
+  },
+  {
+    "id": "C12",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C12.cfg",
+    "specification": "SpecF",
+    "property": "PropC12",
+    "property_text": "\\A i \\in {1, 2} : <>(x = i)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "1b",
+    "note": "\\A i : <>(x=i) expands to per-element <>P obligations, each checked as []<>P; false alarm on the x=2 terminal cycle."
+  },
+  {
+    "id": "C13",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C13.cfg",
+    "specification": "SpecF",
+    "property": "PropC13",
+    "property_text": "\\E i \\in {1, 5} : []<>(x = i)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC13 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "\\E i : []<>(x=i) is dropped with a warning ('existential temporal ... dropping'), so tla-rs passes a property TLC shows violated (false pass)."
+  },
+  {
+    "id": "C14",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C14.cfg",
+    "specification": "SpecF",
+    "property": "PropC14",
+    "property_text": "<>[](x = 1) \\/ <>[](x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "2",
+    "note": "Disjunction <>[]P \\/ <>[]Q is split into two obligations; <>[](x=1) alone fails (false alarm)."
+  },
+  {
+    "id": "C15",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C15.cfg",
+    "specification": "SpecF",
+    "property": "PropC15",
+    "property_text": "[]<>(~ENABLED Step)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "ENABLED inside a temporal property cannot be evaluated ('ENABLED operator cannot be evaluated in explicit-state model checking')."
+  },
+  {
+    "id": "C16",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C16.cfg",
+    "specification": "SpecNF",
+    "property": "PropC16",
+    "property_text": "<>(x = 2)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC16 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C17",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C17.cfg",
+    "specification": "SpecNF",
+    "property": "PropC17",
+    "property_text": "<>(x = 0)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "1b",
+    "note": "<>(x=0) holds at the initial state, but tla-rs checks []<>(x=0) and flags the x=2 cycle (false alarm)."
+  },
+  {
+    "id": "C18",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C18.cfg",
+    "specification": "SpecNF",
+    "property": "PropC18",
+    "property_text": "(x = 0) ~> (x = 1)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC18 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C19",
+    "spec": "specs/Walk2.tla",
+    "cfg": "cfgs/C19.cfg",
+    "specification": "SpecF",
+    "property": "PropC19",
+    "property_text": "(x = 0) ~> (x = 2)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC19 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "1b",
+    "note": "Issue #120 probe: P=(x=0) holds only before the fair x=1 cycle, so the SCC-local ~> check misses the violation (false pass)."
+  },
+  {
+    "id": "C20",
+    "spec": "specs/Walk2.tla",
+    "cfg": "cfgs/C20.cfg",
+    "specification": "SpecF",
+    "property": "PropC20",
+    "property_text": "[](x = 0 => <>(x = 2))",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC20 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "[](P => <>Q) is rejected with an eval error instead of being treated as P ~> Q."
+  },
+  {
+    "id": "C21",
+    "spec": "specs/Walk2.tla",
+    "cfg": "cfgs/C21.cfg",
+    "specification": "SpecF",
+    "property": "PropC21",
+    "property_text": "\\E i \\in {1, 2} : <>(x = i)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C22",
+    "spec": "specs/Walk2.tla",
+    "cfg": "cfgs/C22.cfg",
+    "specification": "SpecF",
+    "property": "PropC22",
+    "property_text": "\\A i \\in {1, 2} : <>(x = i)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC22 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C23",
+    "spec": "specs/Toggle.tla",
+    "cfg": "cfgs/C23.cfg",
+    "specification": "SpecF",
+    "property": "PropC23",
+    "property_text": "[]<>(x = 0) /\\ []<>(x = 1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C24",
+    "spec": "specs/Toggle.tla",
+    "cfg": "cfgs/C24.cfg",
+    "specification": "SpecF",
+    "property": "PropC24",
+    "property_text": "<>[](x = 1)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC24 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C25",
+    "spec": "specs/Toggle.tla",
+    "cfg": "cfgs/C25.cfg",
+    "specification": "SpecF",
+    "property": "PropC25",
+    "property_text": "[]<>(x = 0) \\/ []<>(x = 1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C26",
+    "spec": "specs/Toggle.tla",
+    "cfg": "cfgs/C26.cfg",
+    "specification": "SpecF",
+    "property": "PropC26",
+    "property_text": "[]((x = 0) => <>(x = 1))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "[]((x=0) => <>(x=1)) is rejected with an eval error."
+  },
+  {
+    "id": "C27",
+    "spec": "specs/Toggle.tla",
+    "cfg": "cfgs/C27.cfg",
+    "specification": "SpecNF",
+    "property": "PropC27",
+    "property_text": "[]<>(x = 1)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC27 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C28",
+    "spec": "specs/WFvsSF.tla",
+    "cfg": "cfgs/C28.cfg",
+    "specification": "SWF",
+    "property": "PropC28",
+    "property_text": "<>(y = 1)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC28 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C29",
+    "spec": "specs/WFvsSF.tla",
+    "cfg": "cfgs/C29.cfg",
+    "specification": "SSF",
+    "property": "PropC28",
+    "property_text": "<>(y = 1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C30",
+    "spec": "specs/WFvsSF.tla",
+    "cfg": "cfgs/C30.cfg",
+    "specification": "SWF",
+    "property": "PropC30",
+    "property_text": "[]<>b",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C31",
+    "spec": "specs/SFSub.tla",
+    "cfg": "cfgs/C31.cfg",
+    "specification": "SpecSF",
+    "property": "PropC31",
+    "property_text": "<>(x = 5)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC31 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "1b",
+    "note": "SF_x(A) is judged on the whole SCC {0,1,2}; the fair sub-cycle 0<->2 (where A is never enabled) is never examined (false pass)."
+  },
+  {
+    "id": "C32",
+    "spec": "specs/QuantFair.tla",
+    "cfg": "cfgs/C32.cfg",
+    "specification": "SpecQN",
+    "property": "PropC32",
+    "property_text": "<>(pc[2] = \"done\")",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC32 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C33",
+    "spec": "specs/QuantFair.tla",
+    "cfg": "cfgs/C33.cfg",
+    "specification": "SpecQE",
+    "property": "PropC32",
+    "property_text": "<>(pc[2] = \"done\")",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C34",
+    "spec": "specs/SubVars.tla",
+    "cfg": "cfgs/C34.cfg",
+    "specification": "SX",
+    "property": "PropC34",
+    "property_text": "<>(y = 1)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC34 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "1b",
+    "note": "The WF_x subscript is ignored: <<A>>_x is never enabled because A leaves x unchanged, so WF_x(A) is vacuous and stuttering at y=0 is fair; tla-rs treats it as WF_vars(A) (false pass)."
+  },
+  {
+    "id": "C35",
+    "spec": "specs/SubVars.tla",
+    "cfg": "cfgs/C35.cfg",
+    "specification": "SV",
+    "property": "PropC34",
+    "property_text": "<>(y = 1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": ""
+  },
+  {
+    "id": "C36a",
+    "spec": "specs/Walk3Dead.tla",
+    "cfg": "cfgs/C36a.cfg",
+    "specification": "SpecF",
+    "property": "PropEventually",
+    "property_text": "<>(x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Deadlocking Next with CHECK_DEADLOCK FALSE: TLC treats the deadlock state as infinite stuttering."
+  },
+  {
+    "id": "C36b",
+    "spec": "specs/Walk3Dead.tla",
+    "cfg": "cfgs/C36b.cfg",
+    "specification": "SpecF",
+    "property": "PropInfOften",
+    "property_text": "[]<>(x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Deadlocking Next with CHECK_DEADLOCK FALSE: TLC treats the deadlock state as infinite stuttering."
+  },
+  {
+    "id": "C37",
+    "spec": "specs/Walk3Dead.tla",
+    "cfg": "cfgs/C37.cfg",
+    "specification": "SpecNF",
+    "property": "PropEventually",
+    "property_text": "<>(x = 2)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropEventually was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "Without fairness the behavior may stutter at x=0 forever."
+  },
+  {
+    "id": "C38a",
+    "spec": "specs/Toggle.tla",
+    "cfg": "cfgs/C38a.cfg",
+    "specification": "SpecF",
+    "property": "PropC38",
+    "property_text": "[]<><<Next>>_x",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "Action-level []<><<A>>_v is dropped/rejected ('<<A>>_v (diamond action) reached eval')."
+  },
+  {
+    "id": "C38b",
+    "spec": "specs/Toggle.tla",
+    "cfg": "cfgs/C38b.cfg",
+    "specification": "SpecNF",
+    "property": "PropC38",
+    "property_text": "[]<><<Next>>_x",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC38 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "Action-level []<><<A>>_v is dropped/rejected ('<<A>>_v (diamond action) reached eval')."
+  },
+  {
+    "id": "C39a",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C39a.cfg",
+    "specification": "SpecF",
+    "property": "PropC39",
+    "property_text": "<>[][FALSE]_x",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "Action-level <>[][A]_v is rejected ('[A]_v (box action) reached eval')."
+  },
+  {
+    "id": "C39b",
+    "spec": "specs/Toggle.tla",
+    "cfg": "cfgs/C39b.cfg",
+    "specification": "SpecF",
+    "property": "PropC39",
+    "property_text": "<>[][FALSE]_x",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PropC39 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "Action-level <>[][A]_v is rejected ('[A]_v (box action) reached eval')."
+  },
+  {
+    "id": "C40",
+    "spec": "specs/Assume.tla",
+    "cfg": "cfgs/C40.cfg",
+    "specification": "SpecA",
+    "property": "PropC40",
+    "property_text": "<>(x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "1a",
+    "note": "Temporal conjuncts of SPECIFICATION are assumptions in TLC; tla-rs extracts <>(x=2) from SpecA as a property to check and reports a false alarm."
+  },
+  {
+    "id": "C41a",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C41a.cfg",
+    "specification": "SpecF",
+    "property": "PropC41",
+    "property_text": "[][x' >= x]_x",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "1a",
+    "note": "[][A]_v PROPERTY is an action property in TLC; tla-rs rejects it with an eval error."
+  },
+  {
+    "id": "C41b",
+    "spec": "specs/Toggle.tla",
+    "cfg": "cfgs/C41b.cfg",
+    "specification": "SpecF",
+    "property": "PropC41",
+    "property_text": "[][x' >= x]_x",
+    "expected": "violated",
+    "kind": "action",
+    "tlc": {
+      "verdict_raw": "Error: Action property PropC41 is violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "1a",
+    "note": "[][A]_v PROPERTY is an action property in TLC ('Action property PropC41 is violated'); tla-rs rejects it with an eval error."
+  },
+  {
+    "id": "C42",
+    "spec": "specs/EWD840.tla",
+    "cfg": "cfgs/C42.cfg",
+    "specification": "Spec",
+    "property": "Liveness",
+    "property_text": "terminated ~> terminationDetected",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "EWD840 copy drops the TD == INSTANCE SyncTerminationDetection / TDSpec lines (module not in repo). Module also defines SpecWFNext and CheckInductiveSpec, which the tla-rs parser pre-extracts fairness from (WF_vars(Next) is merged); the verdict still matches. tla-rs also auto-detects TypeOK and Inv as invariants by name (TLC checks none here); both hold. 302 distinct states in both."
+  },
+  {
+    "id": "C43",
+    "spec": "specs/Queens.tla",
+    "cfg": "cfgs/C43.cfg",
+    "specification": "Spec",
+    "property": "Termination",
+    "property_text": "<>(todo = {})",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Queens N=4; TLC and tla-rs both explore 785 distinct states. tla-rs also auto-detects the definition named Invariant as an invariant by name (TLC checks none); it holds."
+  },
+  {
+    "id": "C44",
+    "spec": "specs/Walk3.tla",
+    "cfg": "cfgs/C44.cfg",
+    "specification": "SpecF",
+    "property": "PropC44",
+    "property_text": "[](ENABLED Step => <><<Step>>_x)",
+    "expected": "tlc_unsupported",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Error: Temporal formulas containing actions must be of forms <>[]A or []<>A.",
+      "exit_code": 255,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "TLC rejects the property: 'Temporal formulas containing actions must be of forms <>[]A or []<>A.' Skipped by the CI test."
+  }
+]
