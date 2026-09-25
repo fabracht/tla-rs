@@ -4,7 +4,9 @@
 //! running real TLC (`scripts/liveness-oracle.sh` re-derives them locally). This test
 //! needs no Java: it runs tla-rs on each case and compares against the recorded
 //! verdict. Cases marked `xfail_until_phase` document known divergences and must still
-//! diverge; once one starts agreeing with TLC its xfail marker has to be removed.
+//! diverge; once one starts agreeing with TLC its xfail marker has to be removed. A
+//! divergence may be an error or a false alarm, but never a false pass: an xfail case
+//! that TLC reports as violated fails the test if tla-rs reports it ok.
 //! Every violation reported on a non-xfail case is re-validated by an independent
 //! lasso evaluator (`lasso.rs`).
 
@@ -77,7 +79,17 @@ fn prepare(case: &Case) -> Prepared {
 }
 
 fn observe(case: &Case) -> Observed {
-    let prepared = prepare(case);
+    let prepared = match prepare_from_path(&case.spec, Some(&case.cfg), &[]) {
+        Ok(prepared) => prepared,
+        Err(e) => {
+            return Observed {
+                verdict: "error",
+                kind: None,
+                detail: format!("load error: {e}").chars().take(160).collect(),
+                counterexample: None,
+            };
+        }
+    };
     let mut config = prepared.checker_config;
     config.check_liveness = true;
     match check(&prepared.spec, &prepared.domains, &config) {
@@ -190,6 +202,11 @@ fn liveness_corpus_matches_tlc() {
             (None, false) => {
                 failures += 1;
                 format!("FAIL: disagrees with TLC {}", observed.detail)
+            }
+            (Some(_), false) if case.expected == "violated" && observed.verdict == "ok" => {
+                failures += 1;
+                "FAIL: false pass — an xfail case may be rejected or misreported, never reported ok"
+                    .to_string()
             }
             (Some(_), false) => match (&observed.counterexample, case.expected.as_str()) {
                 (Some(cex), "ok") => match validate(case, cex) {

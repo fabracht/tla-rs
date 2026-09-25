@@ -416,7 +416,27 @@ impl Spec {
     }
 }
 
+/// `[](P => <>Q)` with `P` and `Q` free of temporal operators, which is exactly
+/// `P ~> Q`. Any other shape under `[]` is left alone so it is never mistaken for a
+/// leads-to property.
+pub fn leads_to_form(expr: &Expr) -> Option<(&Expr, &Expr)> {
+    let Expr::Always(inner) = expr else {
+        return None;
+    };
+    let Expr::Implies(p, rhs) = inner.as_ref() else {
+        return None;
+    };
+    let Expr::Eventually(q) = rhs.as_ref() else {
+        return None;
+    };
+    let state_level = |e: &Expr| !expr_contains_temporal(e) && !matches!(e, Expr::Always(_));
+    (state_level(p) && state_level(q)).then_some((p.as_ref(), q.as_ref()))
+}
+
 pub fn expr_contains_temporal(expr: &Expr) -> bool {
+    if leads_to_form(expr).is_some() {
+        return true;
+    }
     match expr {
         Expr::WeakFairness(_, _)
         | Expr::StrongFairness(_, _)
@@ -451,11 +471,7 @@ pub fn collect_temporal(
             ));
         }
         Expr::Eventually(inner) => {
-            if matches!(inner.as_ref(), Expr::Always(_)) {
-                liveness.push(Expr::Eventually(inner.clone()));
-            } else {
-                liveness.push((**inner).clone());
-            }
+            liveness.push(Expr::Eventually(inner.clone()));
         }
         Expr::LeadsTo(p, q) => {
             liveness.push(Expr::LeadsTo(p.clone(), q.clone()));
@@ -465,7 +481,9 @@ pub fn collect_temporal(
             collect_temporal(r, fairness, liveness, quantified, warnings);
         }
         Expr::Always(inner) => {
-            if let Expr::Eventually(p) = inner.as_ref() {
+            if let Some((p, q)) = leads_to_form(expr) {
+                liveness.push(Expr::LeadsTo(Box::new(p.clone()), Box::new(q.clone())));
+            } else if let Expr::Eventually(p) = inner.as_ref() {
                 liveness.push((**p).clone());
             } else {
                 collect_temporal(inner, fairness, liveness, quantified, warnings);
@@ -478,12 +496,10 @@ pub fn collect_temporal(
             quantified.push((var.clone(), (**domain).clone(), (**body).clone()));
         }
         Expr::Exists(var, domain, body) if expr_contains_temporal(body) => {
-            match body.as_ref() {
-                Expr::Eventually(inner) if !matches!(inner.as_ref(), Expr::Always(_)) => {
-                    liveness.push(Expr::Exists(var.clone(), domain.clone(), inner.clone()));
-                }
-                _ => warnings.push(
-                    "existential temporal property \\E x \\in S : P is only supported when P is <>Q — dropping".to_string(),
+            match distribute_exists(var, domain, body) {
+                Some(property) => liveness.push(property),
+                None => warnings.push(
+                    "existential temporal property \\E x \\in S : P is only supported when P is <>Q or []<>Q — dropping".to_string(),
                 ),
             }
         }
@@ -493,6 +509,107 @@ pub fn collect_temporal(
             );
         }
         _ => {}
+    }
+}
+
+/// `\E x \in S : <>Q(x)` is `<>(\E x \in S : Q(x))` and `\E x \in S : []<>Q(x)` is
+/// `[]<>(\E x \in S : Q(x))`, because `<>` and `[]<>` distribute over disjunction.
+/// No other temporal body distributes, so those return `None`.
+fn distribute_exists(var: &Arc<str>, domain: &Expr, body: &Expr) -> Option<Expr> {
+    let exists = |inner: &Expr| {
+        Expr::Exists(
+            var.clone(),
+            Box::new(domain.clone()),
+            Box::new(inner.clone()),
+        )
+    };
+    match body {
+        Expr::Eventually(inner) if is_state_level(inner) => {
+            Some(Expr::Eventually(Box::new(exists(inner))))
+        }
+        Expr::Always(inner) => match inner.as_ref() {
+            Expr::Eventually(p) if is_state_level(p) => Some(exists(p)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn is_state_level(expr: &Expr) -> bool {
+    !expr_contains_temporal(expr) && !matches!(expr, Expr::Always(_))
+}
+
+/// Extract a cfg `PROPERTY` into liveness obligations. Every conjunct of a property
+/// is something to check, so a shape the checker cannot represent is an error: in a
+/// `SPECIFICATION` body a dropped conjunct only weakens an assumption, but in a
+/// property it would silently report the missing obligation as satisfied.
+/// A disjunction is checked as the conjunction of its disjuncts, which can only
+/// report a violation that does not exist, never miss one that does.
+pub fn collect_property(
+    expr: &Expr,
+    liveness: &mut Vec<Expr>,
+    quantified: &mut Vec<(Arc<str>, Expr, Expr)>,
+) -> Result<(), String> {
+    let unsupported = |what: &str| Err(format!("{what} is not supported in a PROPERTY yet"));
+    match expr {
+        Expr::And(l, r) | Expr::Or(l, r) => {
+            collect_property(l, liveness, quantified)?;
+            collect_property(r, liveness, quantified)
+        }
+        Expr::LeadsTo(p, q) if is_state_level(p) && is_state_level(q) => {
+            liveness.push(expr.clone());
+            Ok(())
+        }
+        Expr::Eventually(inner) => match inner.as_ref() {
+            Expr::Always(p) if is_state_level(p) => {
+                liveness.push(expr.clone());
+                Ok(())
+            }
+            other if is_state_level(other) => {
+                liveness.push(expr.clone());
+                Ok(())
+            }
+            _ => unsupported("`<>` applied to a temporal formula"),
+        },
+        Expr::Always(inner) => {
+            if let Some((p, q)) = leads_to_form(expr) {
+                liveness.push(Expr::LeadsTo(Box::new(p.clone()), Box::new(q.clone())));
+                return Ok(());
+            }
+            match inner.as_ref() {
+                Expr::Eventually(p) if is_state_level(p) => {
+                    liveness.push((**p).clone());
+                    Ok(())
+                }
+                _ => unsupported(
+                    "a `[]` formula other than `[]<>P` or `[](P => <>Q)` (a state invariant `[]P` belongs under INVARIANT)",
+                ),
+            }
+        }
+        Expr::Forall(var, domain, body) if expr_contains_temporal(body) => {
+            collect_property(body, &mut Vec::new(), &mut Vec::new())?;
+            quantified.push((var.clone(), (**domain).clone(), (**body).clone()));
+            Ok(())
+        }
+        Expr::Exists(var, domain, body) if expr_contains_temporal(body) => {
+            match distribute_exists(var, domain, body) {
+                Some(property) => {
+                    liveness.push(property);
+                    Ok(())
+                }
+                None => unsupported("`\\E x \\in S : P` with a body other than `<>Q` or `[]<>Q`"),
+            }
+        }
+        Expr::WeakFairness(_, _) | Expr::StrongFairness(_, _) => {
+            unsupported("a fairness formula (`WF`/`SF`)")
+        }
+        Expr::BoxAction(_, _) | Expr::DiamondAction(_, _) => {
+            unsupported("an action-level formula (`[][A]_v`, `<<A>>_v`)")
+        }
+        _ if !expr_contains_temporal(expr) => {
+            unsupported("a state-level conjunct inside a temporal formula")
+        }
+        _ => unsupported("this temporal formula"),
     }
 }
 

@@ -238,12 +238,17 @@ With `--check-liveness`, a top-level property (from a cfg `PROPERTY`, a `SPECIFI
 
 | Form | Checked as | Violated by |
 |------|-----------|-------------|
-| `<>P` | Eventually | a reachable fair cycle whose states are all `¬P` |
+| `<>P` | Eventually | a fair behavior that never reaches `P`: a path of `¬P` states from an initial state into a fair `¬P` cycle |
 | `[]<>P` | Infinitely often | a reachable fair cycle whose states are all `¬P` |
 | `<>[]P` | Stable-eventually | a reachable fair cycle containing any `¬P` state |
-| `P ~> Q` | Leads-to | a reachable fair `¬Q` cycle reachable from a `P ∧ ¬Q` state |
+| `P ~> Q` | Leads-to | a reachable `P ∧ ¬Q` state followed by a path of `¬Q` states into a fair `¬Q` cycle; the `P` state may come before the cycle |
+| `[](P => <>Q)` | Leads-to | checked as `P ~> Q` when `P` and `Q` are state predicates |
 
 The liveness graph models the implicit stuttering that `[][Next]_vars` always permits — every state gets a stutter self-loop, and weak/strong fairness rules out the cycles it would otherwise create. An agent that may stall forever therefore needs no explicit `\/ UNCHANGED vars` disjunct to be considered.
+
+A cfg `PROPERTY` is checked conjunct by conjunct, and any conjunct the checker cannot represent — a state invariant `[]P` (use `INVARIANT`), a `WF`/`SF` formula, an action-level formula, or a temporal shape outside the table above — is a config-time error rather than being skipped. A disjunction of properties is checked as the conjunction of its disjuncts, which can report a violation that does not exist but never misses one.
+
+Fairness follows TLC. `WF_v(A)` and `SF_v(A)` count only `A` steps that change the subscript `v`, so `WF_x(A)` is vacuous for an `A` that never changes `x`. A strongly connected set of states that enables `A` but never takes it can still contain a cycle that is fair to `SF_v(A)` by avoiding every `A`-enabled state; such cycles are found and checked. When a cfg defines the behavior with `SPECIFICATION` or `INIT`/`NEXT`, fairness comes only from the named `SPECIFICATION` (none with `INIT`/`NEXT`), never from other `*Spec` definitions in the module.
 
 ### Quantified Temporal Properties
 
@@ -253,9 +258,10 @@ Temporal properties may be quantified over a constant set (requires `--check-liv
 |------|----------|
 | `\A x \in S : <>P(x)` / `\A x \in S : P(x) ~> Q(x)` | Expanded to one liveness property per element of `S`; all must hold. |
 | `\E x \in S : <>Q(x)` | Normalized to `<>(\E x \in S : Q(x))` and checked as a single liveness property. |
-| `\E x \in S : P(x) ~> Q(x)` (existential, non-`<>` body) | Not supported — emits a warning and is dropped. |
+| `\E x \in S : []<>Q(x)` | Normalized to `[]<>(\E x \in S : Q(x))` and checked as a single liveness property. |
+| `\E x \in S : P(x) ~> Q(x)` (other existential bodies) | Not supported. In a cfg `PROPERTY` it is a config error; inside a `SPECIFICATION` it is an assumption that is dropped with a warning. |
 
-`S` must evaluate to a constant set. A property whose definition name ends in `Spec` is extracted by the parser, so it is not re-extracted when also named in a cfg `PROPERTY`.
+`S` must evaluate to a constant set. Without a cfg that defines the behavior, a property whose definition name ends in `Spec` is extracted by the parser, so it is not re-extracted when also named in a cfg `PROPERTY`.
 
 ---
 

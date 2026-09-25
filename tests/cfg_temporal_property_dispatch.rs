@@ -67,13 +67,16 @@ fn cfg_existential_eventually_property_is_captured() {
     let (spec, _) = apply(spec_src, cfg_src);
     assert_eq!(spec.liveness_properties.len(), 1);
     assert!(
-        matches!(spec.liveness_properties[0], Expr::Exists(_, _, _)),
-        "\\E i : <>Q(i) reduces to <>(\\E i : Q(i)); a \\E state predicate must land in liveness"
+        matches!(
+            &spec.liveness_properties[0],
+            Expr::Eventually(inner) if matches!(inner.as_ref(), Expr::Exists(_, _, _))
+        ),
+        "\\E i : <>Q(i) reduces to <>(\\E i : Q(i)); a \\E state predicate must land in liveness under <>"
     );
 }
 
 #[test]
-fn cfg_unsupported_existential_temporal_warns_instead_of_silently_dropping() {
+fn cfg_unsupported_existential_temporal_property_is_a_config_error() {
     let spec_src = "---- MODULE M ----\n\
         EXTENDS Naturals\n\
         VARIABLE x\n\
@@ -83,13 +86,23 @@ fn cfg_unsupported_existential_temporal_warns_instead_of_silently_dropping() {
         ExistsLeads == \\E i \\in S : (x = 0) ~> (x = i)\n\
         ====\n";
     let cfg_src = "INIT Init\nNEXT Next\nPROPERTY ExistsLeads\n";
-    let (spec, warnings) = apply(spec_src, cfg_src);
-    let captured =
-        spec.liveness_properties.len() + spec.quantified_temporal.len() + spec.fairness.len();
-    assert_eq!(captured, 0);
+    let mut spec = parse(spec_src).expect("spec parses");
+    let cfg = parse_cfg(cfg_src).expect("cfg parses");
+    let result = apply_config(
+        &cfg,
+        &mut spec,
+        &mut Env::new(),
+        &mut CheckerConfig::default(),
+        &[],
+        &[],
+        false,
+    );
+    let err = result.expect_err(
+        "a property that cannot be checked must be rejected, not dropped and reported as satisfied",
+    );
     assert!(
-        warnings.iter().any(|w| w.contains("existential temporal")),
-        "unsupported existential temporal must warn, got {warnings:?}"
+        err.contains("ExistsLeads") && err.contains("\\E"),
+        "the error must name the property and the unsupported shape, got {err}"
     );
 }
 
@@ -189,4 +202,28 @@ fn cfg_existential_eventually_is_checked_end_to_end() {
             "without fairness x stalls at 0 so \\E i in {{1,2}} : <>(x=i) is violated; got {other:?}"
         ),
     }
+}
+
+#[test]
+fn init_next_cfg_warns_when_it_discards_parsed_fairness() {
+    let spec_src = "---- MODULE M ----\n\
+        EXTENDS Naturals\n\
+        VARIABLE x\n\
+        Init == x = 0\n\
+        Step == x < 1 /\\ x' = x + 1\n\
+        Nxt == Step \\/ UNCHANGED x\n\
+        FairSpec == Init /\\ [][Nxt]_x /\\ WF_x(Step)\n\
+        Reach == <>(x = 1)\n\
+        ====\n";
+    let (spec, warnings) = apply(spec_src, "INIT Init\nNEXT Nxt\nPROPERTY Reach\n");
+    assert!(
+        spec.fairness.is_empty(),
+        "INIT/NEXT defines a behavior with no fairness, as in TLC"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("not applied") && w.contains("SPECIFICATION")),
+        "discarding the module's fairness must be announced, got {warnings:?}"
+    );
 }
