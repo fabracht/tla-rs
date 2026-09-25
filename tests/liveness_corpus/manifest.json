@@ -13,9 +13,9 @@
       "exit_code": 0,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "violated",
-    "tla_rs_now_kind": "liveness",
-    "xfail_until_phase": "1b",
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
     "note": "<>P is checked as []<>P: the fair behavior 0,1,2,2,... visits x=1 once, but tla-rs flags the x=2 terminal cycle as a violation (false alarm)."
   },
   {
@@ -222,9 +222,9 @@
       "exit_code": 0,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "violated",
-    "tla_rs_now_kind": "liveness",
-    "xfail_until_phase": "1b",
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
     "note": "\\A i : <>(x=i) expands to per-element <>P obligations, each checked as []<>P; false alarm on the x=2 terminal cycle."
   },
   {
@@ -241,9 +241,9 @@
       "exit_code": 13,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "ok",
-    "tla_rs_now_kind": null,
-    "xfail_until_phase": "2",
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
     "note": "\\E i : []<>(x=i) is dropped with a warning ('existential temporal ... dropping'), so tla-rs passes a property TLC shows violated (false pass)."
   },
   {
@@ -317,9 +317,9 @@
       "exit_code": 0,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "violated",
-    "tla_rs_now_kind": "liveness",
-    "xfail_until_phase": "1b",
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
     "note": "<>(x=0) holds at the initial state, but tla-rs checks []<>(x=0) and flags the x=2 cycle (false alarm)."
   },
   {
@@ -355,9 +355,9 @@
       "exit_code": 13,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "ok",
-    "tla_rs_now_kind": null,
-    "xfail_until_phase": "1b",
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
     "note": "Issue #120 probe: P=(x=0) holds only before the fair x=1 cycle, so the SCC-local ~> check misses the violation (false pass)."
   },
   {
@@ -374,9 +374,9 @@
       "exit_code": 13,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "error",
-    "tla_rs_now_kind": null,
-    "xfail_until_phase": "2",
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
     "note": "[](P => <>Q) is rejected with an eval error instead of being treated as P ~> Q."
   },
   {
@@ -488,9 +488,9 @@
       "exit_code": 0,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "error",
+    "tla_rs_now": "ok",
     "tla_rs_now_kind": null,
-    "xfail_until_phase": "2",
+    "xfail_until_phase": null,
     "note": "[]((x=0) => <>(x=1)) is rejected with an eval error."
   },
   {
@@ -583,9 +583,9 @@
       "exit_code": 13,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "ok",
-    "tla_rs_now_kind": null,
-    "xfail_until_phase": "1b",
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
     "note": "SF_x(A) is judged on the whole SCC {0,1,2}; the fair sub-cycle 0<->2 (where A is never enabled) is never examined (false pass)."
   },
   {
@@ -640,9 +640,9 @@
       "exit_code": 13,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "ok",
-    "tla_rs_now_kind": null,
-    "xfail_until_phase": "1b",
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
     "note": "The WF_x subscript is ignored: <<A>>_x is never enabled because A leaves x unchanged, so WF_x(A) is vacuous and stuttering at y=0 is fair; tla-rs treats it as WF_vars(A) (false pass)."
   },
   {
@@ -910,5 +910,195 @@
     "tla_rs_now_kind": null,
     "xfail_until_phase": null,
     "note": "TLC rejects the property: 'Temporal formulas containing actions must be of forms <>[]A or []<>A.' Skipped by the CI test."
+  },
+  {
+    "id": "C45",
+    "spec": "specs/Leak.tla",
+    "cfg": "cfgs/C45.cfg",
+    "specification": "Spec",
+    "property": "ReachOne",
+    "property_text": "<>(x = 1)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Temporal property ReachOne was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "SPECIFICATION Spec has no fairness, but the parser extracts WF_x(Step) from the sibling definition FairSpec (every definition ending in Spec) and tla-rs applies it (false pass)."
+  },
+  {
+    "id": "C46",
+    "spec": "specs/Leak.tla",
+    "cfg": "cfgs/C46.cfg",
+    "specification": null,
+    "property": "ReachOne",
+    "property_text": "<>(x = 1)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Temporal property ReachOne was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "INIT/NEXT cfg: TLC checks the property with no fairness at all; tla-rs applies WF_x(Step) extracted by the parser from FairSpec (false pass)."
+  },
+  {
+    "id": "C47",
+    "spec": "specs/Leak.tla",
+    "cfg": "cfgs/C47.cfg",
+    "specification": "FairSpec",
+    "property": "ReachOne",
+    "property_text": "<>(x = 1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Positive control for C45/C46: SPECIFICATION FairSpec carries WF_x(Step), so x reaches 1."
+  },
+  {
+    "id": "C48",
+    "spec": "specs/MixedProps.tla",
+    "cfg": "cfgs/C48.cfg",
+    "specification": "Spec",
+    "property": "LTSafe",
+    "property_text": "[](x = 0 => <>(x = 2)) /\\ [](x < 5)",
+    "expected": "violated",
+    "kind": "invariant",
+    "tlc": {
+      "verdict_raw": "Invariant line 7, col 37 to line 7, col 45 of module MixedProps is violated.",
+      "exit_code": 12,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "1a",
+    "note": "TLC checks the [](x < 5) conjunct as an implied invariant. tla-rs 0.10.1 silently dropped that conjunct from the extracted property (false pass); it is now a config-time error until PROPERTY conjuncts are classified like TLC."
+  },
+  {
+    "id": "C49",
+    "spec": "specs/MixedProps.tla",
+    "cfg": "cfgs/C49.cfg",
+    "specification": "Spec",
+    "property": "EvSafe",
+    "property_text": "<>(x = 2) /\\ [](x < 5)",
+    "expected": "violated",
+    "kind": "invariant",
+    "tlc": {
+      "verdict_raw": "Invariant line 7, col 37 to line 7, col 45 of module MixedProps is violated.",
+      "exit_code": 12,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "1a",
+    "note": "Same as C48 with a <>P conjunct: the [](x < 5) conjunct used to be dropped silently (false pass); now a config-time error."
+  },
+  {
+    "id": "C50",
+    "spec": "specs/ExistsProps.tla",
+    "cfg": "cfgs/C50.cfg",
+    "specification": "S",
+    "property": "ExSE",
+    "property_text": "\\E p \\in P : <>[](pc[p] = \"a\")",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Temporal property ExSE was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "\\E over <>[] does not distribute; it used to be dropped with only a warning (false pass). Now a config-time error until the general LTL engine."
+  },
+  {
+    "id": "C51",
+    "spec": "specs/ExistsProps.tla",
+    "cfg": "cfgs/C51.cfg",
+    "specification": "S",
+    "property": "ExLT",
+    "property_text": "\\E p \\in P : (pc[p] = \"a\") ~> (pc[p] = \"c\")",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Temporal property ExLT was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "\\E over ~> does not distribute; it used to be dropped with only a warning (false pass). Now a config-time error."
+  },
+  {
+    "id": "C52",
+    "spec": "specs/ExistsProps.tla",
+    "cfg": "cfgs/C52.cfg",
+    "specification": "S",
+    "property": "ExBoxImp",
+    "property_text": "\\E p \\in P : [](pc[p] = \"a\" => <>(pc[p] = \"c\"))",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Temporal property ExBoxImp was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "\\E over [](P => <>Q); a version of the [](P => <>Q) desugaring routed it into the lenient extractor, which dropped it (false pass). Now a config-time error."
+  },
+  {
+    "id": "C53",
+    "spec": "specs/FairProp.tla",
+    "cfg": "cfgs/C53.cfg",
+    "specification": "Spec",
+    "property": "WProp",
+    "property_text": "WF_x(Step) /\\ <>(x = 2)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Temporal property WProp was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "A WF formula inside a PROPERTY is an obligation in TLC; tla-rs 0.10.1 added it to the fairness assumptions instead (false pass). Now a config-time error."
+  },
+  {
+    "id": "C54",
+    "spec": "specs/MixedProps.tla",
+    "cfg": "cfgs/C54.cfg",
+    "specification": "Spec",
+    "property": "LTOr",
+    "property_text": "[](x = 0 => <>(x = 9)) \\/ [](x = 0 => <>(x = 2))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "2",
+    "note": "Disjunction of properties is checked as the conjunction of its disjuncts: a false alarm, never a false pass."
   }
 ]

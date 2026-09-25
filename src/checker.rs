@@ -23,7 +23,6 @@ use crate::graph::StateGraph;
 use crate::liveness::{self, LivenessViolation};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::modules::{ModuleError, ModuleRegistry, resolve_instances};
-use crate::scc::compute_sccs;
 use crate::stdlib;
 use crate::symmetry::SymmetryConfig;
 
@@ -1082,81 +1081,44 @@ fn check_liveness_properties(
         graph.add_edge(idx, idx, None);
     }
 
-    if !config.quiet {
-        eprintln!("  Computing strongly connected components...");
-    }
-    let sccs = compute_sccs(&graph);
-    let nontrivial_count = sccs.iter().filter(|scc| !scc.is_trivial).count();
-    if !config.quiet {
-        eprintln!(
-            "  Found {} SCCs ({} non-trivial)",
-            sccs.len(),
-            nontrivial_count
-        );
-    }
-
     let (fairness, liveness_properties) = expand_quantified_temporal(spec, domains, defs)?;
+    let table = liveness::FairnessTable::build(&graph, &fairness, &spec.vars, domains, defs)?;
 
     for property in &liveness_properties {
         if time_exceeded() {
             return Ok(LivenessCheckOutcome::TimeExceeded);
         }
-        for scc in &sccs {
-            if !liveness::check_fairness_in_scc(&graph, scc, &fairness, &spec.vars, domains, defs)?
-            {
-                continue;
-            }
-
-            let violating_cycles = match property {
-                Expr::LeadsTo(p, q) => {
-                    liveness::check_leads_to(&graph, scc, p, q, domains, defs, &spec.vars)?
-                }
-                Expr::Eventually(inner) => match inner.as_ref() {
-                    Expr::Always(p) => liveness::check_stable_eventually(
-                        &graph, scc, p, domains, defs, &spec.vars,
-                    )?,
-                    _ => liveness::check_eventually(&graph, scc, inner, domains, defs, &spec.vars)?,
-                },
-                _ => liveness::check_eventually(&graph, scc, property, domains, defs, &spec.vars)?,
+        if let Some(lasso) =
+            liveness::find_violation(&graph, &table, property, &spec.vars, domains, defs)?
+        {
+            let states_at = |indices: &[usize]| -> Vec<State> {
+                indices
+                    .iter()
+                    .filter_map(|&idx| graph.get_state(idx).cloned())
+                    .collect()
             };
-
-            for cycle_indices in violating_cycles {
-                let cycle_scc = crate::scc::SCC::new(cycle_indices.clone(), false);
-                if !fairness.is_empty()
-                    && !liveness::check_fairness_in_scc(
-                        &graph, &cycle_scc, &fairness, &spec.vars, domains, defs,
-                    )?
-                {
-                    continue;
-                }
-
-                let prop_desc = match property {
-                    Expr::LeadsTo(_, _) => format!("{:?}", property),
-                    Expr::Eventually(inner) => match inner.as_ref() {
-                        Expr::Always(p) => format!("<>[]{:?}", p),
-                        _ => format!("<>{:?}", inner),
-                    },
-                    _ => format!("<>{:?}", property),
-                };
-                let cycle_entry = cycle_indices.first().copied().unwrap_or(scc.states[0]);
-                let display_cycle = liveness::extract_display_cycle(&graph, &cycle_indices);
-                let violation = LivenessViolation {
-                    prefix: graph.reconstruct_trace(cycle_entry),
-                    cycle: display_cycle
-                        .iter()
-                        .filter_map(|&idx| graph.get_state(idx).cloned())
-                        .collect(),
-                    property: prop_desc,
-                    fairness_info: liveness::fairness_info_for_scc(
-                        &graph, &cycle_scc, &fairness, &spec.vars, domains, defs,
-                    )?,
-                };
-                return Ok(LivenessCheckOutcome::Violation(violation));
-            }
+            let violation = LivenessViolation {
+                prefix: states_at(&lasso.prefix),
+                cycle: states_at(&lasso.cycle),
+                property: describe_liveness_property(property),
+                fairness_info: table.fairness_info(&graph, &lasso.cycle),
+            };
+            return Ok(LivenessCheckOutcome::Violation(violation));
         }
     }
 
     Ok(LivenessCheckOutcome::Ok)
+}
+
+fn describe_liveness_property(property: &Expr) -> String {
+    match property {
+        Expr::LeadsTo(_, _) => format!("{:?}", property),
+        Expr::Eventually(inner) => match inner.as_ref() {
+            Expr::Always(p) => format!("<>[]{:?}", p),
+            _ => format!("<>{:?}", inner),
+        },
+        _ => format!("[]<>{:?}", property),
+    }
 }
 
 fn expand_quantified_temporal(

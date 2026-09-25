@@ -663,6 +663,28 @@ pub fn apply_config(
         domains.insert(name.clone(), val.clone());
     }
 
+    let cfg_defines_behavior =
+        cfg.specification.is_some() || cfg.init.is_some() || cfg.next.is_some();
+    let discards_parsed_temporal = cfg_defines_behavior
+        && cfg.specification.is_none()
+        && (!spec.fairness.is_empty()
+            || !spec.liveness_properties.is_empty()
+            || !spec.quantified_temporal.is_empty());
+    if discards_parsed_temporal {
+        warnings.push(
+            "fairness and temporal formulas in the module's *Spec definitions are not applied: \
+             the cfg defines the behavior with INIT/NEXT, which (as in TLC) has no fairness. \
+             Use SPECIFICATION <name> to check under that definition's fairness, and PROPERTY \
+             for the properties to check"
+                .to_string(),
+        );
+    }
+    if cfg_defines_behavior {
+        spec.fairness.clear();
+        spec.liveness_properties.clear();
+        spec.quantified_temporal.clear();
+    }
+
     if let Some(ref init_name) = cfg.init {
         match spec.definitions.get(init_name.as_ref()) {
             Some((params, expr)) if params.is_empty() => {
@@ -735,8 +757,13 @@ pub fn apply_config(
                 Some((params, expr)) if params.is_empty() => {
                     let expr = (**expr).clone();
                     if crate::ast::expr_contains_temporal(&expr) {
-                        if !parser_pre_extracts_temporal(prop_name) {
-                            warnings.extend(spec.extract_fairness_and_liveness(&expr));
+                        if cfg_defines_behavior || !parser_pre_extracts_temporal(prop_name) {
+                            crate::ast::collect_property(
+                                &expr,
+                                &mut spec.liveness_properties,
+                                &mut spec.quantified_temporal,
+                            )
+                            .map_err(|e| format!("PROPERTY '{prop_name}': {e}"))?;
                         }
                     } else {
                         spec.liveness_properties.push(expr);
@@ -869,13 +896,7 @@ fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<Vec<St
     if let Some(next_expr) = find_box_action(&expr_clone) {
         spec.init = Some(collect_init(&expr_clone).unwrap_or(Expr::Lit(Value::Bool(true))));
         spec.next = Some(next_expr);
-        let parser_already_extracted = parser_pre_extracts_temporal(spec_name);
-        let warnings = if parser_already_extracted {
-            Vec::new()
-        } else {
-            spec.extract_fairness_and_liveness(&expr_clone)
-        };
-        return Ok(warnings);
+        return Ok(spec.extract_fairness_and_liveness(&expr_clone));
     }
     Err(format!(
         "SPECIFICATION '{}': expected Init /\\ [][Next]_vars form",
@@ -1307,7 +1328,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_config_temporal_property_unwrapped_into_liveness() {
+    fn apply_config_eventually_property_keeps_its_eventually_shape() {
         let mut spec = Spec {
             vars: vec![Arc::from("x")],
             init: None,
@@ -1352,7 +1373,8 @@ mod tests {
         assert_eq!(spec.liveness_properties.len(), 1);
         assert_eq!(
             format!("{:?}", spec.liveness_properties[0]),
-            format!("{inner:?}")
+            format!("{:?}", Expr::Eventually(Box::new(inner))),
+            "<>P must stay distinct from a bare P, which the checker reads as []<>P"
         );
     }
 
