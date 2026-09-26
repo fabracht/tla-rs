@@ -1,5 +1,96 @@
 # Changelog
 
+## [0.10.2] - 2026-09-25
+
+### Fixed
+
+- Liveness checking no longer passes properties that TLC shows are violated (#120).
+  - `P ~> Q` is now checked from every reachable `P ∧ ¬Q` state. Previously only a `P` state inside the same strongly connected component as the fair `¬Q` cycle counted, so `(x = 0) ~> (x = 2)` passed when `x = 0` held only before the cycle.
+  - A cycle that is fair to `SF_v(A)` is now found inside a component that enables `A` but never takes it. Previously the whole component was skipped.
+  - `WF_v` and `SF_v` now honor the subscript: only `A` steps that change `v` count, so `WF_x(A)` is vacuous for an `A` that never changes `x`.
+  - `\E x \in S : []<>P(x)` is checked as `[]<>(\E x \in S : P(x))` instead of being dropped.
+- Fairness written in other `*Spec` definitions no longer leaks into a check. When a cfg defines the behavior with `SPECIFICATION`, fairness comes only from that definition. With `INIT`/`NEXT` there is no fairness, as in TLC, and a warning says when fairness defined in the module is not applied.
+- `<>P` is no longer checked as `[]<>P`. A fair behavior that passes through `P` and then cycles through `¬P` states satisfies `<>P`; it used to be reported as a violation.
+- `[](P => <>Q)` with state-level `P` and `Q` is checked as `P ~> Q` instead of failing with "temporal operator reached eval".
+- Every liveness counterexample satisfies the specification's fairness: the reported cycle passes through a witness for each fairness constraint.
+
+### Changed
+
+- A cfg `PROPERTY` conjunct that the liveness checker cannot represent is now a config error instead of being silently dropped, which reported it as satisfied. This covers a state invariant `[]P` used as a property conjunct (use `INVARIANT`), `WF`/`SF` formulas, action-level formulas, and `\E` over temporal bodies other than `<>Q` and `[]<>Q`. A disjunction of properties is still checked as the conjunction of its disjuncts, which can report a violation that does not exist but never misses one.
+
+### Added
+
+- A liveness oracle of 58 spec/property cases whose expected verdicts come from running Java TLC, checked in CI without Java (`tests/liveness_oracle.rs`). Every counterexample on a case that agrees with TLC is re-checked by an independent lasso validator, and `scripts/liveness-oracle.sh` re-verifies the verdicts against a local `tla2tools.jar` (#121).
+- The liveness benchmark now checks a liveness property. It previously registered none, so it measured only the safety search (#121).
+
+## [0.10.1] - 2026-09-23
+
+### Fixed
+
+- The warning for `/` no longer claims that TLC evaluates `/` as real division (#119). TLC cannot evaluate real division: `/` is undefined under `EXTENDS Integers` and fails under `EXTENDS Reals`. The warning now says that `/` is real division in TLA+'s Reals module, which TLC cannot evaluate and tla-rs does not support. Real-number support was closed as not planned (#110).
+
+## [0.10.0] - 2026-09-23
+
+### Added
+
+- User-defined infix operators (#101). A definition such as `a \oplus b == a + b` defines a two-argument operator for any `\name` symbol. Defining `\oplus`, `\ominus` or `\o` shadows the built-in bag or sequence operator within the module, as in TLC. User operators share one precedence (additive, left-associative) and must be defined before they are used.
+
+## [0.9.9] - 2026-09-23
+
+### Fixed
+
+- `A \X B \X C` now produces flat triples, as in TLC (#103). It produced nested pairs, so `<<1, 2, 3>> \in ({1} \X {2} \X {3})` was FALSE. Explicit nesting `A \X (B \X C)` still yields `<<a, <<b, c>>>>`, and two-way products are unchanged.
+
+## [0.9.8] - 2026-09-22
+
+### Added
+
+- A warning when a boolean definition with a non-invariant name is never checked (#99). Only definitions named `Inv*`, `TypeOK*` or `NotSolved*`, or listed under `INVARIANT`, are checked, so a well-formed invariant with another name was silently skipped. The warning now also fires when other invariants are checked. It ignores definitions that are used elsewhere, contain primes or temporal operators, or mention no state variable.
+- `scripts/regression-sweep.sh` compares a baseline build against the current one over a local sample corpus and reports the specs whose output changes (#116).
+
+## [0.9.7] - 2026-09-22
+
+### Fixed
+
+- Deeply nested specs no longer overflow the stack during liveness-context evaluation, recursive function definitions, or next-state enumeration (#113). These recursions now use the same growing stack as expression evaluation.
+
+## [0.9.6] - 2026-09-21
+
+### Fixed
+
+- Deeply nested specs no longer overflow the stack in debug builds (#112). The evaluator grew its stack too late when a single evaluation level used more than 32 KB, which large quantifier frames do in debug builds.
+
+## [0.9.5] - 2026-09-21
+
+### Added
+
+- A one-time warning that `/` is treated as integer division, like `\div` (#98). The warning's wording was corrected in 0.10.1.
+
+## [0.9.4] - 2026-09-20
+
+### Added
+
+- `--symbolic-integers` can be enabled from a cfg with `SYMBOLIC_INTEGERS TRUE` and from the MCP `check_spec` tool with `symbolic_integers` (#104).
+- `--max-powerset`, `--max-permutations` and `--max-subbag` set the limits on eagerly enumerating `SUBSET`, `Permutations` and `SubBag`. The defaults stay 20, 10 and 20 (#100).
+
+### Fixed
+
+- A defined operator can be primed (#107). `Op'`, and any parenthesized `(expr)'`, primes every state variable in the expression and leaves constants and bound names unprimed, as in TLC. It used to fail with "prime can only be applied to variable".
+
+## [0.9.2] - 2026-09-19
+
+### Added
+
+- `--symbolic-integers` makes `Nat` and `Int` infinite sets, as in TLC (#97, #93). Membership works directly and through set operations such as `Nat \ {0}` and `[D -> Nat]`, enumerating them is an error, and `IsFiniteSet(Nat)` is FALSE. Without the flag, `Nat` and `Int` stay bounded to `0..100` and `-100..100`. The official `Voting` and `Paxos` examples now use a bounded `Ballot`.
+- A warning when a run checks no invariants but the module has boolean definitions that look like invariants (#99, extended in 0.9.8).
+
+### Fixed
+
+- `\div` and `%` use floored division for negative operands, as in TLA+ and TLC (#94). Integer overflow is an error instead of silently wrapping (#96).
+- The MCP `check_spec` result includes parser warnings, so an invariant whose body failed to parse is no longer invisible (#102).
+- With `--continue`, the JSON `status` reports the recorded violations instead of `ok` (#95).
+- The release workflow fails when publishing to crates.io fails, instead of reporting success (#91).
+
 ## [0.9.0] - 2026-09-06
 
 ### Added
