@@ -6,7 +6,8 @@ use std::sync::Arc;
 use crate::Source;
 use crate::ast::{Env, Spec};
 use crate::checker::{
-    CheckResult, CheckStats, CheckerConfig, Counterexample, PrepareSpecError, PropertyStats, check,
+    CheckResult, CheckStats, CheckerConfig, Counterexample, PrepareSpecError, PropertyStats,
+    PropertyViolationKind, check,
 };
 use crate::config::{apply_config, parse_cfg, parse_constant_value};
 use crate::demo::{self, Beat, BeatReport, Manifest, run_beat};
@@ -20,10 +21,10 @@ use super::schema::{
     CheckSpecInput, CheckSpecOutput, CheckStatsSummary, ConstantBinding, DemoStatus,
     DemoTraceState, ErrorPhase, ExportDemoDocInput, ExportDemoDocOutput, ExportDemoHtmlInput,
     ExportDemoHtmlOutput, InvariantSummary, LimitKind, ListInvariantsInput, ListInvariantsOutput,
-    ParseWarning, PropertySummary, ReplayScenarioInput, ReplayScenarioOutput, ScenarioFailureInfo,
-    ScenarioTraceState, SourceSpan, SpecSummary, StateSnapshot, StructuredError, TlaValue,
-    ValidateDemoInput, ValidateDemoOutput, ValidateSpecInput, ValidateSpecOutput,
-    VariantRunSummary,
+    ParseWarning, PropertySummary, PropertyViolationKindOutput, ReplayScenarioInput,
+    ReplayScenarioOutput, ScenarioFailureInfo, ScenarioTraceState, SourceSpan, SpecSummary,
+    StateSnapshot, StructuredError, TlaValue, ValidateDemoInput, ValidateDemoOutput,
+    ValidateSpecInput, ValidateSpecOutput, VariantRunSummary, ViolationKind, ViolationSummary,
 };
 
 pub struct LoadedSpec {
@@ -266,10 +267,13 @@ pub fn check_spec(input: &CheckSpecInput) -> CheckSpecOutput {
         !loaded.checker_config.count_properties.is_empty(),
     );
 
+    let legacy_warning =
+        crate::config::legacy_temporal_warning(&loaded.spec, loaded.checker_config.check_liveness);
+
     let result = check(&loaded.spec, &loaded.domains, &loaded.checker_config);
     let outcome = map_check_result(result, &loaded.spec, &loaded.source);
     let mut warnings = loaded.warnings;
-    if let Some(message) = predicate_warning {
+    for message in predicate_warning.into_iter().chain(legacy_warning) {
         warnings.push(ParseWarning {
             message,
             span: None,
@@ -314,6 +318,11 @@ fn error_phase_for(kind: &super::schema::ErrorKind) -> ErrorPhase {
 fn map_check_result(result: CheckResult, spec: &Spec, source: &Source) -> CheckOutcome {
     match result {
         CheckResult::Ok(stats) => CheckOutcome::Ok {
+            properties_checked: stats
+                .properties_checked
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
             stats: summarize_stats(&stats),
         },
         CheckResult::InvariantViolation(cex, stats) => {
@@ -355,6 +364,24 @@ fn map_check_result(result: CheckResult, spec: &Spec, source: &Source) -> CheckO
         CheckResult::LivenessViolation(violation, stats) => {
             map_liveness_violation(violation, spec, stats)
         }
+        CheckResult::PropertyViolation(violation, stats) => CheckOutcome::PropertyViolation {
+            property: violation.property.to_string(),
+            kind: match violation.kind {
+                PropertyViolationKind::Init => PropertyViolationKindOutput::Init,
+                PropertyViolationKind::Action => PropertyViolationKindOutput::Action,
+            },
+            trace: violation
+                .trace
+                .iter()
+                .map(|s| StateSnapshot::from_state(s, &spec.vars))
+                .collect(),
+            actions: violation
+                .actions
+                .into_iter()
+                .map(|a| a.map(|s| s.to_string()))
+                .collect(),
+            stats: summarize_stats(&stats),
+        },
         CheckResult::MaxStatesExceeded(stats) => CheckOutcome::LimitReached {
             limit: LimitKind::MaxStates,
             stats: summarize_stats(&stats),
@@ -511,6 +538,25 @@ fn summarize_stats(stats: &CheckStats) -> CheckStatsSummary {
         } else {
             Some(stats.violation_count as u64)
         },
+        violations: stats
+            .violations_by_invariant
+            .iter()
+            .map(|(name, count)| ViolationSummary {
+                name: name.as_ref().map(|n| n.to_string()),
+                kind: ViolationKind::Invariant,
+                count: *count as u64,
+            })
+            .chain(
+                stats
+                    .violations_by_property
+                    .iter()
+                    .map(|(name, count)| ViolationSummary {
+                        name: Some(name.to_string()),
+                        kind: ViolationKind::Action,
+                        count: *count as u64,
+                    }),
+            )
+            .collect(),
     }
 }
 

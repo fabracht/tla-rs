@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value as Json;
 use tla_checker::ast::{Env, Expr, State};
-use tla_checker::checker::{CheckResult, check, prepare_spec};
+use tla_checker::checker::{CheckResult, PropertyViolationKind, check, prepare_spec};
 use tla_checker::config::parse_cfg;
 use tla_checker::load::{Prepared, prepare_from_path};
 
@@ -104,6 +104,15 @@ fn observe(case: &Case) -> Observed {
             kind: Some("liveness"),
             detail: violation.property.clone(),
             counterexample: Some(Counterexample::Lasso(violation.prefix, violation.cycle)),
+        },
+        CheckResult::PropertyViolation(violation, _) => Observed {
+            verdict: "violated",
+            kind: Some(match violation.kind {
+                PropertyViolationKind::Init => "init",
+                PropertyViolationKind::Action => "action",
+            }),
+            detail: violation.property.to_string(),
+            counterexample: Some(Counterexample::Trace(violation.trace)),
         },
         CheckResult::InvariantViolation(counterexample, _) => Observed {
             verdict: "violated",

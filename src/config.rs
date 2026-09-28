@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use crate::ast::{Env, Expr, Spec, Value};
+use crate::ast::{Env, Expr, LivenessProperty, PropertyPart, SafetyProperty, Spec, Value};
 use crate::checker::CheckerConfig;
 
 #[derive(Debug)]
@@ -669,7 +669,7 @@ pub fn apply_config(
         && cfg.specification.is_none()
         && (!spec.fairness.is_empty()
             || !spec.liveness_properties.is_empty()
-            || !spec.quantified_temporal.is_empty());
+            || !spec.quantified_fairness.is_empty());
     if discards_parsed_temporal {
         warnings.push(
             "fairness and temporal formulas in the module's *Spec definitions are not applied: \
@@ -682,7 +682,7 @@ pub fn apply_config(
     if cfg_defines_behavior {
         spec.fairness.clear();
         spec.liveness_properties.clear();
-        spec.quantified_temporal.clear();
+        spec.quantified_fairness.clear();
     }
 
     if let Some(ref init_name) = cfg.init {
@@ -720,11 +720,27 @@ pub fn apply_config(
     }
 
     if let Some(ref spec_name) = cfg.specification {
-        let spec_warnings = resolve_specification(spec_name, spec)?;
+        let checks_liveness = !cfg.properties.is_empty() || checker_config.check_liveness;
+        let spec_warnings = resolve_specification(spec_name, spec, checks_liveness)?;
         warnings.extend(spec_warnings);
     }
 
-    if !cfg.invariants.is_empty() {
+    if cfg.invariants.is_empty() {
+        let detected: Vec<&str> = spec
+            .invariant_names
+            .iter()
+            .flatten()
+            .map(|n| n.as_ref())
+            .collect();
+        if !detected.is_empty() {
+            warnings.push(format!(
+                "{} checked as invariant(s) because of the Inv/TypeOK/NotSolved naming convention; \
+                 the cfg has no INVARIANT section, and TLC would check none of them. List them \
+                 under INVARIANT to match TLC",
+                detected.join(", ")
+            ));
+        }
+    } else {
         let mut new_invariants = Vec::new();
         let mut new_names = Vec::new();
         for inv_name in &cfg.invariants {
@@ -755,19 +771,26 @@ pub fn apply_config(
         for prop_name in &cfg.properties {
             match spec.definitions.get(prop_name.as_ref()) {
                 Some((params, expr)) if params.is_empty() => {
-                    let expr = (**expr).clone();
-                    if crate::ast::expr_contains_temporal(&expr) {
-                        if cfg_defines_behavior || !parser_pre_extracts_temporal(prop_name) {
-                            crate::ast::collect_property(
-                                &expr,
-                                &mut spec.liveness_properties,
-                                &mut spec.quantified_temporal,
-                            )
-                            .map_err(|e| format!("PROPERTY '{prop_name}': {e}"))?;
-                        }
+                    let parser_extracted = !cfg_defines_behavior
+                        && parser_pre_extracts_temporal(prop_name)
+                        && crate::ast::expr_contains_temporal(expr);
+                    let obligations = if parser_extracted {
+                        spec.liveness_properties
+                            .retain(|p| !(p.from_specification && p.name == *prop_name));
+                        crate::ast::without_fairness(expr)
                     } else {
-                        spec.liveness_properties.push(expr);
+                        Some((**expr).clone())
+                    };
+                    if let Some(obligations) = obligations {
+                        let parts = crate::ast::classify_property(
+                            &obligations,
+                            &spec.vars,
+                            &spec.definitions,
+                        )
+                        .map_err(|e| format!("PROPERTY '{prop_name}': {e}"))?;
+                        add_property_parts(spec, prop_name, parts);
                     }
+                    checker_config.properties.push(prop_name.clone());
                 }
                 Some(_) => {
                     return Err(format!(
@@ -873,11 +896,71 @@ fn collect_init(expr: &Expr) -> Option<Expr> {
     }
 }
 
+/// Route a classified `PROPERTY` into the checks that run it. Its `[]P` conjuncts
+/// become one invariant, so the property is reported (and counted) once.
+fn add_property_parts(spec: &mut Spec, name: &Arc<str>, parts: Vec<PropertyPart>) {
+    let mut invariant: Option<Expr> = None;
+    for part in parts {
+        match part {
+            PropertyPart::Init(predicate) => spec.safety_properties.push(SafetyProperty::Init {
+                name: name.clone(),
+                predicate,
+            }),
+            PropertyPart::Invariant(predicate) => {
+                invariant = Some(match invariant {
+                    Some(earlier) => Expr::And(Box::new(earlier), Box::new(predicate)),
+                    None => predicate,
+                });
+            }
+            PropertyPart::Action(formula) => spec.safety_properties.push(SafetyProperty::Action {
+                name: name.clone(),
+                formula,
+            }),
+            PropertyPart::Liveness(formula) => spec.liveness_properties.push(LivenessProperty {
+                name: name.clone(),
+                formula,
+                from_specification: false,
+            }),
+        }
+    }
+    if let Some(predicate) = invariant {
+        spec.invariants.push(predicate);
+        spec.invariant_names.push(Some(name.clone()));
+    }
+}
+
+/// Temporal conjuncts of a `*Spec` definition are checked as properties only in the
+/// legacy mode without a cfg that defines the behavior; TLC treats them as
+/// assumptions. Returns the deprecation warning when that mode is in effect.
+pub fn legacy_temporal_warning(spec: &Spec, check_liveness: bool) -> Option<String> {
+    let mut names: Vec<&str> = spec
+        .liveness_properties
+        .iter()
+        .filter(|p| p.from_specification)
+        .map(|p| p.name.as_ref())
+        .collect();
+    names.dedup();
+    if !check_liveness || names.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "temporal formulas in {} are checked as properties because no cfg SPECIFICATION \
+         is given; this is deprecated: TLC treats a specification's temporal conjuncts as \
+         assumptions. Use a cfg with SPECIFICATION <name> and list the properties to check \
+         under PROPERTY",
+        names.join(", ")
+    ))
+}
+
 fn parser_pre_extracts_temporal(name: &str) -> bool {
     name == "Spec" || name.ends_with("Spec")
 }
 
-fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<Vec<String>, String> {
+fn resolve_specification(
+    spec_name: &Arc<str>,
+    spec: &mut Spec,
+    checks_liveness: bool,
+) -> Result<Vec<String>, String> {
     let expr_clone = match spec.definitions.get(spec_name.as_ref()) {
         Some((params, expr)) if params.is_empty() => expr.clone(),
         Some(_) => {
@@ -896,7 +979,24 @@ fn resolve_specification(spec_name: &Arc<str>, spec: &mut Spec) -> Result<Vec<St
     if let Some(next_expr) = find_box_action(&expr_clone) {
         spec.init = Some(collect_init(&expr_clone).unwrap_or(Expr::Lit(Value::Bool(true))));
         spec.next = Some(next_expr);
-        return Ok(spec.extract_fairness_and_liveness(&expr_clone));
+        let mut assumptions = Vec::new();
+        let mut warnings = Vec::new();
+        crate::ast::collect_temporal(
+            &expr_clone,
+            &mut spec.fairness,
+            &mut assumptions,
+            &mut spec.quantified_fairness,
+            &mut warnings,
+        );
+        if checks_liveness && !assumptions.is_empty() {
+            warnings.push(format!(
+                "SPECIFICATION '{spec_name}': its temporal conjuncts other than WF/SF are \
+                 assumptions (as in TLC), not properties to check; they do not yet restrict \
+                 the behaviors checked, so a reported liveness violation may be one they \
+                 exclude"
+            ));
+        }
+        return Ok(warnings);
     }
     Err(format!(
         "SPECIFICATION '{}': expected Init /\\ [][Next]_vars form",
@@ -1297,8 +1397,9 @@ mod tests {
             extends: vec![],
             fairness: vec![],
             assumes: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
             constants: vec![],
         };
         spec.definitions.insert(
@@ -1340,8 +1441,9 @@ mod tests {
             extends: vec![],
             fairness: vec![],
             assumes: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
             constants: vec![],
         };
 
@@ -1372,7 +1474,7 @@ mod tests {
         assert!(checker_config.check_liveness);
         assert_eq!(spec.liveness_properties.len(), 1);
         assert_eq!(
-            format!("{:?}", spec.liveness_properties[0]),
+            format!("{:?}", spec.liveness_properties[0].formula),
             format!("{:?}", Expr::Eventually(Box::new(inner))),
             "<>P must stay distinct from a bare P, which the checker reads as []<>P"
         );
@@ -1391,8 +1493,9 @@ mod tests {
             extends: vec![],
             fairness: vec![],
             assumes: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
             constants: vec![],
         };
 
@@ -1425,7 +1528,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(spec.liveness_properties.len(), 1);
-        assert!(matches!(spec.liveness_properties[0], Expr::LeadsTo(_, _)));
+        assert!(matches!(
+            spec.liveness_properties[0].formula,
+            Expr::LeadsTo(_, _)
+        ));
     }
 
     #[test]
@@ -1441,8 +1547,9 @@ mod tests {
             extends: vec![],
             fairness: vec![],
             assumes: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
             constants: vec![],
         };
 
@@ -1450,7 +1557,10 @@ mod tests {
         let next_expr = Expr::Var(Arc::from("MyNext"));
         let spec_body = Expr::And(
             Box::new(init_expr.clone()),
-            Box::new(Expr::BoxAction(Box::new(next_expr.clone()), Arc::from("x"))),
+            Box::new(Expr::BoxAction(
+                Box::new(next_expr.clone()),
+                Box::new(Expr::Var(Arc::from("x"))),
+            )),
         );
         spec.definitions
             .insert(Arc::from("Spec"), (vec![], spec_body.into()));
@@ -1493,8 +1603,9 @@ mod tests {
             extends: vec![],
             fairness: vec![],
             assumes: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
             constants: vec![],
         };
 
@@ -1514,7 +1625,7 @@ mod tests {
             )),
             Box::new(Expr::BoxAction(
                 Box::new(next_expr.clone()),
-                Arc::from("vars"),
+                Box::new(Expr::Var(Arc::from("vars"))),
             )),
         );
         spec.definitions
@@ -1553,8 +1664,9 @@ mod tests {
             extends: vec![],
             fairness: vec![],
             assumes: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
             constants: vec![],
         };
 

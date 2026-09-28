@@ -35,7 +35,9 @@ struct ConstraintTable {
 /// evaluated once over the whole graph. `taken[s][e]` holds when the `e`-th edge out
 /// of `s` is an `A` step that changes the subscript `v`, so `WF_x(A)` ignores
 /// `A` steps that leave `x` unchanged and stuttering never counts as taking `A`.
-/// A state enables `<<A>>_v` when one of its explored edges takes it. `taken` is
+/// A state enables `<<A>>_v` when one of its explored edges takes it, or when one of
+/// its successors outside the `CONSTRAINT` (`excluded[s]`, never part of a behavior)
+/// would: as in TLC, the constraint prunes behaviors, not enabledness. `taken` is
 /// exact for every edge inside a full-graph SCC, the only edges a fair cycle can
 /// use; edges that leave the SCC are evaluated only until one proves enabledness.
 pub struct FairnessTable {
@@ -51,6 +53,7 @@ impl FairnessTable {
     pub fn build(
         graph: &StateGraph,
         fairness: &[FairnessConstraint],
+        excluded: &[Vec<State>],
         vars: &[Arc<str>],
         constants: &Env,
         defs: &Definitions,
@@ -106,6 +109,18 @@ impl FairnessTable {
                             && occurs_at(edge_idx, &mut bindings)?
                         {
                             row[edge_idx] = true;
+                            any = true;
+                            break;
+                        }
+                    }
+                }
+                if !any {
+                    for next in excluded.get(state_idx).into_iter().flatten() {
+                        bindings.bind(next);
+                        let changes = bindings.value(subscript)? != subscript_values[state_idx];
+                        bindings.bind(state);
+                        bindings.bind_next(next);
+                        if changes && bindings.holds(action, "fairness action")? {
                             any = true;
                             break;
                         }
@@ -622,7 +637,7 @@ mod tests {
         let vars: Vec<Arc<str>> = vars.iter().map(|&v| Arc::from(v)).collect();
         let constants = Env::new();
         let defs = Definitions::new();
-        let table = FairnessTable::build(graph, fairness, &vars, &constants, &defs).unwrap();
+        let table = FairnessTable::build(graph, fairness, &[], &vars, &constants, &defs).unwrap();
         find_violation(graph, &table, property, &vars, &constants, &defs).unwrap()
     }
 

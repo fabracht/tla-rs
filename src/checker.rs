@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
 #[cfg(not(target_arch = "wasm32"))]
@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use indexmap::IndexSet;
 
-use crate::ast::{Env, Expr, Spec, State, Value};
+use crate::ast::{Env, Expr, SafetyProperty, Spec, State, Value};
 use crate::eval::{
     CheckerStats as EvalCheckerStats, Definitions, EvalContext, EvalError, contains_prime_ref,
     eval, eval_with_context, expr_contains, expr_references, init_states, make_primed_names,
@@ -65,6 +65,8 @@ pub struct CheckerConfig {
     /// state unchanged (a stutter), and every initial state must satisfy the
     /// abstract `Init`.
     pub check_refinement: Option<Arc<str>>,
+    /// Names of the cfg `PROPERTY` definitions, reported as checked on success.
+    pub properties: Vec<Arc<str>>,
 }
 
 impl Default for CheckerConfig {
@@ -97,6 +99,7 @@ impl Default for CheckerConfig {
             max_permutations: 10,
             max_subbag_copies: 20,
             check_refinement: None,
+            properties: Vec::new(),
         }
     }
 }
@@ -125,6 +128,24 @@ pub struct RefinementViolation {
     pub at_init: bool,
 }
 
+/// Which safety part of a cfg `PROPERTY` failed: a state predicate on an initial
+/// state, or a `[][A]_v` conjunct on a transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyViolationKind {
+    Init,
+    Action,
+}
+
+/// A behavior that violates the safety part of a cfg `PROPERTY`. For `Init` the trace
+/// is the offending initial state; for `Action` it ends with the offending transition.
+#[derive(Debug)]
+pub struct PropertyViolation {
+    pub property: Arc<str>,
+    pub kind: PropertyViolationKind,
+    pub trace: Vec<State>,
+    pub actions: Vec<Option<Arc<str>>>,
+}
+
 #[derive(Debug)]
 pub struct CheckStats {
     pub states_explored: usize,
@@ -137,6 +158,12 @@ pub struct CheckStats {
     pub violations_by_invariant: Vec<(Option<Arc<str>>, usize)>,
     pub property_stats: Vec<PropertyStats>,
     pub dot_graph: Option<String>,
+    pub properties_checked: Vec<Arc<str>>,
+    /// Under `--continue`: violations of `PROPERTY` action parts, counted by
+    /// property, with up to ten of their traces. An initial-state violation always
+    /// stops the check, as in TLC.
+    pub violations_by_property: Vec<(Arc<str>, usize)>,
+    pub property_violation_traces: Vec<PropertyViolation>,
 }
 
 #[derive(Debug)]
@@ -155,6 +182,7 @@ pub enum CheckResult {
     InvariantViolation(Counterexample, CheckStats),
     RefinementViolation(RefinementViolation, CheckStats),
     LivenessViolation(LivenessViolation, CheckStats),
+    PropertyViolation(PropertyViolation, CheckStats),
     Deadlock(Vec<State>, Vec<Option<Arc<str>>>, CheckStats),
     InitError(EvalError),
     NextError(EvalError, Vec<State>, Option<String>),
@@ -509,7 +537,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     let needs_liveness_check = config.check_liveness
         && (!spec.fairness.is_empty()
             || !spec.liveness_properties.is_empty()
-            || !spec.quantified_temporal.is_empty());
+            || !spec.quantified_fairness.is_empty());
 
     #[cfg(not(target_arch = "wasm32"))]
     let collect_edges =
@@ -528,6 +556,9 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         violations_by_invariant: Vec::new(),
         property_stats: Vec::new(),
         dot_graph: None,
+        properties_checked: Vec::new(),
+        violations_by_property: Vec::new(),
+        property_violation_traces: Vec::new(),
     };
 
     let base_env: Env = domains.clone();
@@ -556,7 +587,33 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         None => None,
     };
 
+    let init_properties: Vec<(&Arc<str>, &Expr)> = spec
+        .safety_properties
+        .iter()
+        .filter_map(|property| match property {
+            SafetyProperty::Init { name, predicate } => Some((name, predicate)),
+            SafetyProperty::Action { .. } => None,
+        })
+        .collect();
+    let mut action_properties: Vec<ActionPropertyCheck> = Vec::new();
+    for property in &spec.safety_properties {
+        if let SafetyProperty::Action { name, formula } = property
+            && let Err(e) =
+                expand_action_property(name, formula, &domains, &defs, &mut action_properties)
+        {
+            return CheckResult::InitError(e);
+        }
+    }
+    let mut successor_env = if action_properties.is_empty() {
+        Env::new()
+    } else {
+        base_env.clone()
+    };
+
     let mut violation_counts_by_inv: Vec<usize> = vec![0; spec.invariants.len()];
+    let mut excluded_checked: HashSet<State> = HashSet::new();
+    let mut property_violation_counts: BTreeMap<Arc<str>, usize> = BTreeMap::new();
+    let mut excluded_successors: Vec<Vec<State>> = Vec::new();
     let max_violation_traces: usize = 10;
 
     let count_exprs: Vec<(Arc<str>, Expr)> = config
@@ -621,10 +678,74 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     };
 
     for state in initial {
-        match state_passes_constraints(&state, &mut constraint_env) {
-            Ok(true) => {}
-            Ok(false) => continue,
+        let within_constraints = match state_passes_constraints(&state, &mut constraint_env) {
+            Ok(passes) => passes,
             Err(e) => return CheckResult::InitError(e),
+        };
+        if !init_properties.is_empty() {
+            let mut env = base_env.clone();
+            bind_state(&mut env, &spec.vars, &state);
+            let init_ctx = EvalContext {
+                state_vars: spec.vars.clone(),
+                constants: domains.clone(),
+                current_state: state.clone(),
+            };
+            for (name, predicate) in &init_properties {
+                match eval_with_context(predicate, &mut env, &defs, &init_ctx) {
+                    Ok(Value::Bool(true)) => {}
+                    Ok(Value::Bool(false)) => {
+                        stats.elapsed_secs = elapsed_secs();
+                        return CheckResult::PropertyViolation(
+                            PropertyViolation {
+                                property: (*name).clone(),
+                                kind: PropertyViolationKind::Init,
+                                trace: vec![state.clone()],
+                                actions: vec![None],
+                            },
+                            stats,
+                        );
+                    }
+                    Ok(other) => {
+                        return CheckResult::InitError(EvalError::type_mismatch_ctx(
+                            "Bool", other, "PROPERTY",
+                        ));
+                    }
+                    Err(e) => return CheckResult::InitError(e),
+                }
+            }
+        }
+        if !within_constraints {
+            let violated = match violated_invariants(spec, &state, &base_env, &domains, &defs) {
+                Ok(violated) => violated,
+                Err(e) => return CheckResult::InvariantError(e, vec![state.clone()], None),
+            };
+            if let Some(&first) = violated.first() {
+                if !config.continue_on_violation {
+                    stats.elapsed_secs = elapsed_secs();
+                    return CheckResult::InvariantViolation(
+                        Counterexample {
+                            trace: vec![state.clone()],
+                            actions: vec![None],
+                            violated_invariant: first,
+                        },
+                        stats,
+                    );
+                }
+                if excluded_checked.insert(state.clone()) {
+                    for idx in violated {
+                        violation_counts_by_inv[idx] += 1;
+                        stats.violation_count += 1;
+                        if stats.violation_traces.len() < max_violation_traces {
+                            stats.violation_traces.push(Counterexample {
+                                trace: vec![state.clone()],
+                                actions: vec![None],
+                                violated_invariant: idx,
+                            });
+                        }
+                    }
+                }
+            }
+            continue;
         }
         if let Some(refinement) = &refinement {
             match refinement.init_holds(&state, &spec.vars, &base_env, &defs) {
@@ -910,9 +1031,108 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 .transitions_by_action
                 .entry(transition.action.clone())
                 .or_insert(0) += 1;
+            if !action_properties.is_empty() {
+                match violated_action_property(
+                    &action_properties,
+                    &mut env,
+                    &mut successor_env,
+                    &primed_vars,
+                    &transition.state,
+                    &defs,
+                    &ctx,
+                ) {
+                    Ok(violated) if violated.is_empty() => {}
+                    Ok(violated) => {
+                        let (mut trace, mut actions) =
+                            reconstruct_trace(current_idx, &states, &parent, &parent_action);
+                        trace.push(transition.state.clone());
+                        actions.push(transition.action.clone());
+                        let mut violations = violated.into_iter().map(|name| PropertyViolation {
+                            property: name.clone(),
+                            kind: PropertyViolationKind::Action,
+                            trace: trace.clone(),
+                            actions: actions.clone(),
+                        });
+                        if !config.continue_on_violation
+                            && let Some(first) = violations.next()
+                        {
+                            stats.elapsed_secs = elapsed_secs();
+                            return CheckResult::PropertyViolation(first, stats);
+                        }
+                        for violation in violations {
+                            record_property_violation(
+                                &mut stats,
+                                &mut property_violation_counts,
+                                violation,
+                                max_violation_traces,
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        let (trace, _actions) =
+                            reconstruct_trace(current_idx, &states, &parent, &parent_action);
+                        let dot = do_export(&states, &parent, Some(current_idx), &all_edges);
+                        return CheckResult::NextError(e, trace, dot);
+                    }
+                }
+            }
             match state_passes_constraints(&transition.state, &mut constraint_env) {
                 Ok(true) => {}
-                Ok(false) => continue,
+                Ok(false) => {
+                    if needs_liveness_check {
+                        if excluded_successors.len() <= current_idx {
+                            excluded_successors.resize_with(current_idx + 1, Vec::new);
+                        }
+                        excluded_successors[current_idx].push(transition.state.clone());
+                    }
+                    let violated =
+                        violated_invariants(spec, &transition.state, &base_env, &domains, &defs);
+                    let with_successor = || {
+                        let (mut trace, mut actions) =
+                            reconstruct_trace(current_idx, &states, &parent, &parent_action);
+                        trace.push(transition.state.clone());
+                        actions.push(transition.action.clone());
+                        (trace, actions)
+                    };
+                    let violated = match violated {
+                        Ok(violated) => violated,
+                        Err(e) => {
+                            let (trace, _actions) = with_successor();
+                            let dot = do_export(&states, &parent, Some(current_idx), &all_edges);
+                            return CheckResult::InvariantError(e, trace, dot);
+                        }
+                    };
+                    if let Some(&first) = violated.first() {
+                        let (trace, actions) = with_successor();
+                        if !config.continue_on_violation {
+                            stats.elapsed_secs = elapsed_secs();
+                            stats.dot_graph =
+                                do_export(&states, &parent, Some(current_idx), &all_edges);
+                            return CheckResult::InvariantViolation(
+                                Counterexample {
+                                    trace,
+                                    actions,
+                                    violated_invariant: first,
+                                },
+                                stats,
+                            );
+                        }
+                        if excluded_checked.insert(transition.state.clone()) {
+                            for idx in violated {
+                                violation_counts_by_inv[idx] += 1;
+                                stats.violation_count += 1;
+                                if stats.violation_traces.len() < max_violation_traces {
+                                    stats.violation_traces.push(Counterexample {
+                                        trace: trace.clone(),
+                                        actions: actions.clone(),
+                                        violated_invariant: idx,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
                 Err(e) => {
                     let (trace, _actions) =
                         reconstruct_trace(current_idx, &states, &parent, &parent_action);
@@ -986,6 +1206,8 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     }
 
     stats.property_stats = property_counters;
+    stats.violations_by_property = property_violation_counts.into_iter().collect();
+    stats.properties_checked = properties_checked(spec, config, &stats);
 
     if needs_liveness_check {
         if !config.quiet {
@@ -996,6 +1218,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             domains: &domains,
             defs: &defs,
             config,
+            excluded_successors: &excluded_successors,
         };
         match check_liveness_properties(ctx, &states, &parent, &all_edges, &elapsed_secs) {
             Ok(LivenessCheckOutcome::Ok) => {}
@@ -1016,6 +1239,160 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     CheckResult::Ok(stats)
 }
 
+/// Every invariant a state violates. Used for states outside the `CONSTRAINT`,
+/// which TLC checks against the invariants but does not explore.
+fn violated_invariants(
+    spec: &Spec,
+    state: &State,
+    base_env: &Env,
+    domains: &Env,
+    defs: &Definitions,
+) -> Result<Vec<usize>, EvalError> {
+    if spec.invariants.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut env = base_env.clone();
+    bind_state(&mut env, &spec.vars, state);
+    let ctx = EvalContext {
+        state_vars: spec.vars.clone(),
+        constants: domains.clone(),
+        current_state: state.clone(),
+    };
+    let mut violated = Vec::new();
+    for (idx, invariant) in spec.invariants.iter().enumerate() {
+        match eval_with_context(invariant, &mut env, defs, &ctx)? {
+            Value::Bool(true) => {}
+            Value::Bool(false) => violated.push(idx),
+            other => {
+                return Err(EvalError::type_mismatch_ctx(
+                    "Bool",
+                    other,
+                    "invariant evaluation",
+                ));
+            }
+        }
+    }
+    Ok(violated)
+}
+
+struct ActionPropertyCheck {
+    name: Arc<str>,
+    action: Expr,
+    subscript: Expr,
+}
+
+/// Instantiate each `\A x \in S` around a `[][A]_v` property into concrete
+/// action/subscript pairs, so a subscript may depend on the bound variable.
+fn expand_action_property(
+    name: &Arc<str>,
+    formula: &Expr,
+    domains: &Env,
+    defs: &Definitions,
+    out: &mut Vec<ActionPropertyCheck>,
+) -> Result<(), EvalError> {
+    match formula {
+        Expr::Forall(var, domain, body) => {
+            for element in quantifier_elements(domain, domains, defs)? {
+                let subs = [(var.clone(), Expr::Lit(element))];
+                let concrete = crate::substitution::substitute_expr(body, &subs);
+                expand_action_property(name, &concrete, domains, defs, out)?;
+            }
+            Ok(())
+        }
+        Expr::BoxAction(action, subscript) => {
+            out.push(ActionPropertyCheck {
+                name: name.clone(),
+                action: (**action).clone(),
+                subscript: (**subscript).clone(),
+            });
+            Ok(())
+        }
+        other => Err(EvalError::domain_error(format!(
+            "internal: PROPERTY '{name}' has an action part that is not [][A]_v: {other:?}"
+        ))),
+    }
+}
+
+fn bind_state(env: &mut Env, names: &[Arc<str>], state: &State) {
+    for (name, value) in names.iter().zip(&state.values) {
+        env.insert(name.clone(), value.clone());
+    }
+}
+
+/// Every `[][A]_v` property the transition breaks: an `A`-step is required only
+/// when the transition changes `v`. `env` holds the current state (`ctx`) and gets
+/// the successor bound to the primed names; `successor_env` holds the successor alone.
+fn violated_action_property<'a>(
+    properties: &'a [ActionPropertyCheck],
+    env: &mut Env,
+    successor_env: &mut Env,
+    primed_vars: &[Arc<str>],
+    successor: &State,
+    defs: &Definitions,
+    ctx: &EvalContext,
+) -> Result<Vec<&'a Arc<str>>, EvalError> {
+    bind_state(env, primed_vars, successor);
+    bind_state(successor_env, &ctx.state_vars, successor);
+    let mut violated = Vec::new();
+    for property in properties {
+        if eval(&property.subscript, env, defs)? == eval(&property.subscript, successor_env, defs)?
+        {
+            continue;
+        }
+        match eval_with_context(&property.action, env, defs, ctx)? {
+            Value::Bool(true) => {}
+            Value::Bool(false) => violated.push(&property.name),
+            other => return Err(EvalError::type_mismatch_ctx("Bool", other, "PROPERTY")),
+        }
+    }
+    Ok(violated)
+}
+
+fn record_property_violation(
+    stats: &mut CheckStats,
+    counts: &mut BTreeMap<Arc<str>, usize>,
+    violation: PropertyViolation,
+    max_traces: usize,
+) {
+    *counts.entry(violation.property.clone()).or_default() += 1;
+    stats.violation_count += 1;
+    if stats.property_violation_traces.len() < max_traces {
+        stats.property_violation_traces.push(violation);
+    }
+}
+
+/// The cfg `PROPERTY` names whose every part was checked without a recorded
+/// violation, plus the `*Spec` definitions whose temporal conjuncts were checked in
+/// the legacy mode.
+fn properties_checked(spec: &Spec, config: &CheckerConfig, stats: &CheckStats) -> Vec<Arc<str>> {
+    let has_liveness = |name: &Arc<str>| spec.liveness_properties.iter().any(|p| &p.name == name);
+    let violated = |name: &Arc<str>| {
+        stats
+            .violations_by_invariant
+            .iter()
+            .any(|(n, _)| n.as_ref() == Some(name))
+            || stats.violations_by_property.iter().any(|(n, _)| n == name)
+    };
+    let mut names: Vec<Arc<str>> = config
+        .properties
+        .iter()
+        .filter(|name| (config.check_liveness || !has_liveness(name)) && !violated(name))
+        .cloned()
+        .collect();
+    if config.check_liveness {
+        for property in spec
+            .liveness_properties
+            .iter()
+            .filter(|p| p.from_specification)
+        {
+            if !names.contains(&property.name) {
+                names.push(property.name.clone());
+            }
+        }
+    }
+    names
+}
+
 enum LivenessCheckOutcome {
     Ok,
     Violation(LivenessViolation),
@@ -1027,6 +1404,7 @@ struct LivenessContext<'a> {
     domains: &'a Env,
     defs: &'a Definitions,
     config: &'a CheckerConfig,
+    excluded_successors: &'a [Vec<State>],
 }
 
 fn check_liveness_properties(
@@ -1041,6 +1419,7 @@ fn check_liveness_properties(
         domains,
         defs,
         config,
+        excluded_successors,
     } = ctx;
     let time_exceeded = || match config.max_seconds {
         Some(max_secs) => elapsed_secs() as u64 >= max_secs,
@@ -1081,10 +1460,27 @@ fn check_liveness_properties(
         graph.add_edge(idx, idx, None);
     }
 
-    let (fairness, liveness_properties) = expand_quantified_temporal(spec, domains, defs)?;
-    let table = liveness::FairnessTable::build(&graph, &fairness, &spec.vars, domains, defs)?;
+    let fairness = expand_fairness(spec, domains, defs)?;
+    let mut liveness_properties = Vec::new();
+    for property in &spec.liveness_properties {
+        expand_liveness(
+            &property.name,
+            &property.formula,
+            domains,
+            defs,
+            &mut liveness_properties,
+        )?;
+    }
+    let table = liveness::FairnessTable::build(
+        &graph,
+        &fairness,
+        excluded_successors,
+        &spec.vars,
+        domains,
+        defs,
+    )?;
 
-    for property in &liveness_properties {
+    for (name, property) in &liveness_properties {
         if time_exceeded() {
             return Ok(LivenessCheckOutcome::TimeExceeded);
         }
@@ -1100,7 +1496,7 @@ fn check_liveness_properties(
             let violation = LivenessViolation {
                 prefix: states_at(&lasso.prefix),
                 cycle: states_at(&lasso.cycle),
-                property: describe_liveness_property(property),
+                property: name.to_string(),
                 fairness_info: table.fairness_info(&graph, &lasso.cycle),
             };
             return Ok(LivenessCheckOutcome::Violation(violation));
@@ -1110,60 +1506,76 @@ fn check_liveness_properties(
     Ok(LivenessCheckOutcome::Ok)
 }
 
-fn describe_liveness_property(property: &Expr) -> String {
-    match property {
-        Expr::LeadsTo(_, _) => format!("{:?}", property),
-        Expr::Eventually(inner) => match inner.as_ref() {
-            Expr::Always(p) => format!("<>[]{:?}", p),
-            _ => format!("<>{:?}", inner),
-        },
-        _ => format!("[]<>{:?}", property),
+fn quantifier_elements(
+    domain: &Expr,
+    domains: &Env,
+    defs: &Definitions,
+) -> Result<Vec<Value>, EvalError> {
+    let mut env = domains.clone();
+    match eval(domain, &mut env, defs)? {
+        Value::Set(set) => Ok(set.iter().cloned().collect()),
+        other => Err(EvalError::domain_error(format!(
+            "quantified fairness/liveness domain must evaluate to a set, got {other:?}"
+        ))),
     }
 }
 
-fn expand_quantified_temporal(
+fn expand_fairness(
     spec: &Spec,
     domains: &Env,
     defs: &Definitions,
-) -> Result<(Vec<crate::ast::FairnessConstraint>, Vec<Expr>), EvalError> {
+) -> Result<Vec<crate::ast::FairnessConstraint>, EvalError> {
     let mut fairness = spec.fairness.clone();
-    let mut liveness_properties: Vec<Expr> = Vec::new();
-    let mut pending = spec.quantified_temporal.clone();
-
-    for property in &spec.liveness_properties {
-        match property {
-            Expr::Forall(var, domain, body) if crate::ast::expr_contains_temporal(body) => {
-                pending.push((var.clone(), (**domain).clone(), (**body).clone()));
-            }
-            _ => liveness_properties.push(property.clone()),
-        }
-    }
-
+    let mut pending = spec.quantified_fairness.clone();
     while let Some((var, domain, body)) = pending.pop() {
-        let mut env = domains.clone();
-        let elements = match eval(&domain, &mut env, defs)? {
-            Value::Set(set) => set,
-            other => {
-                return Err(EvalError::domain_error(format!(
-                    "quantified fairness/liveness domain must evaluate to a set, got {other:?}"
-                )));
-            }
-        };
-        for element in elements.iter() {
-            let subs = [(var.clone(), Expr::Lit(element.clone()))];
+        for element in quantifier_elements(&domain, domains, defs)? {
+            let subs = [(var.clone(), Expr::Lit(element))];
             let concrete = crate::substitution::substitute_expr(&body, &subs);
-            let mut warnings = Vec::new();
             crate::ast::collect_temporal(
                 &concrete,
                 &mut fairness,
-                &mut liveness_properties,
+                &mut Vec::new(),
                 &mut pending,
-                &mut warnings,
+                &mut Vec::new(),
             );
         }
     }
+    Ok(fairness)
+}
 
-    Ok((fairness, liveness_properties))
+/// Instantiate each `\A x \in S : body` of a liveness property into the forms
+/// `liveness::find_violation` checks, keeping the property's name on every instance.
+fn expand_liveness(
+    name: &Arc<str>,
+    formula: &Expr,
+    domains: &Env,
+    defs: &Definitions,
+    out: &mut Vec<(Arc<str>, Expr)>,
+) -> Result<(), EvalError> {
+    match formula {
+        Expr::Forall(var, domain, body) if crate::ast::expr_contains_temporal(body) => {
+            for element in quantifier_elements(domain, domains, defs)? {
+                let subs = [(var.clone(), Expr::Lit(element))];
+                let concrete = crate::substitution::substitute_expr(body, &subs);
+                let mut instances = Vec::new();
+                crate::ast::collect_temporal(
+                    &concrete,
+                    &mut Vec::new(),
+                    &mut instances,
+                    &mut Vec::new(),
+                    &mut Vec::new(),
+                );
+                for instance in &instances {
+                    expand_liveness(name, instance, domains, defs, out)?;
+                }
+            }
+            Ok(())
+        }
+        _ => {
+            out.push((name.clone(), formula.clone()));
+            Ok(())
+        }
+    }
 }
 
 pub fn format_trace(trace: &[State], vars: &[Arc<str>]) -> String {
@@ -1382,15 +1794,16 @@ pub fn eval_error_to_diagnostic(err: &EvalError) -> crate::diagnostic::Diagnosti
     }
 }
 
+fn json_string(s: &str) -> String {
+    serde_json::Value::String(s.to_string()).to_string()
+}
+
 pub fn value_to_json(val: &Value) -> String {
     match val {
         Value::Bool(b) => b.to_string(),
         Value::Int(i) => i.to_string(),
-        Value::Str(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
-        Value::Model(m) => format!(
-            "{{\"model_value\": \"{}\"}}",
-            m.replace('\\', "\\\\").replace('"', "\\\"")
-        ),
+        Value::Str(s) => json_string(s),
+        Value::Model(m) => format!("{{\"model_value\": {}}}", json_string(m)),
         Value::IntSet(d) => format!("{{\"symbolic_set\": \"{}\"}}", d.name()),
         Value::Set(s) => {
             let elems: Vec<_> = s.iter().map(value_to_json).collect();
@@ -1412,7 +1825,7 @@ pub fn value_to_json(val: &Value) -> String {
         Value::Record(r) => {
             let fields: Vec<_> = r
                 .iter()
-                .map(|(k, v)| format!("\"{}\": {}", k, value_to_json(v)))
+                .map(|(k, v)| format!("{}: {}", json_string(k), value_to_json(v)))
                 .collect();
             format!("{{{}}}", fields.join(", "))
         }
@@ -1431,7 +1844,7 @@ pub fn state_to_json(state: &State, vars: &[Arc<str>]) -> String {
             state
                 .values
                 .get(i)
-                .map(|val| format!("\"{}\": {}", var, value_to_json(val)))
+                .map(|val| format!("{}: {}", json_string(var), value_to_json(val)))
         })
         .collect();
     format!("{{{}}}", fields.join(", "))
@@ -1453,7 +1866,7 @@ pub fn trace_to_json_with_actions(
             let action_str = actions
                 .get(i)
                 .and_then(|a| a.as_ref())
-                .map(|s| format!("\"{}\"", s))
+                .map(|s| json_string(s))
                 .unwrap_or_else(|| "null".to_string());
             format!(
                 "{{\"index\": {}, \"action\": {}, \"state\": {}}}",
@@ -1509,11 +1922,17 @@ fn predicate_is_used(spec: &Spec, name: &Arc<str>, def_body: &Expr) -> bool {
     if spec.invariants.iter().any(&uses) {
         return true;
     }
-    if spec.liveness_properties.iter().any(&uses) {
+    if spec.liveness_properties.iter().any(|p| uses(&p.formula)) {
+        return true;
+    }
+    if spec.safety_properties.iter().any(|p| match p {
+        SafetyProperty::Init { predicate, .. } => uses(predicate),
+        SafetyProperty::Action { formula, .. } => uses(formula),
+    }) {
         return true;
     }
     if spec
-        .quantified_temporal
+        .quantified_fairness
         .iter()
         .any(|(_, l, r)| uses(l) || uses(r))
     {
@@ -1527,7 +1946,8 @@ fn predicate_is_used(spec: &Spec, name: &Arc<str>, def_body: &Expr) -> bool {
 pub fn unchecked_predicate_warning(spec: &Spec, has_count_properties: bool) -> Option<String> {
     if has_count_properties
         || !spec.liveness_properties.is_empty()
-        || !spec.quantified_temporal.is_empty()
+        || !spec.safety_properties.is_empty()
+        || !spec.quantified_fairness.is_empty()
     {
         return None;
     }
@@ -1560,12 +1980,21 @@ pub fn unchecked_predicate_warning(spec: &Spec, has_count_properties: bool) -> O
     ))
 }
 
+pub fn property_violation_kind_name(kind: PropertyViolationKind) -> &'static str {
+    match kind {
+        PropertyViolationKind::Init => "init",
+        PropertyViolationKind::Action => "action",
+    }
+}
+
 pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
     match result {
         CheckResult::Ok(stats) => {
             let mut parts = Vec::new();
-            let status = if stats.violation_count > 0 {
+            let status = if !stats.violations_by_invariant.is_empty() {
                 "invariant_violation"
+            } else if !stats.violations_by_property.is_empty() {
+                "property_violation"
             } else {
                 "ok"
             };
@@ -1585,7 +2014,7 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                     .map(|(name, count)| {
                         let name_json = name
                             .as_ref()
-                            .map(|n| format!("\"{}\"", n))
+                            .map(|n| json_string(n))
                             .unwrap_or_else(|| "null".to_string());
                         format!(r#"{{"name": {}, "count": {}}}"#, name_json, count)
                     })
@@ -1594,6 +2023,19 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                     r#""violations_by_invariant": [{}]"#,
                     by_inv.join(", ")
                 ));
+                if !stats.violations_by_property.is_empty() {
+                    let by_property: Vec<String> = stats
+                        .violations_by_property
+                        .iter()
+                        .map(|(name, count)| {
+                            format!(r#"{{"name": {}, "count": {}}}"#, json_string(name), count)
+                        })
+                        .collect();
+                    stat_parts.push(format!(
+                        r#""violations_by_property": [{}]"#,
+                        by_property.join(", ")
+                    ));
+                }
             }
 
             parts.push(format!(r#""stats": {{{}}}"#, stat_parts.join(", ")));
@@ -1621,12 +2063,21 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                             })
                             .collect();
                         format!(
-                            r#"{{"name": "{}", "satisfied": {}, "violated": {}, "errors": {}, "total": {}, "ratio": {:.3}, "depth_breakdown": [{}]}}"#,
-                            p.name, p.satisfied, p.violated, p.errors, total, ratio, depth_entries.join(", ")
+                            r#"{{"name": {}, "satisfied": {}, "violated": {}, "errors": {}, "total": {}, "ratio": {:.3}, "depth_breakdown": [{}]}}"#,
+                            json_string(&p.name), p.satisfied, p.violated, p.errors, total, ratio, depth_entries.join(", ")
                         )
                     })
                     .collect();
                 parts.push(format!(r#""properties": [{}]"#, props.join(", ")));
+            }
+
+            if !stats.properties_checked.is_empty() {
+                let names: Vec<String> = stats
+                    .properties_checked
+                    .iter()
+                    .map(|name| json_string(name))
+                    .collect();
+                parts.push(format!(r#""properties_checked": [{}]"#, names.join(", ")));
             }
 
             format!("{{{}}}", parts.join(", "))
@@ -1636,7 +2087,7 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                 .invariant_names
                 .get(cex.violated_invariant)
                 .and_then(|n| n.as_ref())
-                .map(|n| format!("\"{}\"", n))
+                .map(|n| json_string(n))
                 .unwrap_or_else(|| "null".to_string());
             format!(
                 r#"{{"status": "invariant_violation", "invariant_index": {}, "invariant_name": {}, "trace": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
@@ -1652,9 +2103,21 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
         CheckResult::RefinementViolation(violation, stats) => {
             let kind = if violation.at_init { "init" } else { "step" };
             format!(
-                r#"{{"status": "refinement_violation", "alias": "{}", "at": "{}", "trace": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
-                violation.alias,
+                r#"{{"status": "refinement_violation", "alias": {}, "at": "{}", "trace": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
+                json_string(&violation.alias),
                 kind,
+                trace_to_json_with_actions(&violation.trace, &violation.actions, &spec.vars),
+                stats.states_explored,
+                stats.transitions,
+                stats.max_depth_reached,
+                stats.elapsed_secs
+            )
+        }
+        CheckResult::PropertyViolation(violation, stats) => {
+            format!(
+                r#"{{"status": "property_violation", "property": {}, "kind": "{}", "trace": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
+                json_string(&violation.property),
+                property_violation_kind_name(violation.kind),
                 trace_to_json_with_actions(&violation.trace, &violation.actions, &spec.vars),
                 stats.states_explored,
                 stats.transitions,
@@ -1674,21 +2137,21 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
         }
         CheckResult::InitError(e) => {
             format!(
-                r#"{{"status": "init_error", "error": "{}"}}"#,
-                format_eval_error(e).replace('"', "\\\"")
+                r#"{{"status": "init_error", "error": {}}}"#,
+                json_string(&format_eval_error(e))
             )
         }
         CheckResult::NextError(e, trace, _) => {
             format!(
-                r#"{{"status": "next_error", "error": "{}", "trace": {}}}"#,
-                format_eval_error(e).replace('"', "\\\""),
+                r#"{{"status": "next_error", "error": {}, "trace": {}}}"#,
+                json_string(&format_eval_error(e)),
                 trace_to_json(trace, &spec.vars)
             )
         }
         CheckResult::InvariantError(e, trace, _) => {
             format!(
-                r#"{{"status": "invariant_error", "error": "{}", "trace": {}}}"#,
-                format_eval_error(e).replace('"', "\\\""),
+                r#"{{"status": "invariant_error", "error": {}, "trace": {}}}"#,
+                json_string(&format_eval_error(e)),
                 trace_to_json(trace, &spec.vars)
             )
         }
@@ -1722,12 +2185,12 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
         CheckResult::NoInitialStates => r#"{"status": "no_initial_states"}"#.to_string(),
         CheckResult::PrepareError(PrepareSpecError::InstanceError(e)) => {
             format!(
-                r#"{{"status": "instance_error", "error": "{}"}}"#,
-                format_eval_error(e).replace('"', "\\\"")
+                r#"{{"status": "instance_error", "error": {}}}"#,
+                json_string(&format_eval_error(e))
             )
         }
         CheckResult::PrepareError(PrepareSpecError::MissingConstants(missing)) => {
-            let names: Vec<_> = missing.iter().map(|c| format!("\"{}\"", c)).collect();
+            let names: Vec<_> = missing.iter().map(|c| json_string(c)).collect();
             format!(
                 r#"{{"status": "missing_constants", "constants": [{}]}}"#,
                 names.join(", ")
@@ -1741,32 +2204,29 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
         }
         CheckResult::PrepareError(PrepareSpecError::AssumeError(idx, e)) => {
             format!(
-                r#"{{"status": "assume_error", "assume_index": {}, "error": "{}"}}"#,
+                r#"{{"status": "assume_error", "assume_index": {}, "error": {}}}"#,
                 idx,
-                format_eval_error(e).replace('"', "\\\"")
+                json_string(&format_eval_error(e))
             )
         }
         CheckResult::PrepareError(PrepareSpecError::NonModelValueSymmetry(name, members)) => {
-            let quoted: Vec<_> = members
-                .iter()
-                .map(|m| format!("\"{}\"", m.replace('"', "\\\"")))
-                .collect();
+            let quoted: Vec<_> = members.iter().map(|m| json_string(m)).collect();
             format!(
-                r#"{{"status": "non_model_value_symmetry", "constant": "{}", "members": [{}]}}"#,
-                name,
+                r#"{{"status": "non_model_value_symmetry", "constant": {}, "members": [{}]}}"#,
+                json_string(name),
                 quoted.join(", ")
             )
         }
         CheckResult::PrepareError(PrepareSpecError::RefinementConfigError(message)) => {
             format!(
-                r#"{{"status": "refinement_config_error", "error": "{}"}}"#,
-                message.replace('"', "\\\"")
+                r#"{{"status": "refinement_config_error", "error": {}}}"#,
+                json_string(message)
             )
         }
         CheckResult::LivenessViolation(violation, stats) => {
             format!(
-                r#"{{"status": "liveness_violation", "property": "{}", "prefix": {}, "cycle": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
-                violation.property.replace('"', "\\\""),
+                r#"{{"status": "liveness_violation", "property": {}, "prefix": {}, "cycle": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
+                json_string(&violation.property),
                 trace_to_json(&violation.prefix, &spec.vars),
                 trace_to_json(&violation.cycle, &spec.vars),
                 stats.states_explored,
@@ -1801,12 +2261,12 @@ pub fn write_counterexample_json(
     let mut file = std::fs::File::create(path)?;
 
     let spec_file = spec_path
-        .map(|s| format!("\"{}\"", s))
+        .map(json_string)
         .unwrap_or_else(|| "null".to_string());
     let inv_name = invariant_name
-        .map(|s| format!("\"{}\"", s))
+        .map(json_string)
         .unwrap_or_else(|| "null".to_string());
-    let vars_json: Vec<String> = vars.iter().map(|v| format!("\"{}\"", v)).collect();
+    let vars_json: Vec<String> = vars.iter().map(|v| json_string(v)).collect();
 
     let mut trace_entries: Vec<String> = Vec::new();
     for (i, state) in cex.trace.iter().enumerate() {
@@ -1814,7 +2274,7 @@ pub fn write_counterexample_json(
             .actions
             .get(i)
             .and_then(|a| a.as_ref())
-            .map(|s| format!("\"{}\"", s))
+            .map(|s| json_string(s))
             .unwrap_or_else(|| "null".to_string());
         trace_entries.push(format!(
             "{{\"action\": {}, \"state\": {}}}",
@@ -1841,6 +2301,34 @@ mod tests {
 
     use super::*;
     use crate::ast::Expr;
+
+    #[test]
+    fn json_output_escapes_control_characters_in_errors() {
+        let spec = Spec {
+            vars: vec![],
+            constants: vec![],
+            extends: vec![],
+            definitions: BTreeMap::new(),
+            assumes: vec![],
+            instances: vec![],
+            init: None,
+            next: None,
+            invariants: vec![],
+            invariant_names: vec![],
+            fairness: vec![],
+            quantified_fairness: vec![],
+            liveness_properties: vec![],
+            safety_properties: vec![],
+        };
+        let result = CheckResult::InitError(EvalError::domain_error("line one\nline \"two\"\t"));
+        let json = check_result_to_json(&result, &spec);
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        assert!(
+            parsed["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("line one\nline \"two\""))
+        );
+    }
 
     fn var(name: &str) -> Arc<str> {
         Arc::from(name)
@@ -1919,8 +2407,9 @@ mod tests {
             invariants: vec![le(var_expr("count"), lit_int(3))],
             invariant_names: vec![None],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
 
         let domains = Env::new();
@@ -1956,8 +2445,9 @@ mod tests {
             invariants: vec![le(var_expr("count"), lit_int(1))],
             invariant_names: vec![None],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
 
         let domains = Env::new();
@@ -1999,8 +2489,9 @@ mod tests {
             invariants,
             invariant_names,
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         }
     }
 
@@ -2055,8 +2546,9 @@ mod tests {
             invariants: vec![le(var_expr("x"), lit_int(10))],
             invariant_names: vec![None],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
         assert!(
             unchecked_predicate_warning(&spec, false).is_none(),
@@ -2070,7 +2562,7 @@ mod tests {
         let next = eq(prime_expr("x"), add(var_expr("x"), lit_int(1)));
         let temporal = and(
             init.clone(),
-            Expr::BoxAction(Box::new(next.clone()), var("x")),
+            Expr::BoxAction(Box::new(next.clone()), Box::new(Expr::Var(var("x")))),
         );
         let mut definitions = BTreeMap::new();
         definitions.insert(var("Init"), (vec![], Arc::new(init.clone())));
@@ -2088,8 +2580,9 @@ mod tests {
             invariants: vec![le(var_expr("x"), lit_int(10))],
             invariant_names: vec![None],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
         assert!(
             unchecked_predicate_warning(&spec, false).is_none(),
@@ -2114,8 +2607,9 @@ mod tests {
             invariants: vec![le(var_expr("count"), lit_int(3))],
             invariant_names: vec![None],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
 
         let domains = Env::new();
@@ -2157,8 +2651,9 @@ mod tests {
             invariants: vec![lit_bool(true)],
             invariant_names: vec![None],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
 
         let domains = Env::new();
@@ -2198,8 +2693,9 @@ mod tests {
             invariants: vec![le(var_expr("count"), lit_int(3))],
             invariant_names: vec![None],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
 
         let domains = Env::new();
@@ -2252,8 +2748,9 @@ mod tests {
             ],
             invariant_names: vec![None, None],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
 
         let domains = Env::new();
@@ -2287,8 +2784,9 @@ mod tests {
             invariants: vec![lit_bool(true)],
             invariant_names: vec![None],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
 
         let domains = Env::new();
@@ -2324,8 +2822,9 @@ mod tests {
             invariants: vec![lit_bool(true)],
             invariant_names: vec![None],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
 
         let result = check(&spec, &Env::new(), &CheckerConfig::default());
@@ -2379,8 +2878,9 @@ mod tests {
             invariants: vec![lt(var_expr("x"), lit_int(1))],
             invariant_names: vec![None],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
 
         let result1 = check(&spec1, &Env::new(), &CheckerConfig::default());
@@ -2423,8 +2923,9 @@ mod tests {
             invariants: vec![lt(var_expr("x"), lit_int(1))],
             invariant_names: vec![None],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
 
         let result2 = check(&spec2, &Env::new(), &CheckerConfig::default());

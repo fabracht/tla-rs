@@ -232,10 +232,10 @@ pub enum Expr {
     Always(Box<Expr>),
     Eventually(Box<Expr>),
     LeadsTo(Box<Expr>, Box<Expr>),
-    WeakFairness(Arc<str>, Box<Expr>),
-    StrongFairness(Arc<str>, Box<Expr>),
-    BoxAction(Box<Expr>, Arc<str>),
-    DiamondAction(Box<Expr>, Arc<str>),
+    WeakFairness(Box<Expr>, Box<Expr>),
+    StrongFairness(Box<Expr>, Box<Expr>),
+    BoxAction(Box<Expr>, Box<Expr>),
+    DiamondAction(Box<Expr>, Box<Expr>),
     EnabledOp(Box<Expr>),
 
     QualifiedCall(Box<Expr>, Arc<str>, Vec<Expr>),
@@ -386,6 +386,33 @@ pub struct Transition {
 
 pub type DefinitionMap = BTreeMap<Arc<str>, (Vec<Arc<str>>, Arc<Expr>)>;
 
+/// A liveness obligation named after the definition it came from: a cfg `PROPERTY`,
+/// or (legacy, without a cfg that defines the behavior) a `*Spec` definition whose
+/// temporal conjuncts are checked instead of assumed.
+#[derive(Debug, Clone)]
+pub struct LivenessProperty {
+    pub name: Arc<str>,
+    pub formula: Expr,
+    pub from_specification: bool,
+}
+
+/// The non-liveness parts of a cfg `PROPERTY`, checked during the safety search as
+/// TLC does: a state predicate on the initial states, and `[][A]_v` on every
+/// transition. A `[]P` conjunct is added to the invariants instead.
+#[derive(Debug, Clone)]
+pub enum SafetyProperty {
+    Init { name: Arc<str>, predicate: Expr },
+    Action { name: Arc<str>, formula: Expr },
+}
+
+impl SafetyProperty {
+    pub fn name(&self) -> &Arc<str> {
+        match self {
+            SafetyProperty::Init { name, .. } | SafetyProperty::Action { name, .. } => name,
+        }
+    }
+}
+
 pub struct Spec {
     pub vars: Vec<Arc<str>>,
     pub constants: Vec<Arc<str>>,
@@ -398,22 +425,9 @@ pub struct Spec {
     pub invariants: Vec<Expr>,
     pub invariant_names: Vec<Option<Arc<str>>>,
     pub fairness: Vec<FairnessConstraint>,
-    pub liveness_properties: Vec<Expr>,
-    pub quantified_temporal: Vec<(Arc<str>, Expr, Expr)>,
-}
-
-impl Spec {
-    pub fn extract_fairness_and_liveness(&mut self, expr: &Expr) -> Vec<String> {
-        let mut warnings = Vec::new();
-        collect_temporal(
-            expr,
-            &mut self.fairness,
-            &mut self.liveness_properties,
-            &mut self.quantified_temporal,
-            &mut warnings,
-        );
-        warnings
-    }
+    pub quantified_fairness: Vec<(Arc<str>, Expr, Expr)>,
+    pub liveness_properties: Vec<LivenessProperty>,
+    pub safety_properties: Vec<SafetyProperty>,
 }
 
 /// `[](P => <>Q)` with `P` and `Q` free of temporal operators, which is exactly
@@ -429,8 +443,7 @@ pub fn leads_to_form(expr: &Expr) -> Option<(&Expr, &Expr)> {
     let Expr::Eventually(q) = rhs.as_ref() else {
         return None;
     };
-    let state_level = |e: &Expr| !expr_contains_temporal(e) && !matches!(e, Expr::Always(_));
-    (state_level(p) && state_level(q)).then_some((p.as_ref(), q.as_ref()))
+    (is_state_level(p) && is_state_level(q)).then_some((p.as_ref(), q.as_ref()))
 }
 
 pub fn expr_contains_temporal(expr: &Expr) -> bool {
@@ -450,6 +463,11 @@ pub fn expr_contains_temporal(expr: &Expr) -> bool {
     }
 }
 
+/// Collect the temporal conjuncts of a specification body: fairness into
+/// `fairness`, other temporal formulas into `liveness`. A `\A x \in S : body` goes
+/// to `quantified` when its body holds fairness and to `liveness` (whole) when its
+/// body holds other temporal formulas; each consumer takes only its own kind when
+/// the quantifier is expanded.
 pub fn collect_temporal(
     expr: &Expr,
     fairness: &mut Vec<FairnessConstraint>,
@@ -458,15 +476,15 @@ pub fn collect_temporal(
     warnings: &mut Vec<String>,
 ) {
     match expr {
-        Expr::WeakFairness(var, action) => {
+        Expr::WeakFairness(subscript, action) => {
             fairness.push(FairnessConstraint::Weak(
-                Expr::Var(var.clone()),
+                (**subscript).clone(),
                 (**action).clone(),
             ));
         }
-        Expr::StrongFairness(var, action) => {
+        Expr::StrongFairness(subscript, action) => {
             fairness.push(FairnessConstraint::Strong(
-                Expr::Var(var.clone()),
+                (**subscript).clone(),
                 (**action).clone(),
             ));
         }
@@ -493,7 +511,22 @@ pub fn collect_temporal(
             collect_temporal(inner, fairness, liveness, quantified, warnings);
         }
         Expr::Forall(var, domain, body) if expr_contains_temporal(body) => {
-            quantified.push((var.clone(), (**domain).clone(), (**body).clone()));
+            let mut body_fairness = Vec::new();
+            let mut body_liveness = Vec::new();
+            let mut body_quantified = Vec::new();
+            collect_temporal(
+                body,
+                &mut body_fairness,
+                &mut body_liveness,
+                &mut body_quantified,
+                warnings,
+            );
+            if !body_fairness.is_empty() || !body_quantified.is_empty() {
+                quantified.push((var.clone(), (**domain).clone(), (**body).clone()));
+            }
+            if !body_liveness.is_empty() {
+                liveness.push(expr.clone());
+            }
         }
         Expr::Exists(var, domain, body) if expr_contains_temporal(body) => {
             match distribute_exists(var, domain, body) {
@@ -535,80 +568,474 @@ fn distribute_exists(var: &Arc<str>, domain: &Expr, body: &Expr) -> Option<Expr>
     }
 }
 
-fn is_state_level(expr: &Expr) -> bool {
-    !expr_contains_temporal(expr) && !matches!(expr, Expr::Always(_))
+fn has_temporal_operator(expr: &Expr) -> bool {
+    match expr {
+        Expr::Always(_)
+        | Expr::Eventually(_)
+        | Expr::LeadsTo(_, _)
+        | Expr::WeakFairness(_, _)
+        | Expr::StrongFairness(_, _)
+        | Expr::BoxAction(_, _)
+        | Expr::DiamondAction(_, _) => true,
+        Expr::And(l, r) | Expr::Or(l, r) | Expr::Implies(l, r) | Expr::Equiv(l, r) => {
+            has_temporal_operator(l) || has_temporal_operator(r)
+        }
+        Expr::Not(e) | Expr::LabeledAction(_, e) => has_temporal_operator(e),
+        Expr::If(c, t, e) => {
+            has_temporal_operator(c) || has_temporal_operator(t) || has_temporal_operator(e)
+        }
+        Expr::Forall(_, _, body) | Expr::Exists(_, _, body) => has_temporal_operator(body),
+        Expr::Let(_, binding, body) => {
+            has_temporal_operator(body)
+                || (crate::eval::parameterized_let_op(binding).is_none()
+                    && has_temporal_operator(binding))
+        }
+        _ => false,
+    }
 }
 
-/// Extract a cfg `PROPERTY` into liveness obligations. Every conjunct of a property
-/// is something to check, so a shape the checker cannot represent is an error: in a
+fn is_state_level(expr: &Expr) -> bool {
+    !has_temporal_operator(expr)
+}
+
+/// The formula without its `WF`/`SF` conjuncts (including quantified ones), or `None`
+/// when nothing else is left.
+pub fn without_fairness(expr: &Expr) -> Option<Expr> {
+    match expr {
+        Expr::WeakFairness(_, _) | Expr::StrongFairness(_, _) => None,
+        Expr::And(l, r) => match (without_fairness(l), without_fairness(r)) {
+            (Some(l), Some(r)) => Some(Expr::And(Box::new(l), Box::new(r))),
+            (one, None) | (None, one) => one,
+        },
+        Expr::Forall(var, domain, body) => without_fairness(body)
+            .map(|body| Expr::Forall(var.clone(), domain.clone(), Box::new(body))),
+        other => Some(other.clone()),
+    }
+}
+
+/// One conjunct of a cfg `PROPERTY`, classified as TLC does (`processConfigProps`).
+#[derive(Debug, Clone)]
+pub enum PropertyPart {
+    /// A state predicate: checked on the initial states only.
+    Init(Expr),
+    /// `[]P` with `P` a state predicate: an invariant.
+    Invariant(Expr),
+    /// `[][A]_v`, possibly under `\A x \in S`: every transition is an `A` step or
+    /// leaves `v` unchanged, for every instance.
+    Action(Expr),
+    /// Everything else, in the form `liveness::find_violation` checks.
+    Liveness(Expr),
+}
+
+/// Split a cfg `PROPERTY` into what is checked and how. Every conjunct is an
+/// obligation, so a shape the checker cannot represent is an error: in a
 /// `SPECIFICATION` body a dropped conjunct only weakens an assumption, but in a
 /// property it would silently report the missing obligation as satisfied.
 /// A disjunction is checked as the conjunction of its disjuncts, which can only
 /// report a violation that does not exist, never miss one that does.
-pub fn collect_property(
+pub fn classify_property(
     expr: &Expr,
-    liveness: &mut Vec<Expr>,
-    quantified: &mut Vec<(Arc<str>, Expr, Expr)>,
-) -> Result<(), String> {
-    let unsupported = |what: &str| Err(format!("{what} is not supported in a PROPERTY yet"));
+    vars: &[Arc<str>],
+    defs: &DefinitionMap,
+) -> Result<Vec<PropertyPart>, String> {
+    let normalizer = Normalizer { vars, defs };
+    let normalized = normalizer.normalize(expr, &[], &mut Vec::new(), 0);
+    normalizer.require_constant_domains(&normalized)?;
+    let mut parts = Vec::new();
+    classify_into(&normalized, &mut parts)?;
+    Ok(parts)
+}
+
+/// How deep operator definitions are inlined while looking for temporal operators;
+/// a recursive operator stops being expanded there and is left as a call.
+const MAX_INLINE_DEPTH: usize = 32;
+
+type LocalOperator = (Arc<str>, Vec<Arc<str>>, Expr);
+
+/// Rewrites a property into the shapes `classify_into` understands, preserving its
+/// meaning: operators and `LET` definitions whose bodies are temporal are inlined,
+/// `[][]P` and `<><>P` collapse, negation is pushed through `[]`, `<>`, `/\`, `\/`,
+/// `=>` and quantifiers, and an antecedent (or `IF` condition) that refers to no
+/// state variable is pushed inside the temporal operators it guards.
+struct Normalizer<'a> {
+    vars: &'a [Arc<str>],
+    defs: &'a DefinitionMap,
+}
+
+impl Normalizer<'_> {
+    fn normalize(
+        &self,
+        expr: &Expr,
+        locals: &[LocalOperator],
+        bound: &mut Vec<Arc<str>>,
+        depth: usize,
+    ) -> Expr {
+        let recurse = |e: &Expr, bound: &mut Vec<Arc<str>>| self.normalize(e, locals, bound, depth);
+        match expr {
+            Expr::And(l, r) => Expr::And(Box::new(recurse(l, bound)), Box::new(recurse(r, bound))),
+            Expr::Or(l, r) => Expr::Or(Box::new(recurse(l, bound)), Box::new(recurse(r, bound))),
+            Expr::Implies(l, r) => {
+                let (guard, body) = (recurse(l, bound), recurse(r, bound));
+                self.guarded(guard, body)
+            }
+            Expr::Not(inner) => {
+                if let Expr::If(cond, then_branch, else_branch) = inner.as_ref()
+                    && !self.refers_to_state(cond)
+                {
+                    let branches = Expr::If(
+                        cond.clone(),
+                        Box::new(Expr::Not(then_branch.clone())),
+                        Box::new(Expr::Not(else_branch.clone())),
+                    );
+                    return recurse(&branches, bound);
+                }
+                let inner = recurse(inner, bound);
+                if has_temporal_operator(&inner) {
+                    negate(inner)
+                } else {
+                    Expr::Not(Box::new(inner))
+                }
+            }
+            Expr::If(cond, then_branch, else_branch) => {
+                let (then_branch, else_branch) =
+                    (recurse(then_branch, bound), recurse(else_branch, bound));
+                if !has_temporal_operator(&then_branch) && !has_temporal_operator(&else_branch) {
+                    return expr.clone();
+                }
+                let cond = recurse(cond, bound);
+                if self.refers_to_state(&cond) {
+                    return Expr::If(Box::new(cond), Box::new(then_branch), Box::new(else_branch));
+                }
+                Expr::And(
+                    Box::new(self.guarded(cond.clone(), then_branch)),
+                    Box::new(self.guarded(Expr::Not(Box::new(cond)), else_branch)),
+                )
+            }
+            Expr::Always(inner) => always(recurse(inner, bound)),
+            Expr::Eventually(inner) => eventually(recurse(inner, bound)),
+            Expr::LeadsTo(l, r) => {
+                Expr::LeadsTo(Box::new(recurse(l, bound)), Box::new(recurse(r, bound)))
+            }
+            Expr::Forall(var, domain, body) | Expr::Exists(var, domain, body) => {
+                bound.push(var.clone());
+                let body = recurse(body, bound);
+                bound.pop();
+                let rebuilt = |b: Expr| match expr {
+                    Expr::Forall(..) => Expr::Forall(var.clone(), domain.clone(), Box::new(b)),
+                    _ => Expr::Exists(var.clone(), domain.clone(), Box::new(b)),
+                };
+                rebuilt(body)
+            }
+            Expr::Let(name, binding, body) => {
+                let inlined = match crate::eval::parameterized_let_op(binding) {
+                    Some((params, op_body)) => {
+                        let mut scope = locals.to_vec();
+                        scope.push((name.clone(), params, op_body.clone()));
+                        let inlined = self.normalize(body, &scope, bound, depth);
+                        let rebind =
+                            |leaf: Expr| Expr::Let(name.clone(), binding.clone(), Box::new(leaf));
+                        wrap_non_temporal(inlined, &rebind)
+                    }
+                    None if crate::eval::reaches_temporal(body, self.defs) => {
+                        let subs = [(name.clone(), (**binding).clone())];
+                        let body = crate::substitution::substitute_expr(body, &subs);
+                        self.normalize(&body, locals, bound, depth)
+                    }
+                    None => return expr.clone(),
+                };
+                if has_temporal_operator(&inlined) {
+                    inlined
+                } else {
+                    expr.clone()
+                }
+            }
+            Expr::Var(name) if !bound.contains(name) => {
+                self.inline(expr, name, &[], locals, bound, depth)
+            }
+            Expr::FnCall(name, args) if !bound.contains(name) => {
+                self.inline(expr, name, args, locals, bound, depth)
+            }
+            _ => expr.clone(),
+        }
+    }
+
+    /// The body of the operator `name` applied to `args`, when that body is
+    /// temporal; otherwise the call is left for the evaluator.
+    fn inline(
+        &self,
+        call: &Expr,
+        name: &Arc<str>,
+        args: &[Expr],
+        locals: &[LocalOperator],
+        bound: &mut Vec<Arc<str>>,
+        depth: usize,
+    ) -> Expr {
+        if depth >= MAX_INLINE_DEPTH {
+            return call.clone();
+        }
+        let local = locals.iter().rev().find(|(n, _, _)| n == name);
+        let (params, body) = match local {
+            Some((_, params, body)) => (params.clone(), body.clone()),
+            None => match self.defs.get(name) {
+                Some((params, body)) => (params.clone(), (**body).clone()),
+                None => return call.clone(),
+            },
+        };
+        if params.len() != args.len()
+            || (local.is_none() && !crate::eval::reaches_temporal(&body, self.defs))
+        {
+            return call.clone();
+        }
+        let subs: Vec<(Arc<str>, Expr)> = params.into_iter().zip(args.iter().cloned()).collect();
+        let body = crate::substitution::substitute_expr(&body, &subs);
+        let inlined = self.normalize(&body, locals, bound, depth + 1);
+        if local.is_some() || has_temporal_operator(&inlined) {
+            inlined
+        } else {
+            call.clone()
+        }
+    }
+
+    /// A quantifier around a temporal formula ranges over a set fixed at the start
+    /// of the behavior; TLC rejects one whose set depends on the state, and checking
+    /// it per state would give a different formula, so it is rejected here too.
+    fn require_constant_domains(&self, expr: &Expr) -> Result<(), String> {
+        if !has_temporal_operator(expr) {
+            return Ok(());
+        }
+        match expr {
+            Expr::Forall(var, domain, body) | Expr::Exists(var, domain, body) => {
+                if self.refers_to_state(domain) {
+                    return Err(format!(
+                        "a quantifier `{var} \\in ..` around a temporal formula must range over a \
+                         set that does not depend on the state"
+                    ));
+                }
+                self.require_constant_domains(body)
+            }
+            Expr::And(l, r)
+            | Expr::Or(l, r)
+            | Expr::Implies(l, r)
+            | Expr::Equiv(l, r)
+            | Expr::LeadsTo(l, r) => {
+                self.require_constant_domains(l)?;
+                self.require_constant_domains(r)
+            }
+            Expr::Always(e) | Expr::Eventually(e) | Expr::Not(e) => {
+                self.require_constant_domains(e)
+            }
+            Expr::If(c, t, e) => {
+                self.require_constant_domains(c)?;
+                self.require_constant_domains(t)?;
+                self.require_constant_domains(e)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn refers_to_state(&self, expr: &Expr) -> bool {
+        crate::eval::references_state(expr, self.vars, self.defs)
+    }
+
+    /// `guard => body`, with a guard that refers to no state variable pushed inside
+    /// the temporal operators of `body` (it has the same value in every state).
+    fn guarded(&self, guard: Expr, body: Expr) -> Expr {
+        let implies = |g: Expr, b: Expr| Expr::Implies(Box::new(g), Box::new(b));
+        if !has_temporal_operator(&body)
+            || has_temporal_operator(&guard)
+            || self.refers_to_state(&guard)
+        {
+            return implies(guard, body);
+        }
+        push_guard(&guard, &body).unwrap_or_else(|| implies(guard, body))
+    }
+}
+
+/// `expr` with `wrap` applied to each maximal subformula free of temporal operators
+/// (state predicates, actions and subscripts), leaving the temporal structure intact.
+fn wrap_non_temporal(expr: Expr, wrap: &dyn Fn(Expr) -> Expr) -> Expr {
+    if !has_temporal_operator(&expr) {
+        return wrap(expr);
+    }
+    let go = |e: Box<Expr>| Box::new(wrap_non_temporal(*e, wrap));
+    match expr {
+        Expr::Always(e) => Expr::Always(go(e)),
+        Expr::Eventually(e) => Expr::Eventually(go(e)),
+        Expr::Not(e) => Expr::Not(go(e)),
+        Expr::And(l, r) => Expr::And(go(l), go(r)),
+        Expr::Or(l, r) => Expr::Or(go(l), go(r)),
+        Expr::Implies(l, r) => Expr::Implies(go(l), go(r)),
+        Expr::Equiv(l, r) => Expr::Equiv(go(l), go(r)),
+        Expr::LeadsTo(l, r) => Expr::LeadsTo(go(l), go(r)),
+        Expr::If(c, t, e) => Expr::If(go(c), go(t), go(e)),
+        Expr::Forall(v, d, b) => Expr::Forall(v, go(d), go(b)),
+        Expr::Exists(v, d, b) => Expr::Exists(v, go(d), go(b)),
+        Expr::BoxAction(a, v) => Expr::BoxAction(go(a), go(v)),
+        Expr::DiamondAction(a, v) => Expr::DiamondAction(go(a), go(v)),
+        Expr::WeakFairness(v, a) => Expr::WeakFairness(go(v), go(a)),
+        Expr::StrongFairness(v, a) => Expr::StrongFairness(go(v), go(a)),
+        other => other,
+    }
+}
+
+fn always(inner: Expr) -> Expr {
+    match inner {
+        Expr::Always(_) => inner,
+        other => Expr::Always(Box::new(other)),
+    }
+}
+
+fn eventually(inner: Expr) -> Expr {
+    match inner {
+        Expr::Eventually(_) => inner,
+        other => Expr::Eventually(Box::new(other)),
+    }
+}
+
+/// `~expr` for a normalized temporal `expr`, pushed inward as far as the operators
+/// allow; what cannot be pushed through stays under `~`.
+fn negate(expr: Expr) -> Expr {
+    let not = |e: Expr| {
+        if has_temporal_operator(&e) {
+            negate(e)
+        } else {
+            Expr::Not(Box::new(e))
+        }
+    };
+    match expr {
+        Expr::Not(inner) => *inner,
+        Expr::Always(inner) => eventually(not(*inner)),
+        Expr::Eventually(inner) => always(not(*inner)),
+        Expr::And(l, r) => Expr::Or(Box::new(not(*l)), Box::new(not(*r))),
+        Expr::Or(l, r) => Expr::And(Box::new(not(*l)), Box::new(not(*r))),
+        Expr::Implies(l, r) => Expr::And(l, Box::new(not(*r))),
+        Expr::Forall(var, domain, body) => Expr::Exists(var, domain, Box::new(not(*body))),
+        Expr::Exists(var, domain, body) => Expr::Forall(var, domain, Box::new(not(*body))),
+        other => Expr::Not(Box::new(other)),
+    }
+}
+
+/// `guard => body` rewritten so the guard sits under the temporal operators, valid
+/// because the guard has the same value in every state. `None` when `body` has a
+/// shape the guard cannot be pushed into.
+fn push_guard(guard: &Expr, body: &Expr) -> Option<Expr> {
+    let implies = |b: &Expr| Expr::Implies(Box::new(guard.clone()), Box::new(b.clone()));
+    let and_guard = |b: &Expr| Expr::And(Box::new(guard.clone()), Box::new(b.clone()));
+    if is_state_level(body) {
+        return Some(implies(body));
+    }
+    if let Some((p, q)) = leads_to_form(body) {
+        return Some(Expr::LeadsTo(Box::new(and_guard(p)), Box::new(q.clone())));
+    }
+    match body {
+        Expr::And(l, r) => Some(Expr::And(
+            Box::new(push_guard(guard, l)?),
+            Box::new(push_guard(guard, r)?),
+        )),
+        Expr::Or(l, r) => Some(Expr::Or(
+            Box::new(push_guard(guard, l)?),
+            Box::new(push_guard(guard, r)?),
+        )),
+        Expr::Always(inner) => match inner.as_ref() {
+            Expr::Eventually(p) if is_state_level(p) => Some(always(eventually(implies(p)))),
+            p if is_state_level(p) => Some(always(implies(p))),
+            _ => None,
+        },
+        Expr::Eventually(inner) => match inner.as_ref() {
+            Expr::Always(p) if is_state_level(p) => Some(eventually(always(implies(p)))),
+            p if is_state_level(p) => Some(eventually(implies(p))),
+            _ => None,
+        },
+        Expr::LeadsTo(p, q) => Some(Expr::LeadsTo(Box::new(and_guard(p)), q.clone())),
+        Expr::BoxAction(action, subscript) => Some(Expr::BoxAction(
+            Box::new(implies(action)),
+            subscript.clone(),
+        )),
+        Expr::Forall(var, domain, inner) if !crate::eval::expr_references(guard, var) => {
+            Some(Expr::Forall(
+                var.clone(),
+                domain.clone(),
+                Box::new(push_guard(guard, inner)?),
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn classify_into(expr: &Expr, parts: &mut Vec<PropertyPart>) -> Result<(), String> {
+    if is_state_level(expr) {
+        parts.push(PropertyPart::Init(expr.clone()));
+        return Ok(());
+    }
     match expr {
         Expr::And(l, r) | Expr::Or(l, r) => {
-            collect_property(l, liveness, quantified)?;
-            collect_property(r, liveness, quantified)
+            classify_into(l, parts)?;
+            classify_into(r, parts)
         }
-        Expr::LeadsTo(p, q) if is_state_level(p) && is_state_level(q) => {
-            liveness.push(expr.clone());
+        Expr::Always(inner) if is_state_level(inner) => {
+            parts.push(PropertyPart::Invariant((**inner).clone()));
             Ok(())
         }
+        Expr::BoxAction(_, _) => {
+            parts.push(PropertyPart::Action(expr.clone()));
+            Ok(())
+        }
+        Expr::Forall(var, domain, body) => {
+            let bind = |inner: Expr| Expr::Forall(var.clone(), domain.clone(), Box::new(inner));
+            let mut has_liveness = false;
+            let mut body_parts = Vec::new();
+            classify_into(body, &mut body_parts)?;
+            for part in body_parts {
+                match part {
+                    PropertyPart::Init(p) => parts.push(PropertyPart::Init(bind(p))),
+                    PropertyPart::Invariant(p) => parts.push(PropertyPart::Invariant(bind(p))),
+                    PropertyPart::Action(f) => parts.push(PropertyPart::Action(bind(f))),
+                    PropertyPart::Liveness(_) => has_liveness = true,
+                }
+            }
+            if has_liveness {
+                parts.push(PropertyPart::Liveness(expr.clone()));
+            }
+            Ok(())
+        }
+        _ => {
+            parts.push(PropertyPart::Liveness(liveness_form(expr)?));
+            Ok(())
+        }
+    }
+}
+
+fn liveness_form(expr: &Expr) -> Result<Expr, String> {
+    let unsupported = |what: &str| Err(format!("{what} is not supported in a PROPERTY yet"));
+    match expr {
+        Expr::LeadsTo(p, q) if is_state_level(p) && is_state_level(q) => Ok(expr.clone()),
         Expr::Eventually(inner) => match inner.as_ref() {
-            Expr::Always(p) if is_state_level(p) => {
-                liveness.push(expr.clone());
-                Ok(())
-            }
-            other if is_state_level(other) => {
-                liveness.push(expr.clone());
-                Ok(())
-            }
+            Expr::Always(p) if is_state_level(p) => Ok(expr.clone()),
+            other if is_state_level(other) => Ok(expr.clone()),
             _ => unsupported("`<>` applied to a temporal formula"),
         },
         Expr::Always(inner) => {
             if let Some((p, q)) = leads_to_form(expr) {
-                liveness.push(Expr::LeadsTo(Box::new(p.clone()), Box::new(q.clone())));
-                return Ok(());
+                return Ok(Expr::LeadsTo(Box::new(p.clone()), Box::new(q.clone())));
             }
             match inner.as_ref() {
-                Expr::Eventually(p) if is_state_level(p) => {
-                    liveness.push((**p).clone());
-                    Ok(())
-                }
-                _ => unsupported(
-                    "a `[]` formula other than `[]<>P` or `[](P => <>Q)` (a state invariant `[]P` belongs under INVARIANT)",
-                ),
+                Expr::Eventually(p) if is_state_level(p) => Ok((**p).clone()),
+                _ => unsupported("a `[]` formula other than `[]P`, `[]<>P` or `[](P => <>Q)`"),
             }
         }
-        Expr::Forall(var, domain, body) if expr_contains_temporal(body) => {
-            collect_property(body, &mut Vec::new(), &mut Vec::new())?;
-            quantified.push((var.clone(), (**domain).clone(), (**body).clone()));
-            Ok(())
-        }
-        Expr::Exists(var, domain, body) if expr_contains_temporal(body) => {
-            match distribute_exists(var, domain, body) {
-                Some(property) => {
-                    liveness.push(property);
-                    Ok(())
-                }
-                None => unsupported("`\\E x \\in S : P` with a body other than `<>Q` or `[]<>Q`"),
-            }
-        }
+        Expr::Exists(var, domain, body) => match distribute_exists(var, domain, body) {
+            Some(property) => Ok(property),
+            None => unsupported("`\\E x \\in S : P` with a body other than `<>Q` or `[]<>Q`"),
+        },
         Expr::WeakFairness(_, _) | Expr::StrongFairness(_, _) => {
             unsupported("a fairness formula (`WF`/`SF`)")
         }
         Expr::BoxAction(_, _) | Expr::DiamondAction(_, _) => {
-            unsupported("an action-level formula (`[][A]_v`, `<<A>>_v`)")
+            unsupported("an action-level formula other than a `[][A]_v` conjunct")
         }
-        _ if !expr_contains_temporal(expr) => {
-            unsupported("a state-level conjunct inside a temporal formula")
-        }
+        Expr::Implies(_, _) | Expr::If(_, _, _) => unsupported(
+            "a temporal formula guarded by a condition on the state (`P => []Q`, `IF P THEN ..`)",
+        ),
         _ => unsupported("this temporal formula"),
     }
 }

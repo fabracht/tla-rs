@@ -232,9 +232,28 @@ These operators are parsed into the AST but error at evaluation time. They can a
 | `<<A>>_v` | | Diamond action | Parsed, errors if evaluated directly |
 | `\cdot` | | Action composition | Parsed, errors if evaluated directly |
 
+The subscript `v` of `WF_v`, `SF_v`, `[A]_v` and `<<A>>_v` may be a variable, a definition, or any parenthesized expression, tuple or record: `WF_<<x, y>>(A)`, `[A]_(x + y)`, `[A]_[a |-> x]`.
+
+### Property Classification
+
+A cfg `PROPERTY` is split into conjuncts, and each conjunct is checked the way TLC checks it (a bounded `\A x \in S` distributes over the conjuncts of its body):
+
+| Conjunct | Checked as | Reported as |
+|----------|-----------|-------------|
+| `P` (state predicate) | holds on every initial state | `property_violation`, kind `init` ("violated by the initial state") |
+| `[]P` (state predicate) | an invariant, during the safety search | `invariant_violation` naming the property |
+| `[][A]_v` | every transition is an `A` step or leaves `v` unchanged | `property_violation`, kind `action` |
+| anything else | a liveness property (below), with `--check-liveness`, which a cfg `PROPERTY` turns on | `liveness_violation` naming the property |
+
+Before classification the property is normalized: operators and `LET` definitions whose bodies are temporal are expanded (parameterized ones included, as are tuple binders `\A <<i, j>> \in S \X S`), `[][]P` and `<><>P` collapse, negation is pushed through `[]`, `<>`, `/\`, `\/`, `=>` and quantifiers (`~<>P` becomes `[]~P`, and is then reported as an invariant violation where TLC reports a temporal property violation), and an antecedent or `IF` condition that does not depend on the state is moved inside the temporal operators (`g => <>P` becomes `<>(g => P)`). A condition depends on the state when it refers to a variable, `ENABLED`, `TLCGet`, `RandomElement` or the time, directly or through definitions. A quantifier around a temporal formula must range over a set that does not depend on the state (TLC rejects it too).
+
+Any conjunct the checker cannot represent — a `WF`/`SF` formula, an action-level formula other than `[][A]_v`, a temporal formula guarded by a condition on the state (`P => []Q`), or a temporal shape outside the liveness table — is a config-time error rather than being skipped. A disjunction of temporal formulas is checked as the conjunction of its disjuncts, which can report a violation that does not exist but never misses one; a disjunction of state predicates is one state predicate. As in TLC, these checks also cover states and transitions outside a cfg `CONSTRAINT`: such a state is checked against the invariants and initial-state predicates, and the transition into it against the action properties, but it is not explored. A step into such a state also counts toward whether a `WF`/`SF` action is enabled. Under `--continue`, every invariant and action property violation is recorded; an initial-state property violation stops the check, as in TLC. When one state or transition violates several invariants or properties, tla-rs counts each of them, while TLC's `-continue` reports only the first. A successful run lists the properties it checked (`properties_checked` in `--json` and MCP output).
+
+With a cfg `SPECIFICATION`, the specification's temporal conjuncts are assumptions, as in TLC: `WF`/`SF` restrict the checked behaviors to fair ones, and other temporal conjuncts (such as `<>P`) are never checked as properties. Those other conjuncts do not yet restrict the checked behaviors, so a liveness violation reported under such a specification may be one the assumption excludes; this is warned at load time. Without a cfg that defines the behavior (`SPECIFICATION` or `INIT`/`NEXT`), the temporal conjuncts of `*Spec` definitions are still checked as properties under `--check-liveness`, with a deprecation warning.
+
 ### Liveness Property Forms
 
-With `--check-liveness`, a top-level property (from a cfg `PROPERTY`, a `SPECIFICATION`, or a `*Spec`-named definition) is checked against fair behaviors via SCC analysis. Supported forms and the cycle that witnesses a violation:
+With `--check-liveness`, a liveness property is checked against fair behaviors via SCC analysis. Supported forms and the cycle that witnesses a violation:
 
 | Form | Checked as | Violated by |
 |------|-----------|-------------|
@@ -246,20 +265,19 @@ With `--check-liveness`, a top-level property (from a cfg `PROPERTY`, a `SPECIFI
 
 The liveness graph models the implicit stuttering that `[][Next]_vars` always permits — every state gets a stutter self-loop, and weak/strong fairness rules out the cycles it would otherwise create. An agent that may stall forever therefore needs no explicit `\/ UNCHANGED vars` disjunct to be considered.
 
-A cfg `PROPERTY` is checked conjunct by conjunct, and any conjunct the checker cannot represent — a state invariant `[]P` (use `INVARIANT`), a `WF`/`SF` formula, an action-level formula, or a temporal shape outside the table above — is a config-time error rather than being skipped. A disjunction of properties is checked as the conjunction of its disjuncts, which can report a violation that does not exist but never misses one.
-
 Fairness follows TLC. `WF_v(A)` and `SF_v(A)` count only `A` steps that change the subscript `v`, so `WF_x(A)` is vacuous for an `A` that never changes `x`. A strongly connected set of states that enables `A` but never takes it can still contain a cycle that is fair to `SF_v(A)` by avoiding every `A`-enabled state; such cycles are found and checked. When a cfg defines the behavior with `SPECIFICATION` or `INIT`/`NEXT`, fairness comes only from the named `SPECIFICATION` (none with `INIT`/`NEXT`), never from other `*Spec` definitions in the module.
 
 ### Quantified Temporal Properties
 
-Temporal properties may be quantified over a constant set (requires `--check-liveness`; declared via a cfg `PROPERTY` or the `SPECIFICATION`).
+Temporal properties may be quantified over a constant set (requires `--check-liveness`; declared via a cfg `PROPERTY`, or legacy `*Spec` extraction without a cfg).
 
 | Form | Handling |
 |------|----------|
 | `\A x \in S : <>P(x)` / `\A x \in S : P(x) ~> Q(x)` | Expanded to one liveness property per element of `S`; all must hold. |
+| `\A x \in S : []P(x)` / `\A x \in S : [][A(x)]_v(x)` | Checked as the invariant `\A x \in S : P(x)` / one action property per element of `S` (the subscript may depend on `x`). |
 | `\E x \in S : <>Q(x)` | Normalized to `<>(\E x \in S : Q(x))` and checked as a single liveness property. |
 | `\E x \in S : []<>Q(x)` | Normalized to `[]<>(\E x \in S : Q(x))` and checked as a single liveness property. |
-| `\E x \in S : P(x) ~> Q(x)` (other existential bodies) | Not supported. In a cfg `PROPERTY` it is a config error; inside a `SPECIFICATION` it is an assumption that is dropped with a warning. |
+| `\E x \in S : P(x) ~> Q(x)` (other existential bodies) | Not supported. In a cfg `PROPERTY` it is a config error; inside a `SPECIFICATION` it is an assumption that is not enforced. |
 
 `S` must evaluate to a constant set. Without a cfg that defines the behavior, a property whose definition name ends in `Spec` is extracted by the parser, so it is not re-extracted when also named in a cfg `PROPERTY`.
 

@@ -49,7 +49,10 @@ pub use self::state::{
     is_action_enabled, make_primed_names, next_states, next_states_with_guards, state_to_env,
 };
 
-pub(crate) use self::ast_utils::{contains_prime_ref, expr_contains, expr_references};
+pub(crate) use self::ast_utils::{
+    contains_prime_ref, expr_contains, expr_references, parameterized_let_op, reaches_temporal,
+    references_state,
+};
 pub use self::walk::{EngineOverride, set_allow_unassigned_stutter, set_use_inference_engine};
 
 pub(crate) fn resolve_parameterized_defs(
