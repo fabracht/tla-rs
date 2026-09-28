@@ -631,8 +631,10 @@ pub enum PropertyPart {
 /// obligation, so a shape the checker cannot represent is an error: in a
 /// `SPECIFICATION` body a dropped conjunct only weakens an assumption, but in a
 /// property it would silently report the missing obligation as satisfied.
-/// A disjunction is checked as the conjunction of its disjuncts, which can only
-/// report a violation that does not exist, never miss one that does.
+/// A disjunction of liveness properties is checked as the conjunction of its
+/// disjuncts, which can only report a violation that does not exist, never miss one
+/// that does; any other disjunction with a temporal disjunct is rejected, since
+/// splitting it would turn a state predicate or `[]P` into a hard obligation.
 pub fn classify_property(
     expr: &Expr,
     vars: &[Arc<str>],
@@ -968,9 +970,26 @@ fn classify_into(expr: &Expr, parts: &mut Vec<PropertyPart>) -> Result<(), Strin
         return Ok(());
     }
     match expr {
-        Expr::And(l, r) | Expr::Or(l, r) => {
+        Expr::And(l, r) => {
             classify_into(l, parts)?;
             classify_into(r, parts)
+        }
+        Expr::Or(l, r) => {
+            let mut disjuncts = Vec::new();
+            classify_into(l, &mut disjuncts)?;
+            classify_into(r, &mut disjuncts)?;
+            if !disjuncts
+                .iter()
+                .all(|part| matches!(part, PropertyPart::Liveness(_)))
+            {
+                return Err(
+                    "a disjunction with a disjunct that is not a liveness property (such as \
+                     `x = 1 \\/ <>P` or `[]P \\/ []Q`) is not supported in a PROPERTY yet"
+                        .to_string(),
+                );
+            }
+            parts.extend(disjuncts);
+            Ok(())
         }
         Expr::Always(inner) if is_state_level(inner) => {
             parts.push(PropertyPart::Invariant((**inner).clone()));

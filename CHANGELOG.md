@@ -27,6 +27,7 @@
   - A quantifier around a temporal formula must range over a set that does not depend on the state; TLC rejects such a property and tla-rs now does too instead of checking it state by state.
 - Subscripts of `[A]_v`, `<<A>>_v`, `WF_v` and `SF_v` can be any expression: `[A]_(x + y)`, `[A]_<<x, y>>`, `[A]_[a |-> x]` and `WF_<<x, y>>(A)` parse. They used to make the parser drop the definition.
 - The subscript of a quantified action property may depend on the bound variable, and `ENABLED` can be used in initial-state and action `PROPERTY` parts.
+- A disjunction in a `PROPERTY` with a disjunct that is not a liveness property (`x = 1 \/ <>P`, `[]P \/ []Q`) is a config error; checking each disjunct separately would report violations TLC does not. A disjunction of liveness properties is still checked as their conjunction, which can only over-report.
 - A property's `[]P` conjuncts are checked as one invariant, so `--list-invariants` and `--continue` report the property once.
 - A warning notes invariants checked only because of their `Inv`/`TypeOK`/`NotSolved` name when a cfg has no `INVARIANT` section; TLC checks none of them. tla-rs keeps checking them.
 - Violations name the property: a liveness violation reports the `PROPERTY` (or legacy `*Spec`) definition name instead of an internal dump of the formula.
@@ -36,7 +37,7 @@
 
 - `--json` and the human-readable summary list the properties checked on success (`properties_checked`). A property with violations recorded under `--continue` is not listed.
 - The safety parts of a `PROPERTY` are checked on states and transitions outside the `CONSTRAINT` too, as in TLC.
-- 60 TLC-confirmed oracle cases for the property classes, their normalization, expression subscripts and their interplay with `CONSTRAINT` (C55–C114); the corpus now has 118 cases. The oracle's independent lasso validator now expands `LET` definitions and `IF` over temporal formulas.
+- 64 TLC-confirmed oracle cases for the property classes, their normalization, disjunctions, expression subscripts and their interplay with `CONSTRAINT` (C55–C118); the corpus now has 122 cases. The oracle's independent lasso validator now expands `LET` definitions and `IF` over temporal formulas.
 
 ## [0.10.2] - 2026-09-25
 

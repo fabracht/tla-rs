@@ -715,6 +715,9 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             }
         }
         if !within_constraints {
+            if spec.invariants.is_empty() || !excluded_checked.insert(state.clone()) {
+                continue;
+            }
             let violated = match violated_invariants(spec, &state, &base_env, &domains, &defs) {
                 Ok(violated) => violated,
                 Err(e) => return CheckResult::InvariantError(e, vec![state.clone()], None),
@@ -731,17 +734,15 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                         stats,
                     );
                 }
-                if excluded_checked.insert(state.clone()) {
-                    for idx in violated {
-                        violation_counts_by_inv[idx] += 1;
-                        stats.violation_count += 1;
-                        if stats.violation_traces.len() < max_violation_traces {
-                            stats.violation_traces.push(Counterexample {
-                                trace: vec![state.clone()],
-                                actions: vec![None],
-                                violated_invariant: idx,
-                            });
-                        }
+                for idx in violated {
+                    violation_counts_by_inv[idx] += 1;
+                    stats.violation_count += 1;
+                    if stats.violation_traces.len() < max_violation_traces {
+                        stats.violation_traces.push(Counterexample {
+                            trace: vec![state.clone()],
+                            actions: vec![None],
+                            violated_invariant: idx,
+                        });
                     }
                 }
             }
@@ -1085,6 +1086,11 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                         }
                         excluded_successors[current_idx].push(transition.state.clone());
                     }
+                    if spec.invariants.is_empty()
+                        || !excluded_checked.insert(transition.state.clone())
+                    {
+                        continue;
+                    }
                     let violated =
                         violated_invariants(spec, &transition.state, &base_env, &domains, &defs);
                     let with_successor = || {
@@ -1117,17 +1123,15 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                                 stats,
                             );
                         }
-                        if excluded_checked.insert(transition.state.clone()) {
-                            for idx in violated {
-                                violation_counts_by_inv[idx] += 1;
-                                stats.violation_count += 1;
-                                if stats.violation_traces.len() < max_violation_traces {
-                                    stats.violation_traces.push(Counterexample {
-                                        trace: trace.clone(),
-                                        actions: actions.clone(),
-                                        violated_invariant: idx,
-                                    });
-                                }
+                        for idx in violated {
+                            violation_counts_by_inv[idx] += 1;
+                            stats.violation_count += 1;
+                            if stats.violation_traces.len() < max_violation_traces {
+                                stats.violation_traces.push(Counterexample {
+                                    trace: trace.clone(),
+                                    actions: actions.clone(),
+                                    violated_invariant: idx,
+                                });
                             }
                         }
                     }

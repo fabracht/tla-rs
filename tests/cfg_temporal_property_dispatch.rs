@@ -586,3 +586,37 @@ fn continue_json_reports_property_violations_when_no_invariant_failed() {
     assert_eq!(json["status"], "property_violation");
     assert_eq!(json["stats"]["violations_by_property"][0]["count"], 2);
 }
+
+#[test]
+fn disjunction_with_a_non_liveness_disjunct_is_a_config_error() {
+    let spec_src = "---- MODULE M ----\n\
+        EXTENDS Naturals\n\
+        VARIABLE x\n\
+        Init == x = 0\n\
+        Next == x' = 1 - x\n\
+        Spec == Init /\\ [][Next]_x /\\ WF_x(Next)\n\
+        StateOrLive == x = 1 \\/ <>(x = 1)\n\
+        LiveOrLive == <>(x = 1) \\/ <>(x = 7)\n\
+        ====\n";
+    let mut spec = parse(spec_src).expect("spec parses");
+    let err = apply_config(
+        &parse_cfg("SPECIFICATION Spec\nPROPERTY StateOrLive\n").unwrap(),
+        &mut spec,
+        &mut Env::new(),
+        &mut CheckerConfig::default(),
+        &[],
+        &[],
+        false,
+    )
+    .expect_err("splitting x = 1 \\/ <>(x = 1) would report a violation TLC does not");
+    assert!(
+        err.contains("StateOrLive") && err.contains("disjunction"),
+        "got {err}"
+    );
+    let (spec, _) = apply(spec_src, "SPECIFICATION Spec\nPROPERTY LiveOrLive\n");
+    assert_eq!(
+        spec.liveness_properties.len(),
+        2,
+        "a disjunction of liveness properties keeps the documented over-approximation"
+    );
+}
