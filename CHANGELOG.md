@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.11.1] - 2026-09-29
+
+### Fixed
+
+- Liveness checking no longer overflows the stack on large state graphs (#120). The strongly connected component search recursed once per state, so a long chain of states aborted the process: around 70,000 states from the command line and fewer inside the MCP server or a test thread. It now keeps its own stack, and a 500,000-state chain checks in about a second.
+
 ## [0.11.0] - 2026-09-27
 
 ### Fixed
