@@ -6,8 +6,8 @@ use wasm_bindgen::prelude::*;
 
 use crate::ast::{Env, Spec, State, Value};
 use crate::checker::{
-    CheckResult, CheckStats, CheckerConfig, PrepareSpecError, check, format_eval_error,
-    format_trace, format_value,
+    CheckResult, CheckStats, CheckerConfig, PrepareSpecError, PropertyViolationKind, check,
+    format_eval_error, format_trace, format_value,
 };
 use crate::config::{apply_config, parse_cfg};
 use crate::eval::{Definitions, eval, init_states, make_primed_names, next_states};
@@ -368,6 +368,21 @@ fn result_to_wasm(
                 format_trace(&violation.prefix, vars),
                 format_trace(&violation.cycle, vars),
             ]),
+            warnings,
+        ),
+        CheckResult::PropertyViolation(violation, stats) => WasmCheckResult::err_with_stats(
+            "PropertyViolation",
+            match violation.kind {
+                PropertyViolationKind::Init => format!(
+                    "Property {} is violated by the initial state",
+                    violation.property
+                ),
+                PropertyViolationKind::Action => {
+                    format!("Action property {} is violated", violation.property)
+                }
+            },
+            stats,
+            Some(vec![format_trace(&violation.trace, vars)]),
             warnings,
         ),
         CheckResult::Deadlock(trace, _, stats) => WasmCheckResult::err_with_stats(

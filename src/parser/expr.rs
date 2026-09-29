@@ -890,8 +890,8 @@ impl Parser {
                     let action = self.parse_expr()?;
                     self.expect(Token::RBracket)?;
                     self.expect(Token::Underscore)?;
-                    let var = self.expect_ident()?;
-                    return Ok(Expr::BoxAction(Box::new(action), var));
+                    let subscript = self.parse_subscript()?;
+                    return Ok(Expr::BoxAction(Box::new(action), Box::new(subscript)));
                 }
                 let inner = self.parse_unary()?;
                 Ok(Expr::Always(Box::new(inner)))
@@ -1131,10 +1131,10 @@ impl Parser {
                     .collect(),
             ),
             LabeledAction(n, a) => LabeledAction(n.clone(), un(a, bound)),
-            WeakFairness(v, e) => WeakFairness(v.clone(), un(e, bound)),
-            StrongFairness(v, e) => StrongFairness(v.clone(), un(e, bound)),
-            BoxAction(e, v) => BoxAction(un(e, bound), v.clone()),
-            DiamondAction(e, v) => DiamondAction(un(e, bound), v.clone()),
+            WeakFairness(v, e) => WeakFairness(un(v, bound), un(e, bound)),
+            StrongFairness(v, e) => StrongFairness(un(v, bound), un(e, bound)),
+            BoxAction(e, v) => BoxAction(un(e, bound), un(v, bound)),
+            DiamondAction(e, v) => DiamondAction(un(e, bound), un(v, bound)),
         }
     }
 

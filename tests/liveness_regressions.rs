@@ -207,10 +207,14 @@ fn stable_eventually_violated_when_property_flips_forever() {
         ====\n";
     match run_inline("StableFlips", module) {
         CheckResult::LivenessViolation(violation, _) => {
+            assert_eq!(
+                violation.property, "Spec",
+                "the violation must name the definition the property came from"
+            );
             assert!(
-                violation.property.starts_with("<>[]"),
-                "the reported property must be the stable-eventually form, got {}",
-                violation.property
+                violation.cycle.iter().any(|s| x_of(s) == 0),
+                "a <>[](x=1) counterexample cycle must contain an x=0 state, got {:?}",
+                violation.cycle
             );
         }
         other => panic!(

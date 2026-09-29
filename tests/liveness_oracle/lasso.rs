@@ -107,16 +107,15 @@ impl Model<'_> {
 
     fn subscript_changes(
         &self,
-        subscript: &str,
+        subscript: &Expr,
         current: &State,
         next: &State,
         bound: &Env,
     ) -> Verdict<bool> {
-        let expr = Expr::Var(Arc::from(subscript));
-        let before = eval(&expr, &mut self.state_env(current, bound), self.defs)
-            .map_err(|e| format!("subscript {subscript} failed to evaluate: {e:?}"))?;
-        let after = eval(&expr, &mut self.state_env(next, bound), self.defs)
-            .map_err(|e| format!("subscript {subscript} failed to evaluate: {e:?}"))?;
+        let before = eval(subscript, &mut self.state_env(current, bound), self.defs)
+            .map_err(|e| format!("subscript {subscript:?} failed to evaluate: {e:?}"))?;
+        let after = eval(subscript, &mut self.state_env(next, bound), self.defs)
+            .map_err(|e| format!("subscript {subscript:?} failed to evaluate: {e:?}"))?;
         Ok(before != after)
     }
 
@@ -124,7 +123,7 @@ impl Model<'_> {
     fn angle_step(
         &self,
         action: &Expr,
-        subscript: &str,
+        subscript: &Expr,
         current: &State,
         next: &State,
         bound: &Env,
@@ -137,7 +136,7 @@ impl Model<'_> {
     fn angle_enabled(
         &self,
         action: &Expr,
-        subscript: &str,
+        subscript: &Expr,
         state: &State,
         bound: &Env,
     ) -> Verdict<bool> {
@@ -157,7 +156,7 @@ impl Model<'_> {
         &self,
         lasso: &Lasso,
         strong: bool,
-        subscript: &str,
+        subscript: &Expr,
         action: &Expr,
         bound: &Env,
     ) -> Verdict<bool> {
@@ -243,6 +242,27 @@ impl Model<'_> {
                     }
                 }
                 Ok(true)
+            }
+            Expr::Let(_, _, body) if !temporal(body) => self.leaf(lasso, formula, pos, bound),
+            Expr::Let(name, binding, body) => match let_operator(binding) {
+                Some((params, op_body)) => {
+                    let localized = localize(body, name, binding, &params, op_body);
+                    self.holds(lasso, &localized, pos, bound)
+                }
+                None => {
+                    let subs = [(name.clone(), (**binding).clone())];
+                    let inlined = tla_checker::substitution::substitute_expr(body, &subs);
+                    self.holds(lasso, &inlined, pos, bound)
+                }
+            },
+            Expr::If(cond, then_branch, else_branch) if temporal(formula) => {
+                let chosen =
+                    if self.eval_bool(cond, &mut self.state_env(&lasso.states[pos], bound))? {
+                        then_branch
+                    } else {
+                        else_branch
+                    };
+                self.holds(lasso, chosen, pos, bound)
             }
             Expr::Not(inner) => Ok(!self.holds(lasso, inner, pos, bound)?),
             Expr::And(l, r) => {
@@ -341,6 +361,90 @@ impl Model<'_> {
             }
         }
         Ok(())
+    }
+}
+
+/// The parser encodes `LET F(p1, ..) == body` as a binding `Let("_params", <<p1, ..>>, body)`.
+fn let_operator(binding: &Expr) -> Option<(Vec<Arc<str>>, &Expr)> {
+    let Expr::Let(marker, params, body) = binding else {
+        return None;
+    };
+    let Expr::TupleLit(params) = params.as_ref() else {
+        return None;
+    };
+    if marker.as_ref() != "_params" {
+        return None;
+    }
+    params
+        .iter()
+        .map(|p| match p {
+            Expr::Var(name) => Some(name.clone()),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(|names| (names, body.as_ref()))
+}
+
+fn temporal(expr: &Expr) -> bool {
+    match expr {
+        Expr::Always(_)
+        | Expr::Eventually(_)
+        | Expr::LeadsTo(_, _)
+        | Expr::BoxAction(_, _)
+        | Expr::DiamondAction(_, _)
+        | Expr::WeakFairness(_, _)
+        | Expr::StrongFairness(_, _) => true,
+        Expr::Not(e) => temporal(e),
+        Expr::And(l, r) | Expr::Or(l, r) | Expr::Implies(l, r) | Expr::Equiv(l, r) => {
+            temporal(l) || temporal(r)
+        }
+        Expr::If(c, t, e) => temporal(c) || temporal(t) || temporal(e),
+        Expr::Forall(_, _, b) | Expr::Exists(_, _, b) | Expr::Let(_, _, b) => temporal(b),
+        Expr::FnCall(_, _) => true,
+        _ => false,
+    }
+}
+
+/// `body` under the local operator `name`: calls in temporal positions are replaced
+/// by the operator's body, and every subformula without temporal operators is
+/// evaluated inside `LET name == binding IN ..`.
+fn localize(
+    body: &Expr,
+    name: &Arc<str>,
+    binding: &Expr,
+    params: &[Arc<str>],
+    op_body: &Expr,
+) -> Expr {
+    let go = |e: &Expr| Box::new(localize(e, name, binding, params, op_body));
+    match body {
+        Expr::FnCall(called, args) if called == name && args.len() == params.len() => {
+            let subs: Vec<(Arc<str>, Expr)> =
+                params.iter().cloned().zip(args.iter().cloned()).collect();
+            localize(
+                &tla_checker::substitution::substitute_expr(op_body, &subs),
+                name,
+                binding,
+                params,
+                op_body,
+            )
+        }
+        _ if !temporal(body) => Expr::Let(
+            name.clone(),
+            Box::new(binding.clone()),
+            Box::new(body.clone()),
+        ),
+        Expr::Always(e) => Expr::Always(go(e)),
+        Expr::Eventually(e) => Expr::Eventually(go(e)),
+        Expr::Not(e) => Expr::Not(go(e)),
+        Expr::And(l, r) => Expr::And(go(l), go(r)),
+        Expr::Or(l, r) => Expr::Or(go(l), go(r)),
+        Expr::Implies(l, r) => Expr::Implies(go(l), go(r)),
+        Expr::LeadsTo(l, r) => Expr::LeadsTo(go(l), go(r)),
+        Expr::If(c, t, e) => Expr::If(go(c), go(t), go(e)),
+        Expr::Forall(v, d, b) => Expr::Forall(v.clone(), go(d), go(b)),
+        Expr::Exists(v, d, b) => Expr::Exists(v.clone(), go(d), go(b)),
+        Expr::BoxAction(a, v) => Expr::BoxAction(go(a), go(v)),
+        other => other.clone(),
     }
 }
 
@@ -485,7 +589,7 @@ mod tests {
         let fixture = Fixture::new();
         let model = fixture.model();
         let action = formula("x = 1 /\\ x' = 2");
-        let subscript: Arc<str> = Arc::from("x");
+        let subscript = Box::new(Expr::Var(Arc::from("x")));
         let flicker = lasso(&[0, 1], 0);
         let weak = Expr::WeakFairness(subscript.clone(), Box::new(action.clone()));
         let strong = Expr::StrongFairness(subscript, Box::new(action));

@@ -130,21 +130,24 @@ impl Parser {
                 self.advance();
                 Ok(Expr::OldValue)
             }
-            Token::Ident(name) if name.starts_with("WF_") => {
-                let var: Arc<str> = name[3..].into();
+            Token::Ident(name) if name.starts_with("WF_") || name.starts_with("SF_") => {
+                let weak = name.starts_with("WF_");
+                let named: Arc<str> = name[3..].into();
                 self.advance();
+                let subscript = if named.is_empty() {
+                    self.parse_subscript()?
+                } else {
+                    Expr::Var(named)
+                };
                 self.expect(Token::LParen)?;
                 let action = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::WeakFairness(var, Box::new(action)))
-            }
-            Token::Ident(name) if name.starts_with("SF_") => {
-                let var: Arc<str> = name[3..].into();
-                self.advance();
-                self.expect(Token::LParen)?;
-                let action = self.parse_expr()?;
-                self.expect(Token::RParen)?;
-                Ok(Expr::StrongFairness(var, Box::new(action)))
+                let (subscript, action) = (Box::new(subscript), Box::new(action));
+                Ok(if weak {
+                    Expr::WeakFairness(subscript, action)
+                } else {
+                    Expr::StrongFairness(subscript, action)
+                })
             }
             Token::Ident(name) => {
                 self.advance();
@@ -438,13 +441,25 @@ impl Parser {
         }
     }
 
+    /// The subscript after `_` in `[A]_v`, `<<A>>_v`, `WF_v` and `SF_v`: a variable
+    /// or definition name, or a parenthesized expression, tuple or record.
+    pub(super) fn parse_subscript(&mut self) -> Result<Expr> {
+        match self.peek() {
+            Token::Ident(_) => Ok(Expr::Var(self.expect_ident()?)),
+            _ => self.parse_primary(),
+        }
+    }
+
     pub(super) fn parse_tuple(&mut self) -> Result<Expr> {
         if *self.peek() == Token::RAngle {
             self.advance();
             if *self.peek() == Token::Underscore {
                 self.advance();
-                let var = self.expect_ident()?;
-                return Ok(Expr::DiamondAction(Box::new(Expr::TupleLit(vec![])), var));
+                let subscript = self.parse_subscript()?;
+                return Ok(Expr::DiamondAction(
+                    Box::new(Expr::TupleLit(vec![])),
+                    Box::new(subscript),
+                ));
             }
             return Ok(Expr::TupleLit(vec![]));
         }
@@ -454,8 +469,8 @@ impl Parser {
             self.advance();
             if *self.peek() == Token::Underscore {
                 self.advance();
-                let var = self.expect_ident()?;
-                return Ok(Expr::DiamondAction(Box::new(first), var));
+                let subscript = self.parse_subscript()?;
+                return Ok(Expr::DiamondAction(Box::new(first), Box::new(subscript)));
             }
             return Ok(Expr::TupleLit(vec![first]));
         }
@@ -468,8 +483,11 @@ impl Parser {
         self.expect(Token::RAngle)?;
         if *self.peek() == Token::Underscore {
             self.advance();
-            let var = self.expect_ident()?;
-            return Ok(Expr::DiamondAction(Box::new(Expr::TupleLit(elems)), var));
+            let subscript = self.parse_subscript()?;
+            return Ok(Expr::DiamondAction(
+                Box::new(Expr::TupleLit(elems)),
+                Box::new(subscript),
+            ));
         }
         Ok(Expr::TupleLit(elems))
     }

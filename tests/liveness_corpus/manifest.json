@@ -16,7 +16,7 @@
     "tla_rs_now": "ok",
     "tla_rs_now_kind": null,
     "xfail_until_phase": null,
-    "note": "<>P is checked as []<>P: the fair behavior 0,1,2,2,... visits x=1 once, but tla-rs flags the x=2 terminal cycle as a violation (false alarm)."
+    "note": "Fixed in 0.10.2. Before: <>P is checked as []<>P: the fair behavior 0,1,2,2,... visits x=1 once, but tla-rs flags the x=2 terminal cycle as a violation (false alarm)."
   },
   {
     "id": "C2",
@@ -51,10 +51,10 @@
       "exit_code": 0,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "error",
+    "tla_rs_now": "ok",
     "tla_rs_now_kind": null,
-    "xfail_until_phase": "1a",
-    "note": "State-level [](P) PROPERTY is rejected with an eval error ('temporal operator [] reached eval'); TLC checks it as an invariant."
+    "xfail_until_phase": null,
+    "note": "Fixed in 0.11.0. Before: State-level [](P) PROPERTY is rejected with an eval error ('temporal operator [] reached eval'); TLC checks it as an invariant."
   },
   {
     "id": "C4",
@@ -89,10 +89,10 @@
       "exit_code": 12,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "error",
-    "tla_rs_now_kind": null,
-    "xfail_until_phase": "1a",
-    "note": "TLC checks the state-level [](x<2) PROPERTY as an invariant (reports 'Invariant PropC5 is violated', exit 12); tla-rs rejects it with an eval error. TLC classifies this as an invariant violation, not a temporal one."
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": null,
+    "note": "Fixed in 0.11.0. Before: TLC checks the state-level [](x<2) PROPERTY as an invariant (reports 'Invariant PropC5 is violated', exit 12); tla-rs rejects it with an eval error. TLC classifies this as an invariant violation, not a temporal one."
   },
   {
     "id": "C6",
@@ -109,9 +109,9 @@
       "version": "2026.09.23.154203"
     },
     "tla_rs_now": "violated",
-    "tla_rs_now_kind": "liveness",
-    "xfail_until_phase": "1a",
-    "note": "A state-level PROPERTY is checked by TLC on initial states only ('violated by the initial state'); tla-rs reports the right verdict for the wrong reason: it checks x=1 as a liveness []<>(x=1) obligation (kind liveness, expected init)."
+    "tla_rs_now_kind": "init",
+    "xfail_until_phase": null,
+    "note": "Fixed in 0.11.0. Before: A state-level PROPERTY is checked by TLC on initial states only ('violated by the initial state'); tla-rs reports the right verdict for the wrong reason: it checks x=1 as a liveness []<>(x=1) obligation (kind liveness, expected init)."
   },
   {
     "id": "C7",
@@ -225,7 +225,7 @@
     "tla_rs_now": "ok",
     "tla_rs_now_kind": null,
     "xfail_until_phase": null,
-    "note": "\\A i : <>(x=i) expands to per-element <>P obligations, each checked as []<>P; false alarm on the x=2 terminal cycle."
+    "note": "Fixed in 0.10.2. Before: \\A i : <>(x=i) expands to per-element <>P obligations, each checked as []<>P; false alarm on the x=2 terminal cycle."
   },
   {
     "id": "C13",
@@ -244,7 +244,7 @@
     "tla_rs_now": "violated",
     "tla_rs_now_kind": "liveness",
     "xfail_until_phase": null,
-    "note": "\\E i : []<>(x=i) is dropped with a warning ('existential temporal ... dropping'), so tla-rs passes a property TLC shows violated (false pass)."
+    "note": "Fixed in 0.10.2. Before: \\E i : []<>(x=i) is dropped with a warning ('existential temporal ... dropping'), so tla-rs passes a property TLC shows violated (false pass)."
   },
   {
     "id": "C14",
@@ -320,7 +320,7 @@
     "tla_rs_now": "ok",
     "tla_rs_now_kind": null,
     "xfail_until_phase": null,
-    "note": "<>(x=0) holds at the initial state, but tla-rs checks []<>(x=0) and flags the x=2 cycle (false alarm)."
+    "note": "Fixed in 0.10.2. Before: <>(x=0) holds at the initial state, but tla-rs checks []<>(x=0) and flags the x=2 cycle (false alarm)."
   },
   {
     "id": "C18",
@@ -358,7 +358,7 @@
     "tla_rs_now": "violated",
     "tla_rs_now_kind": "liveness",
     "xfail_until_phase": null,
-    "note": "Issue #120 probe: P=(x=0) holds only before the fair x=1 cycle, so the SCC-local ~> check misses the violation (false pass)."
+    "note": "Fixed in 0.10.2. Before: Issue #120 probe: P=(x=0) holds only before the fair x=1 cycle, so the SCC-local ~> check misses the violation (false pass)."
   },
   {
     "id": "C20",
@@ -377,7 +377,7 @@
     "tla_rs_now": "violated",
     "tla_rs_now_kind": "liveness",
     "xfail_until_phase": null,
-    "note": "[](P => <>Q) is rejected with an eval error instead of being treated as P ~> Q."
+    "note": "Fixed in 0.10.2. Before: [](P => <>Q) is rejected with an eval error instead of being treated as P ~> Q."
   },
   {
     "id": "C21",
@@ -491,7 +491,7 @@
     "tla_rs_now": "ok",
     "tla_rs_now_kind": null,
     "xfail_until_phase": null,
-    "note": "[]((x=0) => <>(x=1)) is rejected with an eval error."
+    "note": "Fixed in 0.10.2. Before: []((x=0) => <>(x=1)) is rejected with an eval error."
   },
   {
     "id": "C27",
@@ -586,7 +586,7 @@
     "tla_rs_now": "violated",
     "tla_rs_now_kind": "liveness",
     "xfail_until_phase": null,
-    "note": "SF_x(A) is judged on the whole SCC {0,1,2}; the fair sub-cycle 0<->2 (where A is never enabled) is never examined (false pass)."
+    "note": "Fixed in 0.10.2. Before: SF_x(A) is judged on the whole SCC {0,1,2}; the fair sub-cycle 0<->2 (where A is never enabled) is never examined (false pass)."
   },
   {
     "id": "C32",
@@ -643,7 +643,7 @@
     "tla_rs_now": "violated",
     "tla_rs_now_kind": "liveness",
     "xfail_until_phase": null,
-    "note": "The WF_x subscript is ignored: <<A>>_x is never enabled because A leaves x unchanged, so WF_x(A) is vacuous and stuttering at y=0 is fair; tla-rs treats it as WF_vars(A) (false pass)."
+    "note": "Fixed in 0.10.2. Before: The WF_x subscript is ignored: <<A>>_x is never enabled because A leaves x unchanged, so WF_x(A) is vacuous and stuttering at y=0 is fair; tla-rs treats it as WF_vars(A) (false pass)."
   },
   {
     "id": "C35",
@@ -813,8 +813,8 @@
     },
     "tla_rs_now": "violated",
     "tla_rs_now_kind": "liveness",
-    "xfail_until_phase": "1a",
-    "note": "Temporal conjuncts of SPECIFICATION are assumptions in TLC; tla-rs extracts <>(x=2) from SpecA as a property to check and reports a false alarm."
+    "xfail_until_phase": "2",
+    "note": "Temporal conjuncts of SPECIFICATION are assumptions in TLC. tla-rs no longer checks <>(x=2) from SpecA as a property, but it does not yet restrict the checked behaviors by it either, so PROPERTY <>(x=2) reports a stuttering-at-0 behavior the assumption excludes (false alarm, warned at load time)."
   },
   {
     "id": "C41a",
@@ -830,10 +830,10 @@
       "exit_code": 0,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "error",
+    "tla_rs_now": "ok",
     "tla_rs_now_kind": null,
-    "xfail_until_phase": "1a",
-    "note": "[][A]_v PROPERTY is an action property in TLC; tla-rs rejects it with an eval error."
+    "xfail_until_phase": null,
+    "note": "Fixed in 0.11.0. Before: [][A]_v PROPERTY is an action property in TLC; tla-rs rejects it with an eval error."
   },
   {
     "id": "C41b",
@@ -849,10 +849,10 @@
       "exit_code": 13,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "error",
-    "tla_rs_now_kind": null,
-    "xfail_until_phase": "1a",
-    "note": "[][A]_v PROPERTY is an action property in TLC ('Action property PropC41 is violated'); tla-rs rejects it with an eval error."
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "action",
+    "xfail_until_phase": null,
+    "note": "Fixed in 0.11.0. Before: [][A]_v PROPERTY is an action property in TLC ('Action property PropC41 is violated'); tla-rs rejects it with an eval error."
   },
   {
     "id": "C42",
@@ -928,7 +928,7 @@
     "tla_rs_now": "violated",
     "tla_rs_now_kind": "liveness",
     "xfail_until_phase": null,
-    "note": "SPECIFICATION Spec has no fairness, but the parser extracts WF_x(Step) from the sibling definition FairSpec (every definition ending in Spec) and tla-rs applies it (false pass)."
+    "note": "Fixed in 0.10.2. Before: SPECIFICATION Spec has no fairness, but the parser extracts WF_x(Step) from the sibling definition FairSpec (every definition ending in Spec) and tla-rs applies it (false pass)."
   },
   {
     "id": "C46",
@@ -947,7 +947,7 @@
     "tla_rs_now": "violated",
     "tla_rs_now_kind": "liveness",
     "xfail_until_phase": null,
-    "note": "INIT/NEXT cfg: TLC checks the property with no fairness at all; tla-rs applies WF_x(Step) extracted by the parser from FairSpec (false pass)."
+    "note": "Fixed in 0.10.2. Before: INIT/NEXT cfg: TLC checks the property with no fairness at all; tla-rs applies WF_x(Step) extracted by the parser from FairSpec (false pass)."
   },
   {
     "id": "C47",
@@ -982,10 +982,10 @@
       "exit_code": 12,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "error",
-    "tla_rs_now_kind": null,
-    "xfail_until_phase": "1a",
-    "note": "TLC checks the [](x < 5) conjunct as an implied invariant. tla-rs 0.10.1 silently dropped that conjunct from the extracted property (false pass); it is now a config-time error until PROPERTY conjuncts are classified like TLC."
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": null,
+    "note": "TLC checks the [](x < 5) conjunct as an implied invariant. tla-rs 0.10.1 silently dropped that conjunct (false pass) and 0.10.2 rejected it as a config error; since 0.11.0 it is checked as an invariant named after the property."
   },
   {
     "id": "C49",
@@ -1001,10 +1001,10 @@
       "exit_code": 12,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "error",
-    "tla_rs_now_kind": null,
-    "xfail_until_phase": "1a",
-    "note": "Same as C48 with a <>P conjunct: the [](x < 5) conjunct used to be dropped silently (false pass); now a config-time error."
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": null,
+    "note": "Same as C48 with a <>P conjunct: dropped silently in 0.10.1, a config error in 0.10.2, checked as an invariant since 0.11.0."
   },
   {
     "id": "C50",
@@ -1100,5 +1100,1221 @@
     "tla_rs_now_kind": "liveness",
     "xfail_until_phase": "2",
     "note": "Disjunction of properties is checked as the conjunction of its disjuncts: a false alarm, never a false pass."
+  },
+  {
+    "id": "C55",
+    "spec": "specs/Classify.tla",
+    "cfg": "cfgs/C55.cfg",
+    "specification": "Spec",
+    "property": "QInvOk",
+    "property_text": "\\A i \\in {1, 2} : [](x # i + 5)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "A quantified [] state predicate is an implied invariant: TLC expands the bounded \\A."
+  },
+  {
+    "id": "C56",
+    "spec": "specs/Classify.tla",
+    "cfg": "cfgs/C56.cfg",
+    "specification": "Spec",
+    "property": "QInvBad",
+    "property_text": "\\A i \\in {1, 2} : [](x # i)",
+    "expected": "violated",
+    "kind": "invariant",
+    "tlc": {
+      "verdict_raw": "Error: Invariant line 12, col 30 to line 12, col 38 of module Classify is violated.",
+      "exit_code": 12,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": null,
+    "note": "The violated instance of a quantified [] state predicate is reported as an invariant violation."
+  },
+  {
+    "id": "C57",
+    "spec": "specs/Classify.tla",
+    "cfg": "cfgs/C57.cfg",
+    "specification": "Spec",
+    "property": "ActVarsOk",
+    "property_text": "[][x' >= x /\\ y' >= y]_vars",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Action property with a tuple subscript defined as vars == <<x, y>>."
+  },
+  {
+    "id": "C58",
+    "spec": "specs/Classify.tla",
+    "cfg": "cfgs/C58.cfg",
+    "specification": "Spec",
+    "property": "ActVarsBad",
+    "property_text": "[][y' = y]_vars",
+    "expected": "violated",
+    "kind": "action",
+    "tlc": {
+      "verdict_raw": "Error: Action property ActVarsBad is violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "action",
+    "xfail_until_phase": null,
+    "note": "The Swap step changes y and vars, so [y' = y]_vars fails on it."
+  },
+  {
+    "id": "C59",
+    "spec": "specs/Classify.tla",
+    "cfg": "cfgs/C59.cfg",
+    "specification": "Spec",
+    "property": "InitOr",
+    "property_text": "x = 0 \\/ x = 5",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "A state-level disjunction is one predicate checked on the initial states, not split into obligations."
+  },
+  {
+    "id": "C60",
+    "spec": "specs/Classify.tla",
+    "cfg": "cfgs/C60.cfg",
+    "specification": "Spec",
+    "property": "InitOrBad",
+    "property_text": "x = 3 \\/ y = 1",
+    "expected": "violated",
+    "kind": "init",
+    "tlc": {
+      "verdict_raw": "Error: Property InitOrBad is violated by the initial state:",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "init",
+    "xfail_until_phase": null,
+    "note": "State-level disjunction false on the initial state; later states where y = 1 do not matter."
+  },
+  {
+    "id": "C61",
+    "spec": "specs/Classify.tla",
+    "cfg": "cfgs/C61.cfg",
+    "specification": "Spec",
+    "property": "QActBad",
+    "property_text": "\\A i \\in {0, 1} : [][x' # i + 2]_x",
+    "expected": "violated",
+    "kind": "action",
+    "tlc": {
+      "verdict_raw": "Error: Action property line 17, col 30 to line 17, col 45 of module Classify is violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "action",
+    "xfail_until_phase": null,
+    "note": "A quantified [][A]_v is an action property; the x: 1 -> 2 step breaks the i = 0 instance."
+  },
+  {
+    "id": "C62",
+    "spec": "specs/Classify.tla",
+    "cfg": "cfgs/C62.cfg",
+    "specification": "Spec",
+    "property": "MixLiveBad",
+    "property_text": "[](x < 3) /\\ <>(y = 2)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property MixLiveBad was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "The implied invariant holds, so the violation comes from the <>(y = 2) conjunct."
+  },
+  {
+    "id": "C63",
+    "spec": "specs/Classify.tla",
+    "cfg": "cfgs/C63.cfg",
+    "specification": "Spec",
+    "property": "MixOk",
+    "property_text": "[](y < 2) /\\ [][x' >= x]_x /\\ <>(y = 1) /\\ x = 0",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "All four TLC property classes in one PROPERTY: invariant, action, liveness and initial-state predicate."
+  },
+  {
+    "id": "C64",
+    "spec": "specs/Constrained.tla",
+    "cfg": "cfgs/C64.cfg",
+    "specification": "Spec",
+    "property": "ActBelow2",
+    "property_text": "[][x' < 2]_x",
+    "expected": "violated",
+    "kind": "action",
+    "tlc": {
+      "verdict_raw": "Error: Action property ActBelow2 is violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "action",
+    "xfail_until_phase": null,
+    "note": "TLC checks an action property on every generated transition, including one into a state outside the CONSTRAINT (x: 1 -> 2)."
+  },
+  {
+    "id": "C65",
+    "spec": "specs/Constrained.tla",
+    "cfg": "cfgs/C65.cfg",
+    "specification": "Spec",
+    "property": "AlwaysBelow2",
+    "property_text": "[](x < 2)",
+    "expected": "violated",
+    "kind": "invariant",
+    "tlc": {
+      "verdict_raw": "Error: Invariant AlwaysBelow2 is violated.",
+      "exit_code": 12,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": null,
+    "note": "A state outside the CONSTRAINT (x = 2) is still checked against the invariants, just not explored further."
+  },
+  {
+    "id": "C66",
+    "spec": "specs/Constrained.tla",
+    "cfg": "cfgs/C66.cfg",
+    "specification": "Spec2",
+    "property": "StartsAtZero",
+    "property_text": "x = 0",
+    "expected": "violated",
+    "kind": "init",
+    "tlc": {
+      "verdict_raw": "Error: Property StartsAtZero is violated by the initial state:",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "init",
+    "xfail_until_phase": null,
+    "note": "The initial state x = 7 is outside the CONSTRAINT but is still checked against the initial-state property."
+  },
+  {
+    "id": "C67",
+    "spec": "specs/Constrained.tla",
+    "cfg": "cfgs/C67.cfg",
+    "specification": "Spec",
+    "property": "AlwaysBelow3",
+    "property_text": "[](x < 3)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Control for C65: the excluded state x = 2 satisfies the invariant and x = 3 is never generated because x = 2 is not explored."
+  },
+  {
+    "id": "C68",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C68.cfg",
+    "specification": "Spec",
+    "property": "PSafeQ",
+    "property_text": "\\A i \\in {7, 8} : Safe(i)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "A parameterized temporal operator applied under \\A is inlined before classification: an implied invariant."
+  },
+  {
+    "id": "C69",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C69.cfg",
+    "specification": "Spec",
+    "property": "PSafeBad",
+    "property_text": "Safe(2)",
+    "expected": "violated",
+    "kind": "invariant",
+    "tlc": {
+      "verdict_raw": "Error: Invariant Safe is violated.",
+      "exit_code": 12,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": null,
+    "note": "Safe(2) inlines to [](x # 2), an implied invariant reported under the operator name by TLC."
+  },
+  {
+    "id": "C70",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C70.cfg",
+    "specification": "Spec",
+    "property": "PReachQ",
+    "property_text": "\\A i \\in S : Reach(i)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Parameterized <>-operator under \\A, expanded per element."
+  },
+  {
+    "id": "C71",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C71.cfg",
+    "specification": "Spec",
+    "property": "PReach3",
+    "property_text": "Reach(3)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PReach3 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "Reach(3) inlines to <>(x = 3), never reached."
+  },
+  {
+    "id": "C72",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C72.cfg",
+    "specification": "Spec",
+    "property": "PNotEv",
+    "property_text": "~<>(x = 9)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "~<>P is normalized to [](~P)."
+  },
+  {
+    "id": "C73",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C73.cfg",
+    "specification": "Spec",
+    "property": "PNotEvBad",
+    "property_text": "~<>(x = 2)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PNotEvBad was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": "2",
+    "note": "~<>(x = 2) is normalized to [](x # 2); tla-rs reports the violation as an invariant violation while TLC reports a temporal property violation (same verdict, different kind)."
+  },
+  {
+    "id": "C74",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C74.cfg",
+    "specification": "Spec",
+    "property": "PNotBox",
+    "property_text": "~[](x < 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "~[]P is normalized to <>(~P)."
+  },
+  {
+    "id": "C75",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C75.cfg",
+    "specification": "Spec",
+    "property": "PNotBoxEv",
+    "property_text": "~[]<>(x = 1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "~[]<>P is normalized to <>[](~P)."
+  },
+  {
+    "id": "C76",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C76.cfg",
+    "specification": "Spec",
+    "property": "PLet",
+    "property_text": "LET k == 2 IN <>(x = k)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "A LET value is substituted into the temporal body."
+  },
+  {
+    "id": "C77",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C77.cfg",
+    "specification": "Spec",
+    "property": "PLetOp",
+    "property_text": "LET R(i) == <>(x = i) IN R(3)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PLetOp was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "A LET-defined temporal operator is inlined."
+  },
+  {
+    "id": "C78",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C78.cfg",
+    "specification": "Spec",
+    "property": "PIf",
+    "property_text": "IF 1 = 1 THEN [](x < 1) ELSE TRUE",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PIf was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": "2",
+    "note": "IF with a constant condition becomes guarded conjuncts; tla-rs reports [](x < 1) as an invariant violation while TLC reports a temporal property violation (same verdict, different kind)."
+  },
+  {
+    "id": "C79",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C79.cfg",
+    "specification": "Spec",
+    "property": "PIfElse",
+    "property_text": "IF 1 = 2 THEN [](x < 1) ELSE <>(x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "IF with a constant false condition selects the ELSE formula."
+  },
+  {
+    "id": "C80",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C80.cfg",
+    "specification": "Spec",
+    "property": "PGuardBad",
+    "property_text": "\\A i \\in S : (i = 1 => <>(x = 9))",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PGuardBad was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "A constant antecedent under \\A is pushed under <>: the i = 1 instance requires <>(x = 9)."
+  },
+  {
+    "id": "C81",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C81.cfg",
+    "specification": "Spec",
+    "property": "PGuardOk",
+    "property_text": "\\A i \\in S : (i = 1 => <>(x = 2))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Same with a reachable target."
+  },
+  {
+    "id": "C82",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C82.cfg",
+    "specification": "Spec",
+    "property": "PBoxBox",
+    "property_text": "[][](x < 5)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "[][]P collapses to []P."
+  },
+  {
+    "id": "C83",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C83.cfg",
+    "specification": "Spec",
+    "property": "PEvEv",
+    "property_text": "<><>(x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "<><>P collapses to <>P."
+  },
+  {
+    "id": "C84",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C84.cfg",
+    "specification": "Spec",
+    "property": "PTuple",
+    "property_text": "\\A <<i, j>> \\in S \\X S : [](x # i + j + 10)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Tuple binder \\A <<i, j>> \\in S \\X S over an implied invariant."
+  },
+  {
+    "id": "C85",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C85.cfg",
+    "specification": "Spec",
+    "property": "PTupleBad",
+    "property_text": "\\A <<i, j>> \\in S \\X S : [](x # i + j)",
+    "expected": "violated",
+    "kind": "invariant",
+    "tlc": {
+      "verdict_raw": "Error: Invariant line 31, col 39 to line 31, col 51 of module Shapes is violated.",
+      "exit_code": 12,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": null,
+    "note": "Tuple binder with a violated instance."
+  },
+  {
+    "id": "C86",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C86.cfg",
+    "specification": "Spec",
+    "property": "PSubParen",
+    "property_text": "[][x' >= x]_(x)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Parenthesized subscript [A]_(x)."
+  },
+  {
+    "id": "C87",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C87.cfg",
+    "specification": "Spec",
+    "property": "PSubTupleBad",
+    "property_text": "[][y' = y + 1]_<<x>>",
+    "expected": "violated",
+    "kind": "action",
+    "tlc": {
+      "verdict_raw": "Error: Action property PSubTupleBad is violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "action",
+    "xfail_until_phase": null,
+    "note": "Tuple subscript [A]_<<x>>."
+  },
+  {
+    "id": "C88",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C88.cfg",
+    "specification": "Spec",
+    "property": "PSubRecordOk",
+    "property_text": "[][x' = x + 1]_[a |-> x]",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Record subscript [A]_[a |-> x]."
+  },
+  {
+    "id": "C89",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C89.cfg",
+    "specification": "Spec",
+    "property": "PSubExprBad",
+    "property_text": "[][x' = x]_(x + y)",
+    "expected": "violated",
+    "kind": "action",
+    "tlc": {
+      "verdict_raw": "Error: Action property PSubExprBad is violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "action",
+    "xfail_until_phase": null,
+    "note": "Expression subscript [A]_(x + y)."
+  },
+  {
+    "id": "C90",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C90.cfg",
+    "specification": "Spec",
+    "property": "PEnabledInit",
+    "property_text": "ENABLED Step",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED in an initial-state property."
+  },
+  {
+    "id": "C91",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C91.cfg",
+    "specification": "Spec",
+    "property": "PEnabledAct",
+    "property_text": "[][ENABLED Step]_x",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED inside an action property."
+  },
+  {
+    "id": "C92",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C92.cfg",
+    "specification": "Spec",
+    "property": "PEnabledActBad",
+    "property_text": "[][ENABLED Step]_y",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED inside an action property whose subscript never changes."
+  },
+  {
+    "id": "C93",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C93.cfg",
+    "specification": "Spec",
+    "property": "PStateImpl",
+    "property_text": "(x = 0) => [](x < 2)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PStateImpl was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "A temporal formula guarded by a state predicate only constrains behaviors starting in that state; not representable before the general LTL engine (config error)."
+  },
+  {
+    "id": "C94",
+    "spec": "specs/Shapes.tla",
+    "cfg": "cfgs/C94.cfg",
+    "specification": "SpecT",
+    "property": "PReachQ",
+    "property_text": "\\A i \\in S : Reach(i)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Tuple fairness subscript WF_<<x, y>>(Step)."
+  },
+  {
+    "id": "C95",
+    "spec": "specs/ConLive.tla",
+    "cfg": "cfgs/C95.cfg",
+    "specification": "Spec",
+    "property": "P",
+    "property_text": "<>(x = 3)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "WF_vars(Inc) is enabled at x = 1 through a step into a state outside the CONSTRAINT, so stalling there is unfair (TLC: the constraint prunes behaviors, not enabledness)."
+  },
+  {
+    "id": "C96",
+    "spec": "specs/ConLive.tla",
+    "cfg": "cfgs/C96.cfg",
+    "specification": "SpecS",
+    "property": "P",
+    "property_text": "<>(x = 3)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Same as the WF case under SF."
+  },
+  {
+    "id": "C97",
+    "spec": "specs/ConLive.tla",
+    "cfg": "cfgs/C97.cfg",
+    "specification": "SpecNF",
+    "property": "P",
+    "property_text": "<>(x = 3)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property P was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "Without fairness the behavior may stall at x = 0."
+  },
+  {
+    "id": "C98",
+    "spec": "specs/ConLive.tla",
+    "cfg": "cfgs/C98.cfg",
+    "specification": "SpecFlip",
+    "property": "P",
+    "property_text": "<>(x = 3)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property P was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "Fairness on Flip does not force Inc."
+  },
+  {
+    "id": "C99",
+    "spec": "specs/ConLive.tla",
+    "cfg": "cfgs/C99.cfg",
+    "specification": "SpecFlip",
+    "property": "PY",
+    "property_text": "[]<>(y = 1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "WF_vars(Flip) forces y to toggle."
+  },
+  {
+    "id": "C100",
+    "spec": "specs/ConLive.tla",
+    "cfg": "cfgs/C100.cfg",
+    "specification": "Spec",
+    "property": "PY",
+    "property_text": "[]<>(y = 1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "WF_vars(Inc) stays enabled at x = 1 through the step out of the CONSTRAINT, so every behavior that remains inside it is unfair; no fair behavior is left to violate []<>(y = 1)."
+  },
+  {
+    "id": "C101",
+    "spec": "specs/ConLive.tla",
+    "cfg": "cfgs/C101.cfg",
+    "specification": "SpecNF",
+    "property": "PX1",
+    "property_text": "<>(x = 1)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PX1 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "Without fairness x may stay 0."
+  },
+  {
+    "id": "C102",
+    "spec": "specs/ConLive.tla",
+    "cfg": "cfgs/C102.cfg",
+    "specification": "Spec",
+    "property": "PX1",
+    "property_text": "<>(x = 1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "WF_vars(Inc) forces the step to x = 1 inside the constraint."
+  },
+  {
+    "id": "C103",
+    "spec": "specs/Guards.tla",
+    "cfg": "cfgs/C103.cfg",
+    "specification": "Spec",
+    "property": "GetLevel1",
+    "property_text": "TLCGet(\"level\") = 1 => [](x < 1)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property GetLevel1 was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "TLCGet(\"level\") depends on the behavior, so the guard cannot be pushed under []; a state-dependent guard is a config error until the general LTL engine (it used to be pushed as if constant: false pass)."
+  },
+  {
+    "id": "C104",
+    "spec": "specs/Guards.tla",
+    "cfg": "cfgs/C104.cfg",
+    "specification": "Spec",
+    "property": "GetDistinct",
+    "property_text": "TLCGet(\"distinct\") = 1 => <>(x = 9)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal properties were violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "Same with TLCGet(\"distinct\")."
+  },
+  {
+    "id": "C105",
+    "spec": "specs/Guards.tla",
+    "cfg": "cfgs/C105.cfg",
+    "specification": "Spec",
+    "property": "GetIf",
+    "property_text": "IF TLCGet(\"level\") = 1 THEN [](x < 1) ELSE TRUE",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property GetIf was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "IF on a TLCGet condition: a state-dependent guard (config error until phase 2)."
+  },
+  {
+    "id": "C106",
+    "spec": "specs/Guards.tla",
+    "cfg": "cfgs/C106.cfg",
+    "specification": "Spec",
+    "property": "DomY",
+    "property_text": "\\A i \\in {y} : [](x # i + 1)",
+    "expected": "tlc_unsupported",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Error: TLC cannot handle the temporal formula line 17, col 9 to line 17, col 36 of module Guards:",
+      "exit_code": 255,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "A quantifier over a state-dependent set around a temporal formula: TLC rejects it, tla-rs rejects it too (it used to check the formula per state: false pass)."
+  },
+  {
+    "id": "C107",
+    "spec": "specs/Guards.tla",
+    "cfg": "cfgs/C107.cfg",
+    "specification": "Spec",
+    "property": "NegIf",
+    "property_text": "~(IF N = 2 THEN [](x < 0) ELSE [](x < 10))",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property NegIf was violated.",
+      "exit_code": 13,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "~(IF c THEN A ELSE B) with a constant c is normalized to IF c THEN ~A ELSE ~B (it used to become an over-approximated disjunction)."
+  },
+  {
+    "id": "C108",
+    "spec": "specs/Guards.tla",
+    "cfg": "cfgs/C108.cfg",
+    "specification": "Spec",
+    "property": "NegIfBad",
+    "property_text": "~(IF N = 2 THEN [](x < 0) ELSE [](x < 1))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Same, with the selected branch satisfied."
+  },
+  {
+    "id": "C109",
+    "spec": "specs/Guards.tla",
+    "cfg": "cfgs/C109.cfg",
+    "specification": "Spec",
+    "property": "LetOp",
+    "property_text": "LET F(v) == v + 1 IN <>(x = F(1))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "A LET operator used inside a state predicate under <> is re-attached to that predicate."
+  },
+  {
+    "id": "C110",
+    "spec": "specs/Guards.tla",
+    "cfg": "cfgs/C110.cfg",
+    "specification": "Spec",
+    "property": "LetOpBad",
+    "property_text": "LET F(v) == v + 1 IN [](x < F(1))",
+    "expected": "violated",
+    "kind": "invariant",
+    "tlc": {
+      "verdict_raw": "Error: Invariant LetOpBad is violated.",
+      "exit_code": 12,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": null,
+    "note": "Same under []."
+  },
+  {
+    "id": "C111",
+    "spec": "specs/Guards.tla",
+    "cfg": "cfgs/C111.cfg",
+    "specification": "Spec",
+    "property": "LetOpAct",
+    "property_text": "LET F(v) == v + 1 IN [][x' = F(x) \\/ x' = x]_x",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Same inside [][A]_v."
+  },
+  {
+    "id": "C112",
+    "spec": "specs/Guards.tla",
+    "cfg": "cfgs/C112.cfg",
+    "specification": "Spec",
+    "property": "LetOpLeads",
+    "property_text": "LET F(v) == v + 1 IN (x = 0) ~> (x = F(1))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Same inside ~>."
+  },
+  {
+    "id": "C113",
+    "spec": "specs/Guards.tla",
+    "cfg": "cfgs/C113.cfg",
+    "specification": "Spec",
+    "property": "LetOpQ",
+    "property_text": "LET F(v) == v + 1 IN \\A i \\in 0..1 : <>(x = F(i))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Same under \\A."
+  },
+  {
+    "id": "C114",
+    "spec": "specs/Guards.tla",
+    "cfg": "cfgs/C114.cfg",
+    "specification": "Spec",
+    "property": "LetOpNested",
+    "property_text": "P(1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "A LET operator inside a parameterized operator."
+  },
+  {
+    "id": "C115",
+    "spec": "specs/Disj.tla",
+    "cfg": "cfgs/C115.cfg",
+    "specification": "Spec",
+    "property": "StateOrLive",
+    "property_text": "x = 1 \\/ <>(x = 1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "A disjunction with a state-level disjunct: splitting it made x = 1 an initial-state obligation (false violation found in review); now a config error until the general LTL engine."
+  },
+  {
+    "id": "C116",
+    "spec": "specs/Disj.tla",
+    "cfg": "cfgs/C116.cfg",
+    "specification": "Spec",
+    "property": "BoxOrBox",
+    "property_text": "[](x < 5) \\/ [](x = 7)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "[]P \\/ []Q: splitting it made both invariants; now a config error until the general LTL engine."
+  },
+  {
+    "id": "C117",
+    "spec": "specs/Disj.tla",
+    "cfg": "cfgs/C117.cfg",
+    "specification": "Spec",
+    "property": "NegAnd",
+    "property_text": "~((x = 0) /\\ <>[](x = 0))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "~(P /\\ <>[]Q) normalizes to ~P \\/ []<>~Q, a disjunction with a state-level disjunct; now a config error until the general LTL engine."
+  },
+  {
+    "id": "C118",
+    "spec": "specs/Disj.tla",
+    "cfg": "cfgs/C118.cfg",
+    "specification": "Spec",
+    "property": "LiveOrLive",
+    "property_text": "<>(x = 1) \\/ <>(x = 7)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.09.23.154203"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "2",
+    "note": "A disjunction of liveness properties is still checked as their conjunction (documented over-approximation): a false alarm, never a false pass."
   }
 ]

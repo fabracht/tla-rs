@@ -217,6 +217,8 @@ impl CheckSpecOutput {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum CheckOutcome {
     Ok {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        properties_checked: Vec<String>,
         stats: CheckStatsSummary,
     },
     InvariantViolation {
@@ -236,6 +238,13 @@ pub enum CheckOutcome {
         cycle: Vec<StateSnapshot>,
         stats: CheckStatsSummary,
     },
+    PropertyViolation {
+        property: String,
+        kind: PropertyViolationKindOutput,
+        trace: Vec<StateSnapshot>,
+        actions: Vec<Option<String>>,
+        stats: CheckStatsSummary,
+    },
     LimitReached {
         limit: LimitKind,
         stats: CheckStatsSummary,
@@ -246,6 +255,16 @@ pub enum CheckOutcome {
         #[serde(skip_serializing_if = "Option::is_none")]
         partial_stats: Option<CheckStatsSummary>,
     },
+}
+
+/// Which safety part of a cfg `PROPERTY` failed: a state predicate on an initial
+/// state (`init`) or a `[][A]_v` conjunct on a transition (`action`). A `[]P`
+/// conjunct fails as an `invariant_violation` naming the property.
+#[derive(Serialize, JsonSchema, Debug, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum PropertyViolationKindOutput {
+    Init,
+    Action,
 }
 
 #[derive(Serialize, JsonSchema, Debug, Clone, Copy)]
@@ -281,6 +300,24 @@ pub struct CheckStatsSummary {
     pub property_stats: Vec<PropertySummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub violation_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub violations: Vec<ViolationSummary>,
+}
+
+/// Violations collected under `continue_on_violation`, counted per invariant or
+/// per `PROPERTY` action part.
+#[derive(Serialize, JsonSchema, Debug)]
+pub struct ViolationSummary {
+    pub name: Option<String>,
+    pub kind: ViolationKind,
+    pub count: u64,
+}
+
+#[derive(Serialize, JsonSchema, Debug, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum ViolationKind {
+    Invariant,
+    Action,
 }
 
 #[derive(Serialize, JsonSchema, Debug)]
@@ -770,6 +807,7 @@ mod tests {
     #[test]
     fn passing_outcome_matches_its_oneof_branch() {
         let outcome = CheckOutcome::Ok {
+            properties_checked: Vec::new(),
             stats: CheckStatsSummary::default(),
         };
         let serialized = serde_json::to_value(&outcome).unwrap();

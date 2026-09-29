@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::Source;
 use crate::ast::{Env, Spec, Value};
 use crate::checker::CheckerConfig;
-use crate::config::{apply_config, parse_cfg};
+use crate::config::{apply_config, legacy_temporal_warning, parse_cfg};
 use crate::parser::parse_with_warnings;
 use crate::span::{Span, Spanned};
 
@@ -90,6 +90,10 @@ pub fn prepare_from_path(
 
     for (name, value) in constants {
         domains.insert(name.clone(), value.clone());
+    }
+
+    if let Some(message) = legacy_temporal_warning(&spec, checker_config.check_liveness) {
+        warnings.push(Spanned::new(message, Span::default()));
     }
 
     Ok(Prepared {

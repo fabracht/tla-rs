@@ -255,8 +255,9 @@ mod tests {
             invariants: vec![],
             invariant_names: vec![],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
 
         let mut registry = ModuleRegistry::new();
@@ -287,8 +288,9 @@ mod tests {
             invariants: vec![],
             invariant_names: vec![],
             fairness: vec![],
+            quantified_fairness: vec![],
             liveness_properties: vec![],
-            quantified_temporal: vec![],
+            safety_properties: vec![],
         };
 
         let (resolved, parameterized, _vars) = resolve_instances(&spec, &registry).unwrap();

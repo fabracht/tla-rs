@@ -192,10 +192,10 @@ fn prime_expr(expr: &Expr) -> Expr {
         Expr::Always(e) => Expr::Always(p(e)),
         Expr::Eventually(e) => Expr::Eventually(p(e)),
         Expr::LeadsTo(l, r) => Expr::LeadsTo(p(l), p(r)),
-        Expr::WeakFairness(var, action) => Expr::WeakFairness(var.clone(), p(action)),
-        Expr::StrongFairness(var, action) => Expr::StrongFairness(var.clone(), p(action)),
-        Expr::BoxAction(action, var) => Expr::BoxAction(p(action), var.clone()),
-        Expr::DiamondAction(action, var) => Expr::DiamondAction(p(action), var.clone()),
+        Expr::WeakFairness(subscript, action) => Expr::WeakFairness(p(subscript), p(action)),
+        Expr::StrongFairness(subscript, action) => Expr::StrongFairness(p(subscript), p(action)),
+        Expr::BoxAction(action, subscript) => Expr::BoxAction(p(action), p(subscript)),
+        Expr::DiamondAction(action, subscript) => Expr::DiamondAction(p(action), p(subscript)),
         Expr::EnabledOp(e) => Expr::EnabledOp(p(e)),
 
         Expr::QualifiedCall(inst, op, args) => {
@@ -553,18 +553,22 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
             Box::new(substitute_expr(l, subs)),
             Box::new(substitute_expr(r, subs)),
         ),
-        Expr::WeakFairness(var, action) => {
-            Expr::WeakFairness(var.clone(), Box::new(substitute_expr(action, subs)))
-        }
-        Expr::StrongFairness(var, action) => {
-            Expr::StrongFairness(var.clone(), Box::new(substitute_expr(action, subs)))
-        }
-        Expr::BoxAction(action, var) => {
-            Expr::BoxAction(Box::new(substitute_expr(action, subs)), var.clone())
-        }
-        Expr::DiamondAction(action, var) => {
-            Expr::DiamondAction(Box::new(substitute_expr(action, subs)), var.clone())
-        }
+        Expr::WeakFairness(subscript, action) => Expr::WeakFairness(
+            Box::new(substitute_expr(subscript, subs)),
+            Box::new(substitute_expr(action, subs)),
+        ),
+        Expr::StrongFairness(subscript, action) => Expr::StrongFairness(
+            Box::new(substitute_expr(subscript, subs)),
+            Box::new(substitute_expr(action, subs)),
+        ),
+        Expr::BoxAction(action, subscript) => Expr::BoxAction(
+            Box::new(substitute_expr(action, subs)),
+            Box::new(substitute_expr(subscript, subs)),
+        ),
+        Expr::DiamondAction(action, subscript) => Expr::DiamondAction(
+            Box::new(substitute_expr(action, subs)),
+            Box::new(substitute_expr(subscript, subs)),
+        ),
         Expr::EnabledOp(e) => Expr::EnabledOp(Box::new(substitute_expr(e, subs))),
 
         Expr::QualifiedCall(inst, op, args) => Expr::QualifiedCall(

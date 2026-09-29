@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::ast::{Expr, Spec};
+use crate::ast::{Expr, LivenessProperty, Spec};
 use crate::lexer::Token;
 
 use super::error::{ParseError, Result};
@@ -175,7 +175,7 @@ impl Parser {
                     if name.as_ref() == "Spec" || name.ends_with("Spec") {
                         match self.parse_expr() {
                             Ok(spec_expr) => {
-                                self.extract_fairness_and_liveness(&spec_expr);
+                                self.extract_fairness_and_liveness(&name, &spec_expr);
                                 self.definitions.insert(name, spec_expr);
                             }
                             Err(_) => {
@@ -273,20 +273,28 @@ impl Parser {
             invariants,
             invariant_names,
             fairness: self.fairness.clone(),
+            quantified_fairness: self.quantified_fairness.clone(),
             liveness_properties: self.liveness_properties.clone(),
-            quantified_temporal: self.quantified_temporal.clone(),
+            safety_properties: Vec::new(),
         })
     }
 
-    fn extract_fairness_and_liveness(&mut self, expr: &Expr) {
+    fn extract_fairness_and_liveness(&mut self, name: &Arc<str>, expr: &Expr) {
+        let mut liveness = Vec::new();
         let mut warnings = Vec::new();
         crate::ast::collect_temporal(
             expr,
             &mut self.fairness,
-            &mut self.liveness_properties,
-            &mut self.quantified_temporal,
+            &mut liveness,
+            &mut self.quantified_fairness,
             &mut warnings,
         );
+        self.liveness_properties
+            .extend(liveness.into_iter().map(|formula| LivenessProperty {
+                name: name.clone(),
+                formula,
+                from_specification: true,
+            }));
         for warning in warnings {
             self.warnings.push(crate::span::Spanned::new(
                 warning,

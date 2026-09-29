@@ -11,11 +11,14 @@ use std::sync::Arc;
 use tla_checker::Source;
 use tla_checker::ast::{Env, Spec, Value};
 use tla_checker::checker::{
-    CheckResult, CheckStats, CheckerConfig, PrepareSpecError, check, check_result_to_json,
-    eval_error_to_diagnostic, format_eval_error, format_trace, format_trace_with_actions,
-    format_trace_with_diffs, unchecked_predicate_warning, write_trace_json,
+    CheckResult, CheckStats, CheckerConfig, PrepareSpecError, PropertyViolationKind, check,
+    check_result_to_json, eval_error_to_diagnostic, format_eval_error, format_trace,
+    format_trace_with_actions, format_trace_with_diffs, unchecked_predicate_warning,
+    write_trace_json,
 };
-use tla_checker::config::{apply_config, parse_cfg, parse_constant_value, split_top_level};
+use tla_checker::config::{
+    apply_config, legacy_temporal_warning, parse_cfg, parse_constant_value, split_top_level,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use tla_checker::demo::{Manifest, render_doc, render_explorable, render_html, run_beat};
 use tla_checker::diagnostic::{ColorConfig, Diagnostic};
@@ -163,7 +166,9 @@ fn extract_stats(result: &CheckResult) -> Option<&CheckStats> {
         CheckResult::InvariantViolation(_, stats) | CheckResult::LivenessViolation(_, stats) => {
             Some(stats)
         }
-        CheckResult::Deadlock(_, _, stats) => Some(stats),
+        CheckResult::Deadlock(_, _, stats) | CheckResult::PropertyViolation(_, stats) => {
+            Some(stats)
+        }
         _ => None,
     }
 }
@@ -1033,6 +1038,9 @@ fn main() -> ExitCode {
     if let Some(message) = unchecked_predicate_warning(&spec, !config.count_properties.is_empty()) {
         eprintln!("Warning: {message}");
     }
+    if let Some(message) = legacy_temporal_warning(&spec, config.check_liveness) {
+        eprintln!("Warning: {message}");
+    }
 
     let result = check(&spec, &domains, &config);
 
@@ -1058,6 +1066,7 @@ fn main() -> ExitCode {
         let trace = match &result {
             CheckResult::InvariantViolation(cex, _) => Some(&cex.trace),
             CheckResult::Deadlock(trace, _, _) => Some(trace),
+            CheckResult::PropertyViolation(violation, _) => Some(&violation.trace),
             CheckResult::NextError(_, trace, _) => Some(trace),
             CheckResult::InvariantError(_, trace, _) => Some(trace),
             _ => None,
@@ -1105,7 +1114,7 @@ fn main() -> ExitCode {
         CheckResult::Ok(stats) => {
             if stats.violation_count > 0 {
                 println!(
-                    "Model checking complete. {} invariant violation(s) found across {} states.",
+                    "Model checking complete. {} violation(s) found across {} states.",
                     stats.violation_count, stats.states_explored
                 );
                 println!();
@@ -1115,6 +1124,26 @@ fn main() -> ExitCode {
                         let name_str = name.as_ref().map(|n| n.as_ref()).unwrap_or("(unnamed)");
                         println!("    {}: {} violation(s)", name_str, count);
                     }
+                    println!();
+                }
+                if !stats.violations_by_property.is_empty() {
+                    println!("  Violations by property:");
+                    for (name, count) in &stats.violations_by_property {
+                        println!("    {}: {} violation(s)", name, count);
+                    }
+                    println!();
+                }
+                if let Some(first) = stats.property_violation_traces.first() {
+                    println!(
+                        "  First property violation trace ({}, {} states):",
+                        first.property,
+                        first.trace.len()
+                    );
+                    println!();
+                    print!(
+                        "{}",
+                        format_trace_with_actions(&first.trace, &first.actions, &spec.vars)
+                    );
                     println!();
                 }
                 if let Some(first) = stats.violation_traces.first() {
@@ -1140,6 +1169,16 @@ fn main() -> ExitCode {
                 println!("Model checking complete. No errors found.");
             }
             println!();
+
+            if !stats.properties_checked.is_empty() {
+                let names: Vec<&str> = stats
+                    .properties_checked
+                    .iter()
+                    .map(|n| n.as_ref())
+                    .collect();
+                println!("  Properties checked: {}", names.join(", "));
+                println!();
+            }
 
             if !stats.property_stats.is_empty() {
                 println!("Property statistics:");
@@ -1255,6 +1294,30 @@ fn main() -> ExitCode {
                 }
                 println!();
             }
+            println!("  States explored: {}", stats.states_explored);
+            println!("  Transitions: {}", stats.transitions);
+            println!("  Time: {:.3}s", stats.elapsed_secs);
+            ExitCode::FAILURE
+        }
+        CheckResult::PropertyViolation(violation, stats) => {
+            match violation.kind {
+                PropertyViolationKind::Init => println!(
+                    "Property {} is violated by the initial state",
+                    violation.property
+                ),
+                PropertyViolationKind::Action => {
+                    println!("Action property {} is violated", violation.property)
+                }
+            }
+            println!();
+            println!("Counterexample trace ({} states):", violation.trace.len());
+            println!("  (* marks changed variables)");
+            println!();
+            print!(
+                "{}",
+                format_trace_with_actions(&violation.trace, &violation.actions, &spec.vars)
+            );
+            println!();
             println!("  States explored: {}", stats.states_explored);
             println!("  Transitions: {}", stats.transitions);
             println!("  Time: {:.3}s", stats.elapsed_secs);

@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.11.0] - 2026-09-27
+
+### Fixed
+
+- A state outside the cfg `CONSTRAINT` is now checked against the invariants, as TLC does, and only its successors are skipped. An invariant that failed only on such a state used to pass.
+- A step into a state outside the `CONSTRAINT` now counts toward whether a `WF`/`SF` action is enabled, as in TLC, so a behavior that stalls where such a step is possible is unfair. Liveness under a `CONSTRAINT` used to report such stalls as violations.
+- `--continue` no longer stops at the first action property violation; like TLC's `-continue`, it records every one (`violations_by_property`). An initial-state property violation still stops the check, as in TLC.
+- `--json`, `--trace-json` and `--save-counterexample` output escape every string, including record keys, action names and the spec path. An error message containing a newline, a string key containing a tab, or a path containing a quote used to produce invalid JSON.
+- Under `--continue`, `--json` reports `"status": "property_violation"` when only action properties were violated, and MCP `check_spec` lists the violations per invariant and per property (`stats.violations`).
+
+### Changed
+
+- A cfg `PROPERTY` is now checked the way TLC checks it, conjunct by conjunct (#120):
+  - A state predicate `P` is checked on the initial states only and reported as "violated by the initial state". It used to be checked as `[]<>P`.
+  - `[]P` with a state predicate `P` is checked as an invariant named after the property. It used to be a config error.
+  - `[][A]_v` is checked on every transition and reported as an action property violation. It used to be a config error.
+  - A bounded `\A x \in S` distributes over these, so `\A x \in S : []P(x)` is an invariant and `\A x \in S : [][A(x)]_v` an action property.
+- With a cfg `SPECIFICATION`, the specification's temporal conjuncts other than `WF`/`SF` are assumptions, as in TLC, and are no longer checked as properties. They do not yet restrict the checked behaviors, so a liveness violation reported under such a specification may be one the assumption excludes; a warning says so.
+- Without a cfg that defines the behavior, the temporal conjuncts of `*Spec` definitions are still checked under `--check-liveness`, now with a deprecation warning.
+- A cfg `PROPERTY` whose name ends in `Spec`, listed without a cfg `SPECIFICATION`/`INIT`/`NEXT`, is now classified like any other property (its `WF`/`SF` conjuncts stay assumptions, as the module's `*Spec` extraction already applied them). A conjunct that cannot be checked is a config error; it used to be dropped silently while the rest of the property passed.
+- A `PROPERTY` is normalized before it is classified, so more shapes TLC accepts are checked instead of rejected:
+  - operators and `LET` definitions with temporal bodies are expanded, including parameterized ones (`\A i \in S : Safe(i)` with `Safe(i) == [](x # i)`) and tuple binders (`\A <<i, j>> \in S \X S : ...`);
+  - `[][]P` and `<><>P` collapse, and negation is pushed through `[]`, `<>`, `/\`, `\/`, `=>` and quantifiers (`~<>P` is checked as `[]~P`);
+  - an antecedent or `IF` condition that does not depend on the state is moved inside the temporal operators (`\A i \in S : (i = 1 => <>P)`), and `~(IF c THEN A ELSE B)` becomes `IF c THEN ~A ELSE ~B`. A condition counts as depending on the state when it refers to a variable, `ENABLED`, `TLCGet`, `RandomElement` or the time, directly or through definitions; a temporal formula guarded by such a condition (`P => []Q`) is still a config error.
+  - A quantifier around a temporal formula must range over a set that does not depend on the state; TLC rejects such a property and tla-rs now does too instead of checking it state by state.
+- Subscripts of `[A]_v`, `<<A>>_v`, `WF_v` and `SF_v` can be any expression: `[A]_(x + y)`, `[A]_<<x, y>>`, `[A]_[a |-> x]` and `WF_<<x, y>>(A)` parse. They used to make the parser drop the definition.
+- The subscript of a quantified action property may depend on the bound variable, and `ENABLED` can be used in initial-state and action `PROPERTY` parts.
+- A disjunction in a `PROPERTY` with a disjunct that is not a liveness property (`x = 1 \/ <>P`, `[]P \/ []Q`) is a config error; checking each disjunct separately would report violations TLC does not. A disjunction of liveness properties is still checked as their conjunction, which can only over-report.
+- A property's `[]P` conjuncts are checked as one invariant, so `--list-invariants` and `--continue` report the property once.
+- A warning notes invariants checked only because of their `Inv`/`TypeOK`/`NotSolved` name when a cfg has no `INVARIANT` section; TLC checks none of them. tla-rs keeps checking them.
+- Violations name the property: a liveness violation reports the `PROPERTY` (or legacy `*Spec`) definition name instead of an internal dump of the formula.
+- The MCP output schema is version 2. `check_spec` has a `property_violation` outcome (`kind` `init` or `action`), `liveness_violation.property` is the property name, and an `ok` outcome lists `properties_checked`.
+
+### Added
+
+- `--json` and the human-readable summary list the properties checked on success (`properties_checked`). A property with violations recorded under `--continue` is not listed.
+- The safety parts of a `PROPERTY` are checked on states and transitions outside the `CONSTRAINT` too, as in TLC.
+- 64 TLC-confirmed oracle cases for the property classes, their normalization, disjunctions, expression subscripts and their interplay with `CONSTRAINT` (C55–C118); the corpus now has 122 cases. The oracle's independent lasso validator now expands `LET` definitions and `IF` over temporal formulas.
+
 ## [0.10.2] - 2026-09-25
 
 ### Fixed

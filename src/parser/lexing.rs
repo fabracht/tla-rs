@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use crate::ast::{Expr, FairnessConstraint, InstanceDecl};
+use crate::ast::{Expr, FairnessConstraint, InstanceDecl, LivenessProperty};
 use crate::lexer::{Lexer, Token};
 use crate::source::Source;
 use crate::span::{Span, Spanned};
@@ -20,8 +20,8 @@ pub struct Parser {
     pub(super) assumes: Vec<Expr>,
     pub(super) instances: Vec<InstanceDecl>,
     pub(super) fairness: Vec<FairnessConstraint>,
-    pub(super) liveness_properties: Vec<Expr>,
-    pub(super) quantified_temporal: Vec<(Arc<str>, Expr, Expr)>,
+    pub(super) liveness_properties: Vec<LivenessProperty>,
+    pub(super) quantified_fairness: Vec<(Arc<str>, Expr, Expr)>,
     pub(super) warnings: Vec<Spanned<String>>,
     pub(super) fresh_counter: u64,
     /// The source text with its precomputed line-start index, so `line_of` and
@@ -66,7 +66,7 @@ impl Parser {
             instances: Vec::new(),
             fairness: Vec::new(),
             liveness_properties: Vec::new(),
-            quantified_temporal: Vec::new(),
+            quantified_fairness: Vec::new(),
             warnings: Vec::new(),
             fresh_counter: 0,
             let_scope: Vec::new(),

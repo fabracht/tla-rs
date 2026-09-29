@@ -134,22 +134,69 @@ pub(crate) fn collect_disjuncts_with_labels<'a>(
 
 pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
     let mut visited = BTreeSet::new();
-    contains_prime_ref_impl(expr, defs, &mut visited)
+    let is_prime = |e: &Expr| matches!(e, Expr::Prime(_) | Expr::Unchanged(_));
+    refers_through_defs(expr, defs, &mut visited, &is_prime)
 }
 
-fn contains_prime_ref_impl(
+/// Whether `expr` can take different values in different states: it refers to a
+/// state variable (or primes one), `ENABLED`, or a built-in whose value depends on
+/// the run (`TLCGet`, `RandomElement`, time), directly or through the definitions it
+/// calls. A call to an unknown operator counts as a reference.
+pub(crate) fn references_state(expr: &Expr, vars: &[Arc<str>], defs: &Definitions) -> bool {
+    let mut visited = BTreeSet::new();
+    let is_state = |e: &Expr| match e {
+        Expr::Prime(_)
+        | Expr::Unchanged(_)
+        | Expr::EnabledOp(_)
+        | Expr::TLCGet(_)
+        | Expr::RandomElement(_)
+        | Expr::JavaTime
+        | Expr::SystemTime => true,
+        Expr::Var(name) => vars.contains(name),
+        _ => false,
+    };
+    refers_through_defs(expr, defs, &mut visited, &is_state)
+}
+
+/// Whether `expr` contains a temporal operator, directly or through the definitions
+/// it calls.
+pub(crate) fn reaches_temporal(expr: &Expr, defs: &Definitions) -> bool {
+    let mut visited = BTreeSet::new();
+    let is_temporal = |e: &Expr| {
+        matches!(
+            e,
+            Expr::Always(_)
+                | Expr::Eventually(_)
+                | Expr::LeadsTo(_, _)
+                | Expr::WeakFairness(_, _)
+                | Expr::StrongFairness(_, _)
+                | Expr::BoxAction(_, _)
+                | Expr::DiamondAction(_, _)
+        )
+    };
+    refers_through_defs(expr, defs, &mut visited, &is_temporal)
+}
+
+/// Whether some subexpression satisfies `leaf`, following zero-argument and
+/// parameterized definitions (each at most once per path). A call to an unknown
+/// operator counts as satisfying it.
+fn refers_through_defs(
     expr: &Expr,
     defs: &Definitions,
     visited: &mut BTreeSet<Arc<str>>,
+    leaf: &dyn Fn(&Expr) -> bool,
 ) -> bool {
+    if leaf(expr) {
+        return true;
+    }
     match expr {
-        Expr::Prime(_) | Expr::Unchanged(_) => true,
+        Expr::Prime(_) | Expr::Unchanged(_) => false,
         Expr::Var(name) => match defs.get(name) {
             Some((params, body)) if params.is_empty() => {
                 if !visited.insert(name.clone()) {
                     return false;
                 }
-                let result = contains_prime_ref_impl(body, defs, visited);
+                let result = refers_through_defs(body, defs, visited, leaf);
                 visited.remove(name);
                 result
             }
@@ -188,7 +235,7 @@ fn contains_prime_ref_impl(
         | Expr::BagCardinality(e)
         | Expr::Always(e)
         | Expr::Eventually(e)
-        | Expr::EnabledOp(e) => contains_prime_ref_impl(e, defs, visited),
+        | Expr::EnabledOp(e) => refers_through_defs(e, defs, visited, leaf),
         Expr::And(l, r)
         | Expr::Or(l, r)
         | Expr::Implies(l, r)
@@ -234,12 +281,13 @@ fn contains_prime_ref_impl(
         | Expr::CopiesIn(l, r)
         | Expr::SqSubseteq(l, r)
         | Expr::LeadsTo(l, r) => {
-            contains_prime_ref_impl(l, defs, visited) || contains_prime_ref_impl(r, defs, visited)
+            refers_through_defs(l, defs, visited, leaf)
+                || refers_through_defs(r, defs, visited, leaf)
         }
         Expr::If(c, t, e) | Expr::SubSeq(c, t, e) => {
-            contains_prime_ref_impl(c, defs, visited)
-                || contains_prime_ref_impl(t, defs, visited)
-                || contains_prime_ref_impl(e, defs, visited)
+            refers_through_defs(c, defs, visited, leaf)
+                || refers_through_defs(t, defs, visited, leaf)
+                || refers_through_defs(e, defs, visited, leaf)
         }
         Expr::Forall(_, d, b)
         | Expr::Exists(_, d, b)
@@ -248,30 +296,31 @@ fn contains_prime_ref_impl(
         | Expr::SetFilter(_, d, b)
         | Expr::SetMap(_, d, b)
         | Expr::CustomOp(_, d, b) => {
-            contains_prime_ref_impl(d, defs, visited) || contains_prime_ref_impl(b, defs, visited)
+            refers_through_defs(d, defs, visited, leaf)
+                || refers_through_defs(b, defs, visited, leaf)
         }
-        Expr::ChooseUnbounded(_, b) => contains_prime_ref_impl(b, defs, visited),
+        Expr::ChooseUnbounded(_, b) => refers_through_defs(b, defs, visited, leaf),
         Expr::SetEnum(elems) | Expr::TupleLit(elems) => elems
             .iter()
-            .any(|e| contains_prime_ref_impl(e, defs, visited)),
+            .any(|e| refers_through_defs(e, defs, visited, leaf)),
         Expr::RecordLit(fields) | Expr::RecordSet(fields) => fields
             .iter()
-            .any(|(_, e)| contains_prime_ref_impl(e, defs, visited)),
+            .any(|(_, e)| refers_through_defs(e, defs, visited, leaf)),
         Expr::RecordAccess(r, _) | Expr::TupleAccess(r, _) => {
-            contains_prime_ref_impl(r, defs, visited)
+            refers_through_defs(r, defs, visited, leaf)
         }
         Expr::Except(b, u) => {
-            contains_prime_ref_impl(b, defs, visited)
+            refers_through_defs(b, defs, visited, leaf)
                 || u.iter().any(|(path, val)| {
                     path.iter()
-                        .any(|p| contains_prime_ref_impl(p, defs, visited))
-                        || contains_prime_ref_impl(val, defs, visited)
+                        .any(|p| refers_through_defs(p, defs, visited, leaf))
+                        || refers_through_defs(val, defs, visited, leaf)
                 })
         }
         Expr::FnCall(name, args) => {
             if args
                 .iter()
-                .any(|a| contains_prime_ref_impl(a, defs, visited))
+                .any(|a| refers_through_defs(a, defs, visited, leaf))
             {
                 return true;
             }
@@ -280,7 +329,7 @@ fn contains_prime_ref_impl(
                     if !visited.insert(name.clone()) {
                         return false;
                     }
-                    let result = contains_prime_ref_impl(body, defs, visited);
+                    let result = refers_through_defs(body, defs, visited, leaf);
                     visited.remove(name);
                     result
                 }
@@ -290,7 +339,7 @@ fn contains_prime_ref_impl(
         Expr::QualifiedCall(instance_expr, op, args) => {
             if args
                 .iter()
-                .any(|a| contains_prime_ref_impl(a, defs, visited))
+                .any(|a| refers_through_defs(a, defs, visited, leaf))
             {
                 return true;
             }
@@ -306,7 +355,7 @@ fn contains_prime_ref_impl(
                             if !visited.insert(marker.clone()) {
                                 return false;
                             }
-                            let result = contains_prime_ref_impl(body, defs, visited);
+                            let result = refers_through_defs(body, defs, visited, leaf);
                             visited.remove(&marker);
                             return result;
                         }
@@ -316,19 +365,23 @@ fn contains_prime_ref_impl(
                 _ => true,
             }
         }
-        Expr::Lambda(_, body) => contains_prime_ref_impl(body, defs, visited),
+        Expr::Lambda(_, body) => refers_through_defs(body, defs, visited, leaf),
         Expr::Let(_, binding, body) => {
-            contains_prime_ref_impl(binding, defs, visited)
-                || contains_prime_ref_impl(body, defs, visited)
+            refers_through_defs(binding, defs, visited, leaf)
+                || refers_through_defs(body, defs, visited, leaf)
         }
         Expr::Case(branches) => branches.iter().any(|(c, r)| {
-            contains_prime_ref_impl(c, defs, visited) || contains_prime_ref_impl(r, defs, visited)
+            refers_through_defs(c, defs, visited, leaf)
+                || refers_through_defs(r, defs, visited, leaf)
         }),
-        Expr::LabeledAction(_, a) => contains_prime_ref_impl(a, defs, visited),
-        Expr::WeakFairness(_, e)
-        | Expr::StrongFairness(_, e)
-        | Expr::BoxAction(e, _)
-        | Expr::DiamondAction(e, _) => contains_prime_ref_impl(e, defs, visited),
+        Expr::LabeledAction(_, a) => refers_through_defs(a, defs, visited, leaf),
+        Expr::WeakFairness(a, b)
+        | Expr::StrongFairness(a, b)
+        | Expr::BoxAction(a, b)
+        | Expr::DiamondAction(a, b) => {
+            refers_through_defs(a, defs, visited, leaf)
+                || refers_through_defs(b, defs, visited, leaf)
+        }
     }
 }
 
@@ -483,10 +536,10 @@ pub(crate) fn expr_references(expr: &Expr, name: &Arc<str>) -> bool {
             .iter()
             .any(|(c, r)| expr_references(c, name) || expr_references(r, name)),
         Expr::LabeledAction(_, a) => expr_references(a, name),
-        Expr::WeakFairness(_, e)
-        | Expr::StrongFairness(_, e)
-        | Expr::BoxAction(e, _)
-        | Expr::DiamondAction(e, _) => expr_references(e, name),
+        Expr::WeakFairness(a, b)
+        | Expr::StrongFairness(a, b)
+        | Expr::BoxAction(a, b)
+        | Expr::DiamondAction(a, b) => expr_references(a, name) || expr_references(b, name),
     }
 }
 
@@ -612,10 +665,10 @@ pub(crate) fn expr_contains(haystack: &Expr, needle: &Expr) -> bool {
             .iter()
             .any(|(c, r)| expr_contains(c, needle) || expr_contains(r, needle)),
         Expr::LabeledAction(_, a) => expr_contains(a, needle),
-        Expr::WeakFairness(_, e)
-        | Expr::StrongFairness(_, e)
-        | Expr::BoxAction(e, _)
-        | Expr::DiamondAction(e, _) => expr_contains(e, needle),
+        Expr::WeakFairness(a, b)
+        | Expr::StrongFairness(a, b)
+        | Expr::BoxAction(a, b)
+        | Expr::DiamondAction(a, b) => expr_contains(a, needle) || expr_contains(b, needle),
     }
 }
 

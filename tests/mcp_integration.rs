@@ -27,7 +27,7 @@ fn validate_spec_returns_summary_for_valid_spec() {
         config_path: None,
     };
     let out = runner::validate_spec(&input);
-    assert_eq!(out.schema_version, "1");
+    assert_eq!(out.schema_version, "2");
     assert!(matches!(out.status, ValidationStatus::Ok));
     let spec = out.spec.expect("spec summary present on Ok");
     assert_eq!(spec.vars, vec!["x".to_string()]);
@@ -70,7 +70,7 @@ fn list_invariants_returns_invariant_names() {
         config_path: None,
     };
     let out = runner::list_invariants(&input);
-    assert_eq!(out.schema_version, "1");
+    assert_eq!(out.schema_version, "2");
     assert!(matches!(out.status, ValidationStatus::Ok));
     assert_eq!(out.invariants.len(), 1);
     assert_eq!(out.invariants[0].name.as_deref(), Some("InvBounded"));
@@ -94,7 +94,7 @@ fn check_spec_returns_invariant_violation_with_trace() {
         config_path: None,
     };
     let out = runner::check_spec(&input);
-    assert_eq!(out.schema_version, "1");
+    assert_eq!(out.schema_version, "2");
     match out.outcome {
         CheckOutcome::InvariantViolation {
             invariant,
@@ -375,7 +375,7 @@ fn replay_scenario_returns_step_by_step_trace() {
         config_path: None,
     };
     let out = runner::replay_scenario(&input);
-    assert_eq!(out.schema_version, "1");
+    assert_eq!(out.schema_version, "2");
     assert!(
         matches!(out.status, ScenarioStatus::Ok),
         "expected ok, got {:?}",
@@ -450,7 +450,7 @@ fn check_spec_honors_cfg_constraint_directive() {
     let _ = std::fs::remove_dir(&dir);
 
     match out.outcome {
-        CheckOutcome::Ok { stats } => {
+        CheckOutcome::Ok { stats, .. } => {
             assert_eq!(
                 stats.states_explored, 5,
                 "Bounded constraint should cap at 5 states (x=0..4); got {}",
@@ -492,7 +492,7 @@ fn check_spec_honors_input_state_constraint() {
     let _ = std::fs::remove_dir(&dir);
 
     match out.outcome {
-        CheckOutcome::Ok { stats } => {
+        CheckOutcome::Ok { stats, .. } => {
             assert_eq!(
                 stats.states_explored, 3,
                 "x<3 should cap at 3 states (x=0,1,2); got {}",
@@ -711,11 +711,7 @@ fn check_spec_detects_leads_to_violation_in_sub_scc() {
             cycle,
             ..
         } => {
-            assert!(
-                property.contains("LeadsTo") || property.contains("~>"),
-                "expected leads-to property, got {}",
-                property
-            );
+            assert_eq!(property, "Live", "the violation must name the PROPERTY");
             assert!(!prefix.is_empty() || !cycle.is_empty());
         }
         other => panic!(
@@ -901,7 +897,9 @@ fn check_spec_expands_quantified_fairness_and_leads_to_property() {
     let _ = std::fs::remove_dir(&dir);
 
     match with_fairness {
-        CheckOutcome::Ok { .. } => {}
+        CheckOutcome::Ok {
+            properties_checked, ..
+        } => assert_eq!(properties_checked, vec!["SeatReleases".to_string()]),
         other => panic!(
             "quantified WF_vars(Expire(s)) must make the per-seat leads-to hold; got {:?}",
             other
@@ -909,10 +907,9 @@ fn check_spec_expands_quantified_fairness_and_leads_to_property() {
     }
     match without_fairness {
         CheckOutcome::LivenessViolation { property, .. } => {
-            assert!(
-                property.contains("LeadsTo"),
-                "expected the quantified property expanded to a per-seat leads-to, got {}",
-                property
+            assert_eq!(
+                property, "SeatReleases",
+                "every per-seat instance must carry the PROPERTY's name"
             );
         }
         other => panic!(
@@ -978,7 +975,9 @@ fn check_spec_routes_cfg_temporal_property_to_liveness_checker() {
     let _ = std::fs::remove_dir(&dir);
 
     match with_fairness {
-        CheckOutcome::Ok { .. } => {}
+        CheckOutcome::Ok {
+            properties_checked, ..
+        } => assert_eq!(properties_checked, vec!["Eventually1".to_string()]),
         other => panic!(
             "WF_vars(Step) forces x to reach 1, so <>(x=1) must hold; got {:?}",
             other
@@ -986,10 +985,9 @@ fn check_spec_routes_cfg_temporal_property_to_liveness_checker() {
     }
     match without_fairness {
         CheckOutcome::LivenessViolation { property, .. } => {
-            assert!(
-                property.contains("Eq"),
-                "expected the eventually property expanded to a state predicate, got {}",
-                property
+            assert_eq!(
+                property, "Eventually1",
+                "the violation must name the PROPERTY"
             );
         }
         other => panic!(
@@ -1329,7 +1327,7 @@ fn check_spec_cli_constants_override_cfg_constants() {
     let _ = std::fs::remove_dir(&dir);
 
     match out.outcome {
-        CheckOutcome::Ok { stats } => {
+        CheckOutcome::Ok { stats, .. } => {
             assert_eq!(
                 stats.states_explored, 10,
                 "CLI Cap=10 should win over cfg Cap=5; got {} states (cfg-bound would be 5)",
