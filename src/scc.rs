@@ -8,9 +8,27 @@ pub struct SCC {
     pub is_trivial: bool,
 }
 
+impl SCC {
+    pub fn new(states: Vec<usize>, is_trivial: bool) -> Self {
+        Self { states, is_trivial }
+    }
+
+    pub fn contains(&self, state: usize) -> bool {
+        self.states.contains(&state)
+    }
+}
+
 /// Strongly connected components of the whole graph.
 pub fn compute_sccs(graph: &StateGraph) -> Vec<SCC> {
     tarjan(graph, |_| true)
+}
+
+/// The components that contain a cycle: more than one state, or a self-loop.
+pub fn get_nontrivial_sccs(graph: &StateGraph) -> Vec<SCC> {
+    compute_sccs(graph)
+        .into_iter()
+        .filter(|scc| !scc.is_trivial)
+        .collect()
 }
 
 /// Strongly connected components of the subgraph induced by `allowed`.
@@ -83,7 +101,7 @@ fn tarjan(graph: &StateGraph, allowed: impl Fn(usize) -> bool) -> Vec<SCC> {
                 }
                 let is_trivial =
                     states.len() == 1 && !graph.successors(v).iter().any(|e| e.target == v);
-                sccs.push(SCC { states, is_trivial });
+                sccs.push(SCC::new(states, is_trivial));
             }
         }
     }
@@ -183,11 +201,10 @@ mod tests {
         graph.add_edge(1, 2, None);
         graph.add_edge(2, 1, None);
 
-        let nontrivial: Vec<_> = compute_sccs(&graph)
-            .into_iter()
-            .filter(|scc| !scc.is_trivial)
-            .collect();
+        let nontrivial = get_nontrivial_sccs(&graph);
         assert_eq!(nontrivial.len(), 1);
+        assert!(nontrivial[0].contains(1) && nontrivial[0].contains(2));
+        assert!(!nontrivial[0].contains(0));
         assert!(nontrivial[0].states.len() == 2);
     }
 
