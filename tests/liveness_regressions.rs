@@ -372,3 +372,40 @@ fn stutter_only_recurrence_is_a_single_state_cycle() {
         other => panic!("no fairness forces Rescue, so <>(x=1) must be violated; got {other:?}"),
     }
 }
+
+// --- #120 phase 2a: SCC decomposition must not recurse once per state; a long
+// chain used to overflow the stack (about 20k states on a 2MB test thread). ---
+
+#[test]
+fn liveness_on_a_long_chain_does_not_overflow_the_stack() {
+    let dir = std::env::temp_dir().join("tla_liveness_long_chain");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("LongChain.tla");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE LongChain ----\n\
+         EXTENDS Naturals\n\
+         VARIABLE x\n\
+         Init == x = 0\n\
+         Step == x < 40000 /\\ x' = x + 1\n\
+         Next == Step \\/ UNCHANGED x\n\
+         Spec == Init /\\ [][Next]_x /\\ WF_x(Step)\n\
+         Reach == <>(x = 40000)\n\
+         ====\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("LongChain.cfg"),
+        "SPECIFICATION Spec\nPROPERTY Reach\nCHECK_DEADLOCK FALSE\n",
+    )
+    .unwrap();
+    let prepared = prepare_from_path(&spec_path, None, &[]).expect("spec prepares");
+    let mut cc = prepared.checker_config;
+    cc.max_depth = 100_000;
+    let result = check(&prepared.spec, &prepared.domains, &cc);
+    let _ = std::fs::remove_dir_all(&dir);
+    match result {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 40_001),
+        other => panic!("WF_x(Step) drives x to 40000; got {other:?}"),
+    }
+}
