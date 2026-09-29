@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::ast::{Env, Expr, FairnessConstraint, State, Value};
 use crate::eval::{Definitions, EvalError, eval};
-use crate::graph::StateGraph;
+use crate::graph::{LivenessGraph, StateGraph};
 
 pub type Result<T> = std::result::Result<T, EvalError>;
 
@@ -139,23 +139,34 @@ impl FairnessTable {
         Ok(Self { constraints })
     }
 
-    fn taken_within(
+    fn enabled_at<G: LivenessGraph>(&self, constraint: usize, graph: &G, node: usize) -> bool {
+        self.constraints[constraint].enabled[graph.state_of(node)]
+    }
+
+    fn taken_on<G: LivenessGraph>(
         &self,
         constraint: usize,
-        graph: &StateGraph,
+        graph: &G,
+        node: usize,
+        state_edge: usize,
+    ) -> bool {
+        self.constraints[constraint].taken[graph.state_of(node)][state_edge]
+    }
+
+    fn taken_within<G: LivenessGraph>(
+        &self,
+        constraint: usize,
+        graph: &G,
         component: &[usize],
         members: &HashSet<usize>,
     ) -> Option<(usize, usize)> {
-        let table = &self.constraints[constraint];
-        component.iter().find_map(|&state_idx| {
+        component.iter().find_map(|&node| {
             graph
-                .successors(state_idx)
-                .iter()
-                .enumerate()
-                .find(|(edge_idx, edge)| {
-                    members.contains(&edge.target) && table.taken[state_idx][*edge_idx]
+                .edges(node)
+                .find(|&(target, state_edge)| {
+                    members.contains(&target) && self.taken_on(constraint, graph, node, state_edge)
                 })
-                .map(|(_, edge)| (state_idx, edge.target))
+                .map(|(target, _)| (node, target))
         })
     }
 
@@ -165,7 +176,11 @@ impl FairnessTable {
     /// component that enables `A` somewhere but never takes it can still hold a
     /// cycle fair to `SF(A)` that avoids every `A`-enabled state, so those states are
     /// removed and the remainder is decomposed again.
-    fn fair_components(&self, graph: &StateGraph, subset: &HashSet<usize>) -> Vec<Vec<usize>> {
+    fn fair_components<G: LivenessGraph>(
+        &self,
+        graph: &G,
+        subset: &HashSet<usize>,
+    ) -> Vec<Vec<usize>> {
         let mut fair = Vec::new();
         let mut work = components(graph, subset);
         while let Some(component) = work.pop() {
@@ -173,7 +188,8 @@ impl FairnessTable {
             let mut remove: HashSet<usize> = HashSet::new();
             let mut unfair = false;
             for (constraint, table) in self.constraints.iter().enumerate() {
-                if !component.iter().any(|&s| table.enabled[s])
+                let enabled = |node: usize| self.enabled_at(constraint, graph, node);
+                if !component.iter().any(|&n| enabled(n))
                     || self
                         .taken_within(constraint, graph, &component, &members)
                         .is_some()
@@ -181,8 +197,8 @@ impl FairnessTable {
                     continue;
                 }
                 if table.strong {
-                    remove.extend(component.iter().copied().filter(|&s| table.enabled[s]));
-                } else if component.iter().all(|&s| table.enabled[s]) {
+                    remove.extend(component.iter().copied().filter(|&n| enabled(n)));
+                } else if component.iter().all(|&n| enabled(n)) {
                     unfair = true;
                     break;
                 }
@@ -205,9 +221,9 @@ impl FairnessTable {
     /// state in `must_visit`, and satisfies every fairness constraint: it visits a
     /// state where a weakly fair action is disabled, or takes an edge of that action,
     /// and takes an edge of every strongly fair action enabled inside the component.
-    fn witness_cycle(
+    fn witness_cycle<G: LivenessGraph>(
         &self,
-        graph: &StateGraph,
+        graph: &G,
         component: &[usize],
         must_visit: &[usize],
     ) -> Vec<usize> {
@@ -215,13 +231,14 @@ impl FairnessTable {
         let entry = component[0];
         let mut waypoints: Vec<Waypoint> = must_visit.iter().map(|&s| Waypoint::Node(s)).collect();
         for (constraint, table) in self.constraints.iter().enumerate() {
-            if !component.iter().any(|&s| table.enabled[s]) {
+            let enabled = |node: usize| self.enabled_at(constraint, graph, node);
+            if !component.iter().any(|&n| enabled(n)) {
                 continue;
             }
             let idle = if table.strong {
                 None
             } else {
-                component.iter().copied().find(|&s| !table.enabled[s])
+                component.iter().copied().find(|&n| !enabled(n))
             };
             match idle {
                 Some(state_idx) => waypoints.push(Waypoint::Node(state_idx)),
@@ -257,18 +274,21 @@ impl FairnessTable {
 
     /// For each fairness constraint, whether its action is enabled somewhere on the
     /// reported cycle and whether the cycle takes it.
-    pub fn fairness_info(&self, graph: &StateGraph, cycle: &[usize]) -> Vec<(String, bool)> {
+    pub fn fairness_info<G: LivenessGraph>(
+        &self,
+        graph: &G,
+        cycle: &[usize],
+    ) -> Vec<(String, bool)> {
         self.constraints
             .iter()
-            .map(|table| {
-                let enabled = cycle.iter().any(|&s| table.enabled[s]);
+            .enumerate()
+            .map(|(constraint, table)| {
+                let enabled = cycle.iter().any(|&n| self.enabled_at(constraint, graph, n));
                 let taken = cycle.iter().enumerate().any(|(i, &from)| {
                     let to = cycle[(i + 1) % cycle.len()];
-                    graph
-                        .successors(from)
-                        .iter()
-                        .enumerate()
-                        .any(|(edge_idx, edge)| edge.target == to && table.taken[from][edge_idx])
+                    graph.edges(from).any(|(target, state_edge)| {
+                        target == to && self.taken_on(constraint, graph, from, state_edge)
+                    })
                 });
                 (
                     format!(
@@ -496,8 +516,8 @@ fn component_membership(graph: &StateGraph) -> Vec<usize> {
     component_of
 }
 
-fn components(graph: &StateGraph, subset: &HashSet<usize>) -> Vec<Vec<usize>> {
-    crate::scc::compute_sccs_in_subset(graph, subset)
+fn components<G: LivenessGraph>(graph: &G, subset: &HashSet<usize>) -> Vec<Vec<usize>> {
+    crate::scc::sccs_within(graph, subset)
         .into_iter()
         .filter(|scc| !scc.is_trivial)
         .map(|scc| {
@@ -508,13 +528,13 @@ fn components(graph: &StateGraph, subset: &HashSet<usize>) -> Vec<Vec<usize>> {
         .collect()
 }
 
-fn reach_within(
-    graph: &StateGraph,
+fn reach_within<G: LivenessGraph>(
+    graph: &G,
     sources: &[usize],
     allowed: &[bool],
 ) -> (Vec<bool>, Vec<Option<usize>>) {
-    let mut reached = vec![false; graph.state_count()];
-    let mut parent = vec![None; graph.state_count()];
+    let mut reached = vec![false; graph.node_count()];
+    let mut parent = vec![None; graph.node_count()];
     let mut queue: VecDeque<usize> = VecDeque::new();
     for &source in sources {
         if allowed[source] && !reached[source] {
@@ -522,12 +542,12 @@ fn reach_within(
             queue.push_back(source);
         }
     }
-    while let Some(state_idx) = queue.pop_front() {
-        for edge in graph.successors(state_idx) {
-            if allowed[edge.target] && !reached[edge.target] {
-                reached[edge.target] = true;
-                parent[edge.target] = Some(state_idx);
-                queue.push_back(edge.target);
+    while let Some(node) = queue.pop_front() {
+        for (target, _) in graph.edges(node) {
+            if allowed[target] && !reached[target] {
+                reached[target] = true;
+                parent[target] = Some(node);
+                queue.push_back(target);
             }
         }
     }
@@ -549,8 +569,8 @@ fn parent_path(graph: &StateGraph, target: usize) -> Vec<usize> {
     path_back(&graph.parents, target)
 }
 
-fn extend_path(
-    graph: &StateGraph,
+fn extend_path<G: LivenessGraph>(
+    graph: &G,
     members: &HashSet<usize>,
     cycle: &mut Vec<usize>,
     current: &mut usize,
@@ -560,8 +580,8 @@ fn extend_path(
         return;
     }
     let (reached, parent) = {
-        let allowed: Vec<bool> = (0..graph.state_count())
-            .map(|s| members.contains(&s))
+        let allowed: Vec<bool> = (0..graph.node_count())
+            .map(|n| members.contains(&n))
             .collect();
         reach_within(graph, &[*current], &allowed)
     };
@@ -741,5 +761,86 @@ mod tests {
             !found.cycle.contains(&1),
             "the witness cycle must avoid x=1, where A is enabled but never taken: {found:?}"
         );
+    }
+
+    /// Two disjoint copies of a state graph: node `2 * s + copy` stands for state `s`,
+    /// the shape of a product with a two-node tableau that never switches nodes.
+    struct Copies<'a>(&'a StateGraph);
+
+    impl LivenessGraph for Copies<'_> {
+        fn node_count(&self) -> usize {
+            2 * self.0.state_count()
+        }
+
+        fn edges(&self, node: usize) -> impl Iterator<Item = (usize, usize)> + '_ {
+            let copy = node % 2;
+            self.0
+                .edges(node / 2)
+                .map(move |(target, state_edge)| (2 * target + copy, state_edge))
+        }
+
+        fn edge(&self, node: usize, index: usize) -> Option<(usize, usize)> {
+            self.0
+                .edge(node / 2, index)
+                .map(|(target, state_edge)| (2 * target + node % 2, state_edge))
+        }
+
+        fn state_of(&self, node: usize) -> usize {
+            node / 2
+        }
+    }
+
+    #[test]
+    fn fairness_on_a_product_graph_matches_its_state_graph() {
+        let g = graph(
+            &[
+                (&[0], None),
+                (&[1], Some(0)),
+                (&[2], Some(0)),
+                (&[5], Some(1)),
+            ],
+            &[(0, 1), (0, 2), (1, 0), (2, 0), (1, 3)],
+        );
+        let a = and(eq(var("x"), lit(1)), eq(prime("x"), lit(5)));
+        let fairness = [FairnessConstraint::Strong(var("x"), a)];
+        let vars = [Arc::from("x")];
+        let (constants, defs) = (Env::new(), Definitions::new());
+        let table = FairnessTable::build(&g, &fairness, &[], &vars, &constants, &defs).unwrap();
+        let product = Copies(&g);
+
+        let on_states = table.fair_components(&g, &(0..g.state_count()).collect());
+        let on_product = table.fair_components(&product, &(0..product.node_count()).collect());
+        let mut projected: Vec<Vec<usize>> = on_product
+            .iter()
+            .map(|component| {
+                let mut states: Vec<usize> = component.iter().map(|&n| n / 2).collect();
+                states.sort_unstable();
+                states.dedup();
+                states
+            })
+            .collect();
+        projected.sort();
+        let mut doubled: Vec<Vec<usize>> = on_states
+            .iter()
+            .flat_map(|c| [c.clone(), c.clone()])
+            .collect();
+        doubled.sort();
+        assert_eq!(
+            projected, doubled,
+            "each copy has the state graph's fair components"
+        );
+
+        for component in &on_product {
+            let cycle = table.witness_cycle(&product, component, &[]);
+            let states: Vec<usize> = cycle.iter().map(|&n| n / 2).collect();
+            assert!(
+                !states.contains(&1),
+                "an SF-fair cycle avoids x=1, where A is enabled but not taken: {states:?}"
+            );
+            assert_eq!(
+                table.fairness_info(&product, &cycle),
+                table.fairness_info(&g, &states)
+            );
+        }
     }
 }
