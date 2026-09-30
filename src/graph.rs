@@ -79,6 +79,47 @@ impl StateGraph {
     }
 }
 
+/// A graph the liveness search runs on: the state graph itself, or a product of it
+/// with a tableau. Every node stands for a state of the underlying [`StateGraph`], and
+/// every edge for one of that state's edges, so per-state and per-edge facts computed
+/// once on the state graph (fairness enabledness and occurrence) apply to any of them.
+pub trait LivenessGraph {
+    fn node_count(&self) -> usize;
+
+    /// The outgoing edges of `node` as `(target node, index of the state-graph edge
+    /// out of state_of(node) it stands for)`.
+    fn edges(&self, node: usize) -> impl Iterator<Item = (usize, usize)> + '_;
+
+    /// The `index`-th outgoing edge of `node`, as in [`LivenessGraph::edges`].
+    fn edge(&self, node: usize, index: usize) -> Option<(usize, usize)>;
+
+    /// The state-graph state that `node` stands for.
+    fn state_of(&self, node: usize) -> usize;
+}
+
+impl LivenessGraph for StateGraph {
+    fn node_count(&self) -> usize {
+        self.state_count()
+    }
+
+    fn edges(&self, node: usize) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.successors(node)
+            .iter()
+            .enumerate()
+            .map(|(index, edge)| (edge.target, index))
+    }
+
+    fn edge(&self, node: usize, index: usize) -> Option<(usize, usize)> {
+        self.successors(node)
+            .get(index)
+            .map(|edge| (edge.target, index))
+    }
+
+    fn state_of(&self, node: usize) -> usize {
+        node
+    }
+}
+
 impl Default for StateGraph {
     fn default() -> Self {
         Self::new()

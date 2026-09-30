@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::graph::StateGraph;
+use crate::graph::{LivenessGraph, StateGraph};
 
 #[derive(Debug, Clone)]
 pub struct SCC {
@@ -33,10 +33,16 @@ pub fn get_nontrivial_sccs(graph: &StateGraph) -> Vec<SCC> {
 
 /// Strongly connected components of the subgraph induced by `allowed`.
 pub fn compute_sccs_in_subset(graph: &StateGraph, allowed: &HashSet<usize>) -> Vec<SCC> {
+    sccs_within(graph, allowed)
+}
+
+/// Strongly connected components of the subgraph of any [`LivenessGraph`] induced
+/// by the nodes in `allowed`.
+pub(crate) fn sccs_within<G: LivenessGraph>(graph: &G, allowed: &HashSet<usize>) -> Vec<SCC> {
     if allowed.is_empty() {
         return Vec::new();
     }
-    tarjan(graph, |state| allowed.contains(&state))
+    tarjan(graph, |node| allowed.contains(&node))
 }
 
 /// Tarjan's algorithm over the states for which `allowed` holds, with an explicit
@@ -44,8 +50,8 @@ pub fn compute_sccs_in_subset(graph: &StateGraph, allowed: &HashSet<usize>) -> V
 /// search is bounded by memory rather than by the thread's stack. Components come
 /// out in the same order as the recursive formulation: reverse topological order.
 /// A single-state component is trivial unless it has a self-loop.
-fn tarjan(graph: &StateGraph, allowed: impl Fn(usize) -> bool) -> Vec<SCC> {
-    let node_count = graph.state_count();
+fn tarjan<G: LivenessGraph>(graph: &G, allowed: impl Fn(usize) -> bool) -> Vec<SCC> {
+    let node_count = graph.node_count();
     let mut index = vec![usize::MAX; node_count];
     let mut lowlink = vec![0; node_count];
     let mut on_stack = vec![false; node_count];
@@ -66,10 +72,8 @@ fn tarjan(graph: &StateGraph, allowed: impl Fn(usize) -> bool) -> Vec<SCC> {
         frames.push((root, 0));
 
         while let Some(&mut (v, ref mut next_edge)) = frames.last_mut() {
-            let edges = graph.successors(v);
-            if let Some(edge) = edges.get(*next_edge) {
+            if let Some((w, _)) = graph.edge(v, *next_edge) {
                 *next_edge += 1;
-                let w = edge.target;
                 if !allowed(w) {
                     continue;
                 }
@@ -99,8 +103,7 @@ fn tarjan(graph: &StateGraph, allowed: impl Fn(usize) -> bool) -> Vec<SCC> {
                         break;
                     }
                 }
-                let is_trivial =
-                    states.len() == 1 && !graph.successors(v).iter().any(|e| e.target == v);
+                let is_trivial = states.len() == 1 && !graph.edges(v).any(|(w, _)| w == v);
                 sccs.push(SCC::new(states, is_trivial));
             }
         }
