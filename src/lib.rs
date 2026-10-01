@@ -14,6 +14,7 @@ pub mod lexer;
 pub mod liveness;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod load;
+pub mod ltl;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod mcp;
 #[cfg(not(target_arch = "wasm32"))]
@@ -27,6 +28,7 @@ pub mod span;
 pub mod stdlib;
 pub mod substitution;
 pub mod symmetry;
+pub mod tableau;
 pub mod trace_io;
 #[cfg(feature = "wasm")]
 pub mod wasm;
