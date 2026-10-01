@@ -9,12 +9,21 @@
 //! whose infinitely repeated nodes fulfill every eventuality: for each `<>F`, some
 //! repeated node either does not contain `<>F` or contains `F`.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::ltl::{Literal, Ltl};
 
 /// Past this many nodes a formula is too large to check.
 const MAX_NODES: usize = 4096;
+
+/// Past this many expansion steps for one set of formulas, it is too large to check:
+/// a formula within the node cap needs far fewer, so the budget only stops formulas
+/// whose expansion would otherwise run for exponential time before the cap is seen.
+const MAX_EXPANSION_STEPS: usize = 1 << 24;
+
+fn too_large() -> String {
+    format!("the temporal formula needs more than {MAX_NODES} tableau nodes")
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableauNode {
@@ -84,9 +93,7 @@ pub fn build(formula: &Ltl) -> Result<Tableau, String> {
             return Ok(id);
         }
         if nodes.len() >= MAX_NODES {
-            return Err(format!(
-                "the temporal formula needs more than {MAX_NODES} tableau nodes"
-            ));
+            return Err(too_large());
         }
         let id = nodes.len();
         nodes.push(TableauNode {
@@ -105,21 +112,23 @@ pub fn build(formula: &Ltl) -> Result<Tableau, String> {
     };
 
     let mut initial = Vec::new();
-    for branch in expand(&[root], &mut closure) {
-        let id = intern(branch, &mut nodes, &mut frontier)?;
-        if !initial.contains(&id) {
-            initial.push(id);
-        }
+    for branch in expand(&[root], &mut closure)? {
+        initial.push(intern(branch, &mut nodes, &mut frontier)?);
     }
+    let mut expanded: HashMap<FormulaSet, Vec<usize>> = HashMap::new();
     while let Some((id, next)) = frontier.pop() {
-        let pending: Vec<usize> = next.into_iter().collect();
-        let mut successors = Vec::new();
-        for branch in expand(&pending, &mut closure) {
-            let successor = intern(branch, &mut nodes, &mut frontier)?;
-            if !successors.contains(&successor) {
-                successors.push(successor);
+        let successors = match expanded.get(&next) {
+            Some(successors) => successors.clone(),
+            None => {
+                let pending: Vec<usize> = next.iter().copied().collect();
+                let mut successors = Vec::new();
+                for branch in expand(&pending, &mut closure)? {
+                    successors.push(intern(branch, &mut nodes, &mut frontier)?);
+                }
+                expanded.insert(next, successors.clone());
+                successors
             }
-        }
+        };
         nodes[id].successors = successors;
     }
     Ok(Tableau {
@@ -148,16 +157,30 @@ fn collect_eventualities(formula: &Ltl, closure: &mut Closure, out: &mut Vec<(us
     }
 }
 
-/// Every consistent way of satisfying all of `formulas` at one position.
-fn expand(formulas: &[usize], closure: &mut Closure) -> Vec<Branch> {
+/// Every distinct consistent way of satisfying all of `formulas` at one position,
+/// each a different node. Stops with an error as soon as there are more of them than
+/// the tableau may hold, or the expansion exceeds its step budget, rather than first
+/// enumerating every combination of an oversized formula.
+fn expand(formulas: &[usize], closure: &mut Closure) -> Result<Vec<Branch>, String> {
     let mut done = Vec::new();
+    let mut seen: HashSet<(FormulaSet, FormulaSet)> = HashSet::new();
+    let mut steps = 0usize;
     let mut work = vec![Branch {
         pending: formulas.to_vec(),
         ..Branch::default()
     }];
     while let Some(mut branch) = work.pop() {
+        steps += 1;
+        if steps > MAX_EXPANSION_STEPS {
+            return Err(too_large());
+        }
         let Some(id) = branch.pending.pop() else {
-            done.push(branch);
+            if seen.insert((branch.current.clone(), branch.next.clone())) {
+                if seen.len() > MAX_NODES {
+                    return Err(too_large());
+                }
+                done.push(branch);
+            }
             continue;
         };
         if branch.current.contains(&id) {
@@ -191,9 +214,10 @@ fn expand(formulas: &[usize], closure: &mut Closure) -> Vec<Branch> {
             }
             Ltl::Or(parts) => {
                 branch.current.insert(id);
-                for part in &parts {
+                let alternatives: BTreeSet<usize> = parts.iter().map(|p| closure.id(p)).collect();
+                for part in alternatives {
                     let mut alternative = branch.clone();
-                    alternative.pending.push(closure.id(part));
+                    alternative.pending.push(part);
                     work.push(alternative);
                 }
             }
@@ -213,7 +237,7 @@ fn expand(formulas: &[usize], closure: &mut Closure) -> Vec<Branch> {
             }
         }
     }
-    done
+    Ok(done)
 }
 
 #[cfg(test)]
@@ -445,5 +469,60 @@ mod tests {
         );
         let error = build(&many).expect_err("2^14 eventuality combinations exceed the cap");
         assert!(error.contains("tableau nodes"), "{error}");
+    }
+
+    #[test]
+    fn many_eventualities_stop_at_the_cap_without_enumerating_them() {
+        let many = Ltl::And(
+            (0..30)
+                .map(|atom| Ltl::Eventually(Box::new(literal(atom, true))))
+                .collect(),
+        );
+        let error = build(&many).expect_err("2^30 distinct nodes exceed the cap");
+        assert!(error.contains("tableau nodes"), "{error}");
+    }
+
+    #[test]
+    fn repeated_alternatives_do_not_multiply_branches() {
+        let repeated = Ltl::And(
+            (0..40)
+                .map(|atom| Ltl::Or(vec![literal(atom, true), literal(atom, true)]))
+                .collect(),
+        );
+        let tableau = build(&repeated).expect("each disjunction has one distinct alternative");
+        assert_eq!(tableau.initial.len(), 1);
+    }
+
+    #[test]
+    fn converging_disjunctions_within_the_cap_are_built_correctly() {
+        let shared = Ltl::Or(vec![literal(0, true), literal(1, true)]);
+        let formula = Ltl::Always(Box::new(Ltl::And(
+            (0..6)
+                .map(|_| Ltl::Or(vec![literal(STEP_ATOM, true), shared.clone()]))
+                .chain([Ltl::Eventually(Box::new(literal(0, false)))])
+                .collect(),
+        )));
+        let tableau = build(&formula).expect("the distinct nodes fit the cap");
+        let mut rng = fastrand::Rng::with_seed(0xC0DE);
+        for _ in 0..200 {
+            let lasso = random_lasso(&mut rng);
+            let runs = Runs {
+                lasso: &lasso,
+                tableau: &tableau,
+            };
+            assert_eq!(runs.accepts(), lasso.holds(&formula, 0));
+        }
+    }
+
+    #[test]
+    fn conjunction_of_recurrences_builds_within_the_cap() {
+        let recurring = Ltl::And(
+            (0..8)
+                .map(|atom| Ltl::Always(Box::new(Ltl::Eventually(Box::new(literal(atom, true))))))
+                .collect(),
+        );
+        let tableau = build(&recurring).expect("256 eventuality combinations fit the cap");
+        assert!(tableau.nodes.len() <= 4096);
+        assert!(tableau.nodes.iter().all(|n| !n.successors.is_empty()));
     }
 }
