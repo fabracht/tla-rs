@@ -568,7 +568,7 @@ fn distribute_exists(var: &Arc<str>, domain: &Expr, body: &Expr) -> Option<Expr>
     }
 }
 
-fn has_temporal_operator(expr: &Expr) -> bool {
+pub(crate) fn has_temporal_operator(expr: &Expr) -> bool {
     match expr {
         Expr::Always(_)
         | Expr::Eventually(_)
