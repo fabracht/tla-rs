@@ -106,6 +106,11 @@ pub(crate) struct WalkCtx<'a> {
     /// witness; there totality is not required and the walk short-circuits on the
     /// first witness.
     pub require_total: bool,
+    /// Whether a successor may leave variables unassigned: they keep their current
+    /// values, and `Run::unassigned` records which they are. `ENABLED <<A>>_v`
+    /// needs it: TLC evaluates `v` on the partial successor, so `A` may leave the
+    /// variables outside `v` unassigned, and only those.
+    pub partial_successors: bool,
 }
 
 impl WalkCtx<'_> {
@@ -173,6 +178,9 @@ struct Run<'r> {
     /// not assign the variable and were deferred until a sibling conjunct binds
     /// it. Checked as boolean guards when the state is emitted.
     deferred_guards: Vec<Expr>,
+    /// With `WalkCtx::partial_successors`, the indices of the variables each
+    /// result left unassigned, in the order of `results`.
+    unassigned: Vec<Vec<usize>>,
 }
 
 /// Walk one action (a top-level disjunct, already labelled by the caller) and
@@ -191,6 +199,7 @@ pub(crate) fn walk_next(
         assigned_paths: Vec::new(),
         fully_assigned: Vec::new(),
         deferred_guards: Vec::new(),
+        unassigned: Vec::new(),
     };
     walk(action_expr, &Cont::Nil, env, ctx, &mut run)
 }
@@ -210,6 +219,7 @@ pub(crate) fn walk_init(
         defs,
         phase: Phase::Init,
         require_total: true,
+        partial_successors: false,
     };
     let mut results = Vec::new();
     {
@@ -220,6 +230,7 @@ pub(crate) fn walk_init(
             assigned_paths: Vec::new(),
             fully_assigned: Vec::new(),
             deferred_guards: Vec::new(),
+            unassigned: Vec::new(),
         };
         walk(init, &Cont::Nil, env, &ctx, &mut run)?;
     }
@@ -246,6 +257,7 @@ pub(crate) fn walk_action_enabled(
         defs,
         phase: Phase::Next,
         require_total: false,
+        partial_successors: false,
     };
     let mut results = Vec::new();
     let mut run = Run {
@@ -255,9 +267,47 @@ pub(crate) fn walk_action_enabled(
         assigned_paths: Vec::new(),
         fully_assigned: Vec::new(),
         deferred_guards: Vec::new(),
+        unassigned: Vec::new(),
     };
     walk(action, &Cont::Nil, env, &ctx, &mut run)?;
     Ok(!results.is_empty())
+}
+
+/// Every successor of `action` from the current state, the successors
+/// `ENABLED <<A>>_v` evaluates `v` on, each with the indices of the variables it
+/// leaves unassigned (which keep their values in the state).
+pub(crate) fn walk_action_successors(
+    action: &Expr,
+    env: &mut Env,
+    vars: &[Arc<str>],
+    state_keys: &[Arc<str>],
+    defs: &Definitions,
+) -> Result<Vec<(crate::ast::State, Vec<usize>)>> {
+    let ctx = WalkCtx {
+        vars,
+        state_keys,
+        defs,
+        phase: Phase::Next,
+        require_total: true,
+        partial_successors: true,
+    };
+    let mut results = Vec::new();
+    let mut run = Run {
+        action: None,
+        results: &mut results,
+        journal: Vec::new(),
+        assigned_paths: Vec::new(),
+        fully_assigned: Vec::new(),
+        deferred_guards: Vec::new(),
+        unassigned: Vec::new(),
+    };
+    walk(action, &Cont::Nil, env, &ctx, &mut run)?;
+    let unassigned = run.unassigned;
+    Ok(results
+        .into_iter()
+        .map(|t| t.state)
+        .zip(unassigned)
+        .collect())
 }
 
 fn walk(
@@ -402,6 +452,7 @@ fn walk_inner(
                     defs: &merged,
                     phase: ctx.phase,
                     require_total: ctx.require_total,
+                    partial_successors: ctx.partial_successors,
                 };
                 return walk(body, cont, env, &sub_ctx, run);
             }
@@ -493,10 +544,13 @@ fn emit(env: &mut Env, ctx: &WalkCtx<'_>, run: &mut Run<'_>) -> Result<()> {
             state: env_to_next_state(env, ctx.vars, ctx.state_keys),
             action: run.action.clone(),
         });
+        if ctx.partial_successors {
+            run.unassigned.push(Vec::new());
+        }
         return Ok(());
     }
 
-    if ctx.phase == Phase::Next && allow_unassigned_stutter() {
+    if ctx.phase == Phase::Next && (ctx.partial_successors || allow_unassigned_stutter()) {
         for &i in &missing {
             if let Some(current) = env.get(&ctx.vars[i]).cloned() {
                 env.insert(ctx.state_keys[i].clone(), current);
@@ -509,6 +563,9 @@ fn emit(env: &mut Env, ctx: &WalkCtx<'_>, run: &mut Run<'_>) -> Result<()> {
                 state: env_to_next_state(env, ctx.vars, ctx.state_keys),
                 action: run.action.clone(),
             });
+            if ctx.partial_successors {
+                run.unassigned.push(missing.clone());
+            }
         }
         for &i in &missing {
             env.remove(&ctx.state_keys[i]);
@@ -871,6 +928,7 @@ fn walk_qualified_call(
         defs: &merged,
         phase: ctx.phase,
         require_total: ctx.require_total,
+        partial_successors: ctx.partial_successors,
     };
     walk(&bound_body, cont, env, &sub_ctx, run)
 }

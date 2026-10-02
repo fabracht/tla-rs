@@ -3,13 +3,13 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::{ParameterizedInstances, ResolvedInstances};
-use crate::ast::{Env, State, Value};
+use crate::ast::Value;
 
+/// What [`eval_with_context`](super::eval_with_context) needs to evaluate `ENABLED`:
+/// the state variables, whose current values it reads from the environment.
 #[derive(Clone)]
 pub struct EvalContext {
     pub state_vars: Vec<Arc<str>>,
-    pub constants: Env,
-    pub current_state: State,
 }
 
 #[cfg(feature = "profiling")]
@@ -79,6 +79,37 @@ thread_local! {
     pub(super) static RESOLVED_INSTANCE_VARS: RefCell<BTreeMap<Arc<str>, Vec<Arc<str>>>> = const { RefCell::new(BTreeMap::new()) };
     #[cfg(feature = "profiling")]
     pub(super) static PROFILING_STATS: RefCell<ProfilingStats> = const { RefCell::new(ProfilingStats::new()) };
+}
+
+thread_local! {
+    static ENABLED_VARS: RefCell<Option<Vec<Arc<str>>>> = const { RefCell::new(None) };
+}
+
+struct RestoreEnabledVars(Option<Vec<Arc<str>>>);
+
+impl Drop for RestoreEnabledVars {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        ENABLED_VARS.with(|cell| *cell.borrow_mut() = previous);
+    }
+}
+
+/// Runs `body` with `ENABLED` evaluable: an `ENABLED A` reached while it runs reads
+/// the current values of `vars` from the environment it is evaluated in, and asks
+/// whether `A` has a successor from that state.
+pub(crate) fn with_enabled_vars<T>(vars: &[Arc<str>], body: impl FnOnce() -> T) -> T {
+    if ENABLED_VARS.with(|cell| cell.borrow().as_deref() == Some(vars)) {
+        return body();
+    }
+    let restore = RestoreEnabledVars(ENABLED_VARS.with(|cell| cell.replace(Some(vars.to_vec()))));
+    let result = body();
+    drop(restore);
+    result
+}
+
+/// The state variables `ENABLED` reads, inside [`with_enabled_vars`].
+pub(crate) fn enabled_vars() -> Option<Vec<Arc<str>>> {
+    ENABLED_VARS.with(|cell| cell.borrow().clone())
 }
 
 thread_local! {

@@ -84,9 +84,9 @@ impl AtomTruth {
                 }
                 Atom::Step { action, subscript } => {
                     state.push(None);
-                    step.push(Some(step_truth(
-                        graph, action, subscript, vars, constants, defs,
-                    )?));
+                    step.push(Some(crate::eval::with_enabled_vars(vars, || {
+                        step_truth(graph, action, subscript, vars, constants, defs)
+                    })?));
                 }
             }
         }

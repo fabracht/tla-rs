@@ -1044,11 +1044,10 @@ fn classify_into(
                 .iter()
                 .all(|part| matches!(part, PropertyPart::Liveness(_)))
             {
-                return Err(
+                return Err(format!(
                     "a disjunction with a disjunct that is not a liveness property (such as \
-                     `x = 1 \\/ <>P` or `[]P \\/ []Q`) is not supported in a PROPERTY yet"
-                        .to_string(),
-                );
+                     `x = 1 \\/ <>P` or `[]P \\/ []Q`){LEGACY_UNSUPPORTED}"
+                ));
             }
             parts.extend(disjuncts);
             Ok(())
@@ -1090,8 +1089,11 @@ fn classify_into(
     }
 }
 
+const LEGACY_UNSUPPORTED: &str = " is not supported in a PROPERTY by the legacy liveness engine; \
+     the tableau engine checks it (`--liveness-engine tableau`, MCP `liveness_engine: \"tableau\"`)";
+
 fn liveness_form(expr: &Expr) -> Result<Expr, String> {
-    let unsupported = |what: &str| Err(format!("{what} is not supported in a PROPERTY yet"));
+    let unsupported = |what: &str| Err(format!("{what}{LEGACY_UNSUPPORTED}"));
     match expr {
         Expr::LeadsTo(p, q) if is_state_level(p) && is_state_level(q) => Ok(expr.clone()),
         Expr::Eventually(inner) => match inner.as_ref() {

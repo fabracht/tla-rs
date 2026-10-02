@@ -4,11 +4,13 @@
 //! transition), `/\`, `\/`, `[]` and `<>`, with negation only on atoms. Everything
 //! else a TLA+ property can say is rewritten into that shape while it is built:
 //! `~>`, `=>`, `<=>` and `IF` over temporal formulas, `<<A>>_v` as the negation of
-//! `[~A]_v`, and `\A x \in S` / `\E x \in S` as the conjunction / disjunction of the
-//! instances over a constant `S`.
+//! `[~A]_v`, `WF_v(A)` as `[]<>~ENABLED <<A>>_v \/ []<><<A>>_v` and `SF_v(A)` as
+//! `<>[]~ENABLED <<A>>_v \/ []<><<A>>_v`, and `\A x \in S` / `\E x \in S` as the
+//! conjunction / disjunction of the instances over a constant `S`. A state predicate
+//! may use `ENABLED`.
 
 use crate::ast::{Expr, Value, has_temporal_operator};
-use crate::eval::{Definitions, contains_prime_ref_resolving_lets};
+use crate::eval::{Definitions, contains_free_prime_ref};
 
 /// What an atom constrains: a state predicate holds at a position of a behavior, a
 /// step `[A]_v` holds on the transition from that position to the next.
@@ -177,10 +179,20 @@ impl Builder<'_, '_> {
                 }
                 Ok(dual(universal == positive, instances))
             }
-            Expr::WeakFairness(_, _) | Expr::StrongFairness(_, _) => Err(
-                "a fairness formula (`WF`/`SF`) is not supported inside a temporal formula yet"
-                    .to_string(),
-            ),
+            Expr::WeakFairness(subscript, action) | Expr::StrongFairness(subscript, action) => {
+                let step = Expr::DiamondAction(action.clone(), subscript.clone());
+                let disabled = Expr::Not(Box::new(Expr::EnabledOp(Box::new(step.clone()))));
+                let often = |f: Expr| Expr::Always(Box::new(Expr::Eventually(Box::new(f))));
+                let unless_taken = if matches!(expr, Expr::WeakFairness(..)) {
+                    often(disabled)
+                } else {
+                    Expr::Eventually(Box::new(Expr::Always(Box::new(disabled))))
+                };
+                self.build(
+                    &Expr::Or(Box::new(unless_taken), Box::new(often(step))),
+                    positive,
+                )
+            }
             _ => Err(format!("unsupported temporal formula: {expr:?}")),
         }
     }
@@ -194,10 +206,7 @@ impl Builder<'_, '_> {
             });
         }
         self.reject_run_dependent(expr)?;
-        if crate::eval::uses_enabled(expr, self.defs) {
-            return Err("ENABLED is not supported in a temporal formula yet".to_string());
-        }
-        if contains_prime_ref_resolving_lets(expr, self.defs) {
+        if contains_free_prime_ref(expr, self.defs) {
             return Err(
                 "an action formula must appear as `[][A]_v` or `<<A>>_v` in a temporal formula"
                     .to_string(),
@@ -359,5 +368,59 @@ mod tests {
         assert!(atoms.atoms().is_empty());
         let error = build("<>(x' = x + 1)", true).unwrap_err();
         assert!(error.contains("[][A]_v"), "{error}");
+    }
+
+    #[test]
+    fn fairness_expands_into_enabledness_and_occurrence() {
+        let always_eventually = |f: Ltl| Ltl::Always(Box::new(Ltl::Eventually(Box::new(f))));
+        let eventually_always = |f: Ltl| Ltl::Eventually(Box::new(Ltl::Always(Box::new(f))));
+        let (weak, atoms) = build("WF_x(x' > x)", true).unwrap();
+        assert_eq!(
+            weak,
+            Ltl::Or(vec![
+                always_eventually(literal(0, true)),
+                always_eventually(literal(1, false)),
+            ])
+        );
+        assert!(state_atom(&atoms, 0).starts_with("Not(EnabledOp(DiamondAction("));
+        assert!(matches!(
+            &atoms.atoms()[1],
+            Atom::Step {
+                action: Expr::Not(_),
+                ..
+            }
+        ));
+        let (strong, _) = build("SF_x(x' > x)", true).unwrap();
+        assert_eq!(
+            strong,
+            Ltl::Or(vec![
+                eventually_always(literal(0, true)),
+                always_eventually(literal(1, false)),
+            ])
+        );
+        let (violated, _) = build("WF_x(x' > x)", false).unwrap();
+        assert_eq!(
+            violated,
+            Ltl::And(vec![
+                eventually_always(literal(0, false)),
+                eventually_always(literal(1, true)),
+            ]),
+            "~WF: eventually always enabled, eventually never taken"
+        );
+    }
+
+    #[test]
+    fn primes_bound_by_enabled_make_a_state_predicate() {
+        let (formula, atoms) = build("[]<>ENABLED (x' > x)", true).unwrap();
+        assert_eq!(
+            formula,
+            Ltl::Always(Box::new(Ltl::Eventually(Box::new(literal(0, true)))))
+        );
+        assert!(state_atom(&atoms, 0).starts_with("EnabledOp("));
+        let error = build("<>(ENABLED (x' = 1) /\\ x' = x)", true).unwrap_err();
+        assert!(
+            error.contains("[][A]_v"),
+            "a prime outside ENABLED: {error}"
+        );
     }
 }

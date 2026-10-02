@@ -92,7 +92,9 @@ Each `PROPERTY` is split into the parts TLC checks separately:
 Two liveness engines are available through `--liveness-engine`:
 
 - `legacy` (default) checks `[]<>P`, `<>P`, `<>[]P` and `P ~> Q` over state predicates, with `\A x \in S` distributed over them.
-- `tableau` checks any temporal formula over state predicates and `[][A]_v` / `<<A>>_v` steps, as TLC does: disjunctions, nested temporal operators, negation, `IF` and implication over temporal formulas, and `\A`/`\E` over constant sets. It classifies `PROPERTY` conjuncts on their syntax as TLC does and enforces the temporal conjuncts of the `SPECIFICATION` other than `WF`/`SF` as assumptions. A property it cannot express (`ENABLED`, `WF`/`SF` inside the property, `TLCGet`, `RandomElement`, the time built-ins) is rejected before the state search.
+- `tableau` checks any temporal formula over state predicates and `[][A]_v` / `<<A>>_v` steps, as TLC does: disjunctions, nested temporal operators, negation, `IF` and implication over temporal formulas, `\A`/`\E` over constant sets, `ENABLED` in state predicates, and `WF`/`SF`. It classifies `PROPERTY` conjuncts on their syntax as TLC does and enforces the temporal conjuncts of the `SPECIFICATION` other than `WF`/`SF` as assumptions. A property that uses `TLCGet`, `RandomElement` or the time built-ins is rejected before the state search.
+
+With `tableau`, `WF`/`SF` in a `PROPERTY` is something to prove, not an assumption, so a property can be a whole abstract specification. With `ASpec == AInit /\ [][ANext]_v /\ WF_v(A)`, `PROPERTY ASpec` checks `AInit` on the initial states, `[][ANext]_v` on every step, and the fairness as liveness. `ENABLED A` holds in a state when `A` has a successor from it, whether or not `Next` takes it.
 
 ```bash
 tla spec.tla --liveness-engine tableau

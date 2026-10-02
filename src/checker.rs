@@ -719,7 +719,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         };
         if !init_properties.is_empty() {
             if !config.continue_on_violation {
-                match violated_invariants(spec, &state, &base_env, &domains, &defs) {
+                match violated_invariants(spec, &state, &base_env, &defs) {
                     Ok(violated) => {
                         if let Some(&first) = violated.first() {
                             stats.elapsed_secs = elapsed_secs();
@@ -740,8 +740,6 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             bind_state(&mut env, &spec.vars, &state);
             let init_ctx = EvalContext {
                 state_vars: spec.vars.clone(),
-                constants: domains.clone(),
-                current_state: state.clone(),
             };
             for (name, predicate) in &init_properties {
                 match eval_with_context(predicate, &mut env, &defs, &init_ctx) {
@@ -771,7 +769,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             if spec.invariants.is_empty() || !excluded_checked.insert(state.clone()) {
                 continue;
             }
-            let violated = match violated_invariants(spec, &state, &base_env, &domains, &defs) {
+            let violated = match violated_invariants(spec, &state, &base_env, &defs) {
                 Ok(violated) => violated,
                 Err(e) => return CheckResult::InvariantError(e, vec![state.clone()], None),
             };
@@ -977,8 +975,6 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
         let ctx = EvalContext {
             state_vars: spec.vars.clone(),
-            constants: domains.clone(),
-            current_state: current.clone(),
         };
 
         for (idx, invariant) in spec.invariants.iter().enumerate() {
@@ -1144,8 +1140,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                     {
                         continue;
                     }
-                    let violated =
-                        violated_invariants(spec, &transition.state, &base_env, &domains, &defs);
+                    let violated = violated_invariants(spec, &transition.state, &base_env, &defs);
                     let with_successor = || {
                         let (mut trace, mut actions) =
                             reconstruct_trace(current_idx, &states, &parent, &parent_action);
@@ -1197,14 +1192,11 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                     return CheckResult::NextError(e, trace, dot);
                 }
             }
-            if let Some(refinement) = &refinement {
-                match refinement.step_refines(
-                    &ctx.current_state,
-                    &transition.state,
-                    &spec.vars,
-                    &base_env,
-                    &defs,
-                ) {
+            if let Some(refinement) = &refinement
+                && let Some(from) = states.get_index(current_idx)
+            {
+                match refinement.step_refines(from, &transition.state, &spec.vars, &base_env, &defs)
+                {
                     Ok(true) => {}
                     Ok(false) => {
                         let (mut trace, mut actions) =
@@ -1303,7 +1295,6 @@ fn violated_invariants(
     spec: &Spec,
     state: &State,
     base_env: &Env,
-    domains: &Env,
     defs: &Definitions,
 ) -> Result<Vec<usize>, EvalError> {
     if spec.invariants.is_empty() {
@@ -1313,8 +1304,6 @@ fn violated_invariants(
     bind_state(&mut env, &spec.vars, state);
     let ctx = EvalContext {
         state_vars: spec.vars.clone(),
-        constants: domains.clone(),
-        current_state: state.clone(),
     };
     let mut violated = Vec::new();
     for (idx, invariant) in spec.invariants.iter().enumerate() {

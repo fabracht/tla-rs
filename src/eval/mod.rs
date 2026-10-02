@@ -50,10 +50,10 @@ pub use self::state::{
 };
 
 pub(crate) use self::ast_utils::{
-    contains_prime_ref, contains_prime_ref_resolving_lets, expr_contains, expr_references,
-    parameterized_let_op, reaches_temporal, references_state, uses_enabled,
-    uses_run_dependent_builtin,
+    contains_free_prime_ref, contains_prime_ref, expr_contains, expr_references,
+    parameterized_let_op, reaches_temporal, references_state, uses_run_dependent_builtin,
 };
+pub(crate) use self::global_state::with_enabled_vars;
 pub use self::walk::{EngineOverride, set_allow_unassigned_stutter, set_use_inference_engine};
 
 pub(crate) fn resolve_parameterized_defs(
@@ -766,5 +766,49 @@ mod tests {
         let env = state_to_env(&state, &vars);
         assert_eq!(env.get(&var("x")), Some(&Value::Int(1)));
         assert_eq!(env.get(&var("y")), Some(&Value::Int(2)));
+    }
+
+    #[test]
+    fn enabled_is_evaluated_from_the_environment_anywhere_in_an_expression() {
+        let vars = vec![var("x"), var("y")];
+        let mut env = Env::new();
+        env.insert(var("x"), Value::Int(0));
+        env.insert(var("y"), Value::Int(0));
+        let defs = Definitions::new();
+        let context = EvalContext {
+            state_vars: vars.clone(),
+        };
+        let only_x = eq(
+            prime_expr("x"),
+            Expr::Add(Box::new(var_expr("x")), Box::new(lit_int(1))),
+        );
+        let enabled = |action: Expr| Expr::EnabledOp(Box::new(action));
+        let angle = |subscript: Expr| {
+            enabled(Expr::DiamondAction(
+                Box::new(only_x.clone()),
+                Box::new(subscript),
+            ))
+        };
+        let equiv = Expr::Equiv(Box::new(enabled(only_x.clone())), Box::new(lit_bool(true)));
+        assert_eq!(
+            eval_with_context(&equiv, &mut env, &defs, &context).unwrap(),
+            Value::Bool(true),
+            "ENABLED under <=>, of an action that leaves y unassigned"
+        );
+        assert_eq!(
+            eval_with_context(&angle(var_expr("x")), &mut env, &defs, &context).unwrap(),
+            Value::Bool(true),
+            "<<A>>_x: A determines x, the only variable of the subscript"
+        );
+        let both = Expr::TupleLit(vec![var_expr("x"), var_expr("y")]);
+        let error = eval_with_context(&angle(both), &mut env, &defs, &context).unwrap_err();
+        assert!(
+            error.to_string().contains("leaves y unassigned"),
+            "<<A>>_<<x, y>> depends on y, which A leaves unassigned: {error}"
+        );
+        assert!(
+            eval(&enabled(only_x), &mut env, &defs).is_err(),
+            "outside eval_with_context ENABLED has no state to read"
+        );
     }
 }

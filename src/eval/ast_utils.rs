@@ -142,21 +142,27 @@ enum LetScope {
     Resolved,
 }
 
-/// How [`refers_through_defs`] walks: how it treats `LET` operators, and whether a
+/// How [`refers_through_defs`] walks: how it treats `LET` operators, whether a
 /// call it cannot resolve (an operator outside the definitions, such as one the
-/// evaluator provides by name, or an unresolved instance) counts as a match. It
-/// must for checks where a missed match is unsafe (primes, state, temporal
-/// operators); it must not for checks that reject what they match.
+/// evaluator provides by name, or an unresolved instance) counts as a match, and
+/// whether it skips the action under `ENABLED`. An unresolved call must count for
+/// checks where a missed match is unsafe (primes, state, temporal operators), and
+/// must not for checks that reject what they match. Skipping `ENABLED` suits a
+/// check for primes free in a formula: `ENABLED A` binds the primes of `A`. That
+/// walk substitutes operator arguments and `LET` definitions into the expressions
+/// using them, so an action passed to `ENABLED` through either is skipped too.
 #[derive(Debug, Clone, Copy)]
 struct Walk {
     lets: LetScope,
     unknown_calls_match: bool,
+    skips_enabled: bool,
 }
 
-/// [`contains_prime_ref`] for a complete set of definitions: it looks into
-/// `LET`-defined operators, and an operator still unknown is one the evaluator
-/// provides by name, which never refers to a primed variable.
-pub(crate) fn contains_prime_ref_resolving_lets(expr: &Expr, defs: &Definitions) -> bool {
+/// Whether `expr` refers to a primed variable that `ENABLED` does not bind, for a
+/// complete set of definitions: it looks into `LET`-defined operators, and an
+/// operator still unknown is one the evaluator provides by name, which never refers
+/// to a primed variable.
+pub(crate) fn contains_free_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
     let mut visited = BTreeSet::new();
     let is_prime = |e: &Expr| matches!(e, Expr::Prime(_) | Expr::Unchanged(_));
     refers_through_defs(
@@ -167,6 +173,7 @@ pub(crate) fn contains_prime_ref_resolving_lets(expr: &Expr, defs: &Definitions)
         Walk {
             lets: LetScope::Resolved,
             unknown_calls_match: false,
+            skips_enabled: true,
         },
     )
 }
@@ -182,6 +189,7 @@ pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
         Walk {
             lets: LetScope::Opaque,
             unknown_calls_match: true,
+            skips_enabled: false,
         },
     )
 }
@@ -211,6 +219,7 @@ pub(crate) fn references_state(expr: &Expr, vars: &[Arc<str>], defs: &Definition
         Walk {
             lets: LetScope::Resolved,
             unknown_calls_match: true,
+            skips_enabled: false,
         },
     )
 }
@@ -233,22 +242,7 @@ pub(crate) fn uses_run_dependent_builtin(expr: &Expr, defs: &Definitions) -> boo
         Walk {
             lets: LetScope::Resolved,
             unknown_calls_match: false,
-        },
-    )
-}
-
-/// Whether `expr` uses `ENABLED`, directly or through the definitions it calls.
-pub(crate) fn uses_enabled(expr: &Expr, defs: &Definitions) -> bool {
-    let mut visited = BTreeSet::new();
-    let is_enabled = |e: &Expr| matches!(e, Expr::EnabledOp(_));
-    refers_through_defs(
-        expr,
-        defs,
-        &mut visited,
-        &is_enabled,
-        Walk {
-            lets: LetScope::Resolved,
-            unknown_calls_match: false,
+            skips_enabled: false,
         },
     )
 }
@@ -277,6 +271,7 @@ pub(crate) fn reaches_temporal(expr: &Expr, defs: &Definitions) -> bool {
         Walk {
             lets: LetScope::Resolved,
             unknown_calls_match: true,
+            skips_enabled: false,
         },
     )
 }
@@ -297,6 +292,7 @@ fn refers_through_defs(
     }
     match expr {
         Expr::Prime(_) | Expr::Unchanged(_) => false,
+        Expr::EnabledOp(_) if scope.skips_enabled => false,
         Expr::Var(name) => match defs.get(name) {
             Some((params, body)) if params.is_empty() => {
                 if !visited.insert(name.clone()) {
@@ -423,6 +419,27 @@ fn refers_through_defs(
                         || refers_through_defs(val, defs, visited, leaf, scope)
                 })
         }
+        Expr::FnCall(name, args) if scope.skips_enabled => match defs.get(name) {
+            Some((params, body)) if params.len() == args.len() => {
+                if !visited.insert(name.clone()) {
+                    return false;
+                }
+                let subs: Vec<(Arc<str>, Expr)> =
+                    params.iter().cloned().zip(args.iter().cloned()).collect();
+                let result = refers_through_defs(
+                    &crate::substitution::substitute_expr(body, &subs),
+                    defs,
+                    visited,
+                    leaf,
+                    scope,
+                );
+                visited.remove(name);
+                result
+            }
+            _ => args
+                .iter()
+                .any(|a| refers_through_defs(a, defs, visited, leaf, scope)),
+        },
         Expr::FnCall(name, args) => {
             if args
                 .iter()
@@ -478,6 +495,13 @@ fn refers_through_defs(
                 with_local.insert(name.clone(), (params, Arc::new(op_body.clone())));
                 refers_through_defs(body, &with_local, visited, leaf, scope)
             }
+            None if scope.skips_enabled => refers_through_defs(
+                &crate::substitution::substitute_expr(body, &[(name.clone(), (**binding).clone())]),
+                defs,
+                visited,
+                leaf,
+                scope,
+            ),
             _ => {
                 refers_through_defs(binding, defs, visited, leaf, scope)
                     || refers_through_defs(body, defs, visited, leaf, scope)
