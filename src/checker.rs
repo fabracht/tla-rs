@@ -67,6 +67,26 @@ pub struct CheckerConfig {
     pub check_refinement: Option<Arc<str>>,
     /// Names of the cfg `PROPERTY` definitions, reported as checked on success.
     pub properties: Vec<Arc<str>>,
+    /// Which liveness checker runs: the property-shape checks, or the tableau of
+    /// the negated property (any temporal formula, with TLC's classification).
+    pub liveness_engine: LivenessEngine,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LivenessEngine {
+    #[default]
+    Legacy,
+    Tableau,
+}
+
+impl LivenessEngine {
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "legacy" => Some(Self::Legacy),
+            "tableau" => Some(Self::Tableau),
+            _ => None,
+        }
+    }
 }
 
 impl Default for CheckerConfig {
@@ -100,6 +120,7 @@ impl Default for CheckerConfig {
             max_subbag_copies: 20,
             check_refinement: None,
             properties: Vec::new(),
+            liveness_engine: LivenessEngine::default(),
         }
     }
 }
@@ -202,6 +223,8 @@ pub enum PrepareSpecError {
     AssumeError(usize, EvalError),
     NonModelValueSymmetry(Arc<str>, Vec<String>),
     RefinementConfigError(String),
+    /// A liveness property the tableau checker cannot translate.
+    LivenessProperty(String),
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -610,6 +633,18 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         base_env.clone()
     };
 
+    let tableau_properties =
+        if needs_liveness_check && config.liveness_engine == LivenessEngine::Tableau {
+            match tableau_properties(spec, &domains, &defs) {
+                Ok(properties) => properties,
+                Err(message) => {
+                    return CheckResult::PrepareError(PrepareSpecError::LivenessProperty(message));
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
     let mut violation_counts_by_inv: Vec<usize> = vec![0; spec.invariants.len()];
     let mut excluded_checked: HashSet<State> = HashSet::new();
     let mut property_violation_counts: BTreeMap<Arc<str>, usize> = BTreeMap::new();
@@ -683,6 +718,24 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             Err(e) => return CheckResult::InitError(e),
         };
         if !init_properties.is_empty() {
+            if !config.continue_on_violation {
+                match violated_invariants(spec, &state, &base_env, &domains, &defs) {
+                    Ok(violated) => {
+                        if let Some(&first) = violated.first() {
+                            stats.elapsed_secs = elapsed_secs();
+                            return CheckResult::InvariantViolation(
+                                Counterexample {
+                                    trace: vec![state.clone()],
+                                    actions: vec![None],
+                                    violated_invariant: first,
+                                },
+                                stats,
+                            );
+                        }
+                    }
+                    Err(e) => return CheckResult::InvariantError(e, vec![state.clone()], None),
+                }
+            }
             let mut env = base_env.clone();
             bind_state(&mut env, &spec.vars, &state);
             let init_ctx = EvalContext {
@@ -1223,6 +1276,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             defs: &defs,
             config,
             excluded_successors: &excluded_successors,
+            tableau_properties: &tableau_properties,
         };
         match check_liveness_properties(ctx, &states, &parent, &all_edges, &elapsed_secs) {
             Ok(LivenessCheckOutcome::Ok) => {}
@@ -1409,6 +1463,7 @@ struct LivenessContext<'a> {
     defs: &'a Definitions,
     config: &'a CheckerConfig,
     excluded_successors: &'a [Vec<State>],
+    tableau_properties: &'a [TableauProperty],
 }
 
 fn check_liveness_properties(
@@ -1424,6 +1479,7 @@ fn check_liveness_properties(
         defs,
         config,
         excluded_successors,
+        tableau_properties,
     } = ctx;
     let time_exceeded = || match config.max_seconds {
         Some(max_secs) => elapsed_secs() as u64 >= max_secs,
@@ -1465,6 +1521,25 @@ fn check_liveness_properties(
     }
 
     let fairness = expand_fairness(spec, domains, defs)?;
+    if config.liveness_engine == LivenessEngine::Tableau {
+        let table = liveness::FairnessTable::build(
+            &graph,
+            &fairness,
+            excluded_successors,
+            &spec.vars,
+            domains,
+            defs,
+        )?;
+        return tableau_liveness(
+            spec,
+            domains,
+            defs,
+            tableau_properties,
+            &graph,
+            &table,
+            &time_exceeded,
+        );
+    }
     let mut liveness_properties = Vec::new();
     for property in &spec.liveness_properties {
         expand_liveness(
@@ -1507,6 +1582,116 @@ fn check_liveness_properties(
         }
     }
 
+    Ok(LivenessCheckOutcome::Ok)
+}
+
+/// A liveness property as the tableau checker searches it: the negation of the
+/// property conjoined with the specification's temporal assumptions, compiled.
+struct TableauProperty {
+    name: Arc<str>,
+    violation: crate::ltl_check::Compiled,
+    atoms: crate::ltl::AtomTable,
+}
+
+/// The tableau formulas of the liveness properties, built before the state search
+/// so a property the tableau checker cannot express is reported up front. The
+/// `WF`/`SF` parts a legacy `*Spec` extraction leaves in a quantified formula are
+/// fairness, already applied, not obligations; in a cfg `PROPERTY` they are
+/// obligations and stay.
+fn tableau_properties(
+    spec: &Spec,
+    domains: &Env,
+    defs: &Definitions,
+) -> Result<Vec<TableauProperty>, String> {
+    spec.liveness_properties
+        .iter()
+        .filter_map(|property| {
+            if property.from_specification {
+                crate::ast::without_fairness(&property.formula).map(|formula| (property, formula))
+            } else {
+                Some((property, property.formula.clone()))
+            }
+        })
+        .map(|(property, formula)| {
+            let formula = if crate::ast::has_temporal_operator(&formula) {
+                formula
+            } else {
+                Expr::Always(Box::new(Expr::Eventually(Box::new(formula))))
+            };
+            let mut atoms = crate::ltl::AtomTable::new();
+            let mut domain = |set: &Expr| {
+                quantifier_elements(set, domains, defs).map_err(|e| format_eval_error(&e))
+            };
+            let mut builder = crate::ltl::Builder {
+                atoms: &mut atoms,
+                defs,
+                domain: &mut domain,
+            };
+            let describe = |e: String| format!("PROPERTY '{}': {e}", property.name);
+            let mut conjuncts = vec![builder.build(&formula, false).map_err(describe)?];
+            for assumption in &spec.temporal_assumptions {
+                conjuncts.push(builder.build(assumption, true).map_err(describe)?);
+            }
+            let violation = crate::ltl_check::compile(&crate::ltl::Ltl::And(conjuncts), &atoms)
+                .map_err(describe)?;
+            Ok(TableauProperty {
+                name: property.name.clone(),
+                violation,
+                atoms,
+            })
+        })
+        .collect()
+}
+
+/// Each liveness property checked by searching for a fair behavior that satisfies
+/// the specification's temporal assumptions and violates the property.
+fn tableau_liveness(
+    spec: &Spec,
+    domains: &Env,
+    defs: &Definitions,
+    properties: &[TableauProperty],
+    graph: &StateGraph,
+    table: &liveness::FairnessTable,
+    time_exceeded: &dyn Fn() -> bool,
+) -> Result<LivenessCheckOutcome, EvalError> {
+    let model = crate::ltl_check::Model {
+        vars: &spec.vars,
+        constants: domains,
+        defs,
+    };
+    for property in properties {
+        if time_exceeded() {
+            return Ok(LivenessCheckOutcome::TimeExceeded);
+        }
+        let search = crate::ltl_check::find_behavior(
+            graph,
+            table,
+            &property.violation,
+            &property.atoms,
+            &model,
+            time_exceeded,
+        )?;
+        match search {
+            crate::ltl_check::Search::Clean => {}
+            crate::ltl_check::Search::OutOfTime => {
+                return Ok(LivenessCheckOutcome::TimeExceeded);
+            }
+            crate::ltl_check::Search::Violation(lasso, fairness_info) => {
+                let states_at = |indices: &[usize]| -> Vec<State> {
+                    indices
+                        .iter()
+                        .filter_map(|&idx| graph.get_state(idx).cloned())
+                        .collect()
+                };
+                return Ok(LivenessCheckOutcome::Violation(LivenessViolation {
+                    prefix: states_at(&lasso.prefix),
+                    cycle: states_at(&lasso.cycle),
+                    property: property.name.to_string(),
+                    fairness_info,
+                }));
+            }
+        }
+    }
     Ok(LivenessCheckOutcome::Ok)
 }
 
@@ -2227,6 +2412,12 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                 json_string(message)
             )
         }
+        CheckResult::PrepareError(PrepareSpecError::LivenessProperty(message)) => {
+            format!(
+                r#"{{"status": "liveness_property_error", "error": {}}}"#,
+                json_string(message)
+            )
+        }
         CheckResult::LivenessViolation(violation, stats) => {
             format!(
                 r#"{{"status": "liveness_violation", "property": {}, "prefix": {}, "cycle": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
@@ -2323,6 +2514,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
         let result = CheckResult::InitError(EvalError::domain_error("line one\nline \"two\"\t"));
         let json = check_result_to_json(&result, &spec);
@@ -2414,6 +2606,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
 
         let domains = Env::new();
@@ -2452,6 +2645,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
 
         let domains = Env::new();
@@ -2496,6 +2690,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         }
     }
 
@@ -2553,6 +2748,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
         assert!(
             unchecked_predicate_warning(&spec, false).is_none(),
@@ -2587,6 +2783,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
         assert!(
             unchecked_predicate_warning(&spec, false).is_none(),
@@ -2614,6 +2811,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
 
         let domains = Env::new();
@@ -2658,6 +2856,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
 
         let domains = Env::new();
@@ -2700,6 +2899,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
 
         let domains = Env::new();
@@ -2755,6 +2955,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
 
         let domains = Env::new();
@@ -2791,6 +2992,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
 
         let domains = Env::new();
@@ -2829,6 +3031,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
 
         let result = check(&spec, &Env::new(), &CheckerConfig::default());
@@ -2885,6 +3088,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
 
         let result1 = check(&spec1, &Env::new(), &CheckerConfig::default());
@@ -2930,6 +3134,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
 
         let result2 = check(&spec2, &Env::new(), &CheckerConfig::default());

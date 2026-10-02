@@ -23,6 +23,10 @@ pub struct ValidateSpecInput {
     pub constants: BTreeMap<String, String>,
     #[serde(default)]
     pub config_path: Option<String>,
+    /// The liveness engine whose `PROPERTY` classification to use, as in
+    /// `check_spec`.
+    #[serde(default)]
+    pub liveness_engine: Option<LivenessEngineInput>,
 }
 
 #[derive(Serialize, JsonSchema, Debug)]
@@ -112,6 +116,10 @@ pub struct ListInvariantsInput {
     pub constants: BTreeMap<String, String>,
     #[serde(default)]
     pub config_path: Option<String>,
+    /// The liveness engine whose `PROPERTY` classification to use, as in
+    /// `check_spec`.
+    #[serde(default)]
+    pub liveness_engine: Option<LivenessEngineInput>,
 }
 
 #[derive(Serialize, JsonSchema, Debug)]
@@ -178,6 +186,18 @@ pub struct CheckSpecInput {
     pub state_constraint: Option<String>,
     #[serde(default)]
     pub config_path: Option<String>,
+    /// `tableau` checks any temporal PROPERTY by TLC's tableau method and classifies
+    /// PROPERTY conjuncts as TLC does; `legacy` (the default) checks the supported
+    /// property shapes.
+    #[serde(default)]
+    pub liveness_engine: Option<LivenessEngineInput>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum LivenessEngineInput {
+    Legacy,
+    Tableau,
 }
 
 #[derive(Serialize, JsonSchema, Debug)]
@@ -342,6 +362,10 @@ pub struct ReplayScenarioInput {
     pub constants: BTreeMap<String, String>,
     #[serde(default)]
     pub config_path: Option<String>,
+    /// The liveness engine whose `PROPERTY` classification to use, as in
+    /// `check_spec`.
+    #[serde(default)]
+    pub liveness_engine: Option<LivenessEngineInput>,
 }
 
 #[derive(Serialize, JsonSchema, Debug)]

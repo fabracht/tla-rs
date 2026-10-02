@@ -5,8 +5,8 @@ use serde_json::json;
 use tla_checker::mcp::runner;
 use tla_checker::mcp::schema::{
     AppendBeatInput, CheckOutcome, CheckSpecInput, DemoStatus, ErrorPhase, ExportDemoDocInput,
-    ExportDemoHtmlInput, LimitKind, ListInvariantsInput, ReplayScenarioInput, ScenarioStatus,
-    ValidateDemoInput, ValidateSpecInput, ValidationStatus,
+    ExportDemoHtmlInput, LimitKind, ListInvariantsInput, LivenessEngineInput, ReplayScenarioInput,
+    ScenarioStatus, ValidateDemoInput, ValidateSpecInput, ValidationStatus,
 };
 
 fn pass_spec(name: &str) -> String {
@@ -25,6 +25,7 @@ fn validate_spec_returns_summary_for_valid_spec() {
             .into_iter()
             .collect(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::validate_spec(&input);
     assert_eq!(out.schema_version, "2");
@@ -46,6 +47,7 @@ fn validate_spec_reports_io_error_for_missing_file() {
         spec_path: "does_not_exist.tla".into(),
         constants: BTreeMap::new(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::validate_spec(&input);
     assert!(matches!(out.status, ValidationStatus::Error));
@@ -68,6 +70,7 @@ fn list_invariants_returns_invariant_names() {
             .into_iter()
             .collect(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::list_invariants(&input);
     assert_eq!(out.schema_version, "2");
@@ -91,6 +94,7 @@ fn check_spec_returns_invariant_violation_with_trace() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -130,6 +134,7 @@ fn check_spec_reports_limit_reached_when_budget_exhausted() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -157,6 +162,7 @@ fn check_spec_reports_missing_constant_as_structured_error() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -186,6 +192,7 @@ fn check_spec_reports_parse_error_with_span() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -215,6 +222,7 @@ fn check_spec_passes_for_safe_spec() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -247,6 +255,7 @@ fn check_spec_warns_about_misnamed_invariant_alongside_a_checked_one() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -285,6 +294,7 @@ fn check_spec_honors_cfg_check_deadlock_false_when_input_unset() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -323,6 +333,7 @@ fn check_spec_reports_deadlock_by_default_when_neither_cfg_nor_input_allows() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -348,6 +359,7 @@ fn validate_spec_surfaces_parser_warnings() {
         spec_path: path.to_string_lossy().into_owned(),
         constants: BTreeMap::new(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::validate_spec(&input);
     let _ = std::fs::remove_file(&path);
@@ -373,6 +385,7 @@ fn replay_scenario_returns_step_by_step_trace() {
             .into_iter()
             .collect(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::replay_scenario(&input);
     assert_eq!(out.schema_version, "2");
@@ -400,6 +413,7 @@ fn replay_scenario_reports_failure_with_available_actions() {
             .into_iter()
             .collect(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::replay_scenario(&input);
     assert!(
@@ -442,6 +456,7 @@ fn check_spec_honors_cfg_constraint_directive() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -485,6 +500,7 @@ fn check_spec_honors_input_state_constraint() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: Some("x < 3".to_string()),
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -520,6 +536,7 @@ fn check_spec_reports_state_constraint_parse_error() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: Some(")))".to_string()),
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -574,6 +591,7 @@ fn check_spec_extracts_wf_from_non_spec_named_specification() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -632,6 +650,7 @@ fn check_spec_handles_wf_in_spec_named_definition() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -697,6 +716,7 @@ fn check_spec_detects_leads_to_violation_in_sub_scc() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -770,6 +790,7 @@ fn check_spec_does_not_report_leads_to_violation_when_subscc_unreachable() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -823,6 +844,7 @@ fn check_spec_enforces_wf_vars_for_unfair_cycle_inside_larger_scc() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -885,6 +907,7 @@ fn check_spec_expands_quantified_fairness_and_leads_to_property() {
             count_satisfying: vec![],
             continue_on_violation: false,
             state_constraint: None,
+            liveness_engine: None,
             config_path: None,
         };
         runner::check_spec(&input).outcome
@@ -963,6 +986,7 @@ fn check_spec_routes_cfg_temporal_property_to_liveness_checker() {
             count_satisfying: vec![],
             continue_on_violation: false,
             state_constraint: None,
+            liveness_engine: None,
             config_path: None,
         };
         runner::check_spec(&input).outcome
@@ -1038,6 +1062,7 @@ fn check_spec_reports_fair_sub_cycle_when_an_unfair_sub_cycle_shares_the_scc() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -1062,6 +1087,7 @@ fn validate_spec_surfaces_resolved_constants() {
             .into_iter()
             .collect(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::validate_spec(&input);
     assert!(matches!(out.status, ValidationStatus::Ok));
@@ -1080,6 +1106,7 @@ fn validate_spec_lists_unbound_constants_with_no_value() {
         spec_path: pass_spec("base_counter"),
         constants: BTreeMap::new(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::validate_spec(&input);
     let summary = out.spec.expect("summary present");
@@ -1121,6 +1148,7 @@ fn check_spec_reports_max_seconds_when_time_budget_exhausted() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -1185,6 +1213,7 @@ fn check_spec_reports_max_seconds_when_liveness_phase_runs_with_zero_budget() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -1256,6 +1285,7 @@ fn check_spec_leads_to_violation_cycle_contains_state_where_p_holds() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -1319,6 +1349,7 @@ fn check_spec_cli_constants_override_cfg_constants() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -1662,4 +1693,45 @@ fn export_demo_html_explorable_requires_embed_wasm() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn validate_spec_classifies_properties_for_the_requested_liveness_engine() {
+    let dir = std::env::temp_dir().join("tla_mcp_validate_engine");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("Either.tla");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE Either ----\n\
+         EXTENDS Naturals\n\
+         VARIABLE x\n\
+         Init == x = 0\n\
+         Next == x < 2 /\\ x' = x + 1\n\
+         Spec == Init /\\ [][Next]_x\n\
+         Either == [](x < 5) \\/ [](x > 7)\n\
+         ====\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("Either.cfg"),
+        "SPECIFICATION Spec\nPROPERTY Either\n",
+    )
+    .unwrap();
+    let input = |engine| ValidateSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        constants: BTreeMap::new(),
+        config_path: None,
+        liveness_engine: engine,
+    };
+    let tableau = runner::validate_spec(&input(Some(LivenessEngineInput::Tableau)));
+    let legacy = runner::validate_spec(&input(None));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        matches!(tableau.status, ValidationStatus::Ok),
+        "the tableau engine checks a disjunction of [] formulas"
+    );
+    assert!(
+        matches!(legacy.status, ValidationStatus::Error),
+        "the legacy engine rejects it"
+    );
 }

@@ -15,6 +15,7 @@ pub mod liveness;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod load;
 pub mod ltl;
+pub mod ltl_check;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod mcp;
 #[cfg(not(target_arch = "wasm32"))]

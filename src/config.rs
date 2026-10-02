@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use crate::ast::{Env, Expr, LivenessProperty, PropertyPart, SafetyProperty, Spec, Value};
-use crate::checker::CheckerConfig;
+use crate::ast::{
+    Classification, Env, Expr, LivenessProperty, PropertyPart, SafetyProperty, Spec, Value,
+};
+use crate::checker::{CheckerConfig, LivenessEngine};
 
 #[derive(Debug)]
 pub struct TlcConfig {
@@ -721,7 +723,12 @@ pub fn apply_config(
 
     if let Some(ref spec_name) = cfg.specification {
         let checks_liveness = !cfg.properties.is_empty() || checker_config.check_liveness;
-        let spec_warnings = resolve_specification(spec_name, spec, checks_liveness)?;
+        let spec_warnings = resolve_specification(
+            spec_name,
+            spec,
+            checks_liveness,
+            checker_config.liveness_engine,
+        )?;
         warnings.extend(spec_warnings);
     }
 
@@ -782,10 +789,15 @@ pub fn apply_config(
                         Some((**expr).clone())
                     };
                     if let Some(obligations) = obligations {
+                        let mode = match checker_config.liveness_engine {
+                            LivenessEngine::Legacy => Classification::Rewriting,
+                            LivenessEngine::Tableau => Classification::Syntactic,
+                        };
                         let parts = crate::ast::classify_property(
                             &obligations,
                             &spec.vars,
                             &spec.definitions,
+                            mode,
                         )
                         .map_err(|e| format!("PROPERTY '{prop_name}': {e}"))?;
                         add_property_parts(spec, prop_name, parts);
@@ -878,20 +890,16 @@ fn find_box_action(expr: &Expr) -> Option<Expr> {
     }
 }
 
+/// The conjuncts of a `SPECIFICATION` body, its temporal definitions inlined, that
+/// form its initial predicate: every conjunct without a temporal operator.
 fn collect_init(expr: &Expr) -> Option<Expr> {
     match expr {
-        Expr::BoxAction(_, _)
-        | Expr::WeakFairness(_, _)
-        | Expr::StrongFairness(_, _)
-        | Expr::Eventually(_)
-        | Expr::LeadsTo(_, _)
-        | Expr::Always(_) => None,
-        Expr::Forall(_, _, body) if crate::ast::expr_contains_temporal(body) => None,
         Expr::And(l, r) => match (collect_init(l), collect_init(r)) {
             (Some(a), Some(b)) => Some(Expr::And(Box::new(a), Box::new(b))),
             (a, None) => a,
             (None, b) => b,
         },
+        other if crate::ast::has_temporal_operator(other) => None,
         other => Some(other.clone()),
     }
 }
@@ -956,10 +964,33 @@ fn parser_pre_extracts_temporal(name: &str) -> bool {
     name == "Spec" || name.ends_with("Spec")
 }
 
+/// The conjuncts of a `SPECIFICATION` body that are temporal assumptions: temporal
+/// formulas other than `[][Next]_v` and `WF`/`SF` (a quantified one keeps whatever
+/// of its body is not fairness).
+fn collect_assumptions(expr: &Expr, out: &mut Vec<Expr>) {
+    match expr {
+        Expr::And(l, r) => {
+            collect_assumptions(l, out);
+            collect_assumptions(r, out);
+        }
+        Expr::BoxAction(_, _) | Expr::WeakFairness(_, _) | Expr::StrongFairness(_, _) => {}
+        Expr::Forall(var, domain, body) if crate::ast::has_temporal_operator(body) => {
+            if let Some(rest) = crate::ast::without_fairness(body)
+                && crate::ast::has_temporal_operator(&rest)
+            {
+                out.push(Expr::Forall(var.clone(), domain.clone(), Box::new(rest)));
+            }
+        }
+        other if crate::ast::has_temporal_operator(other) => out.push(other.clone()),
+        _ => {}
+    }
+}
+
 fn resolve_specification(
     spec_name: &Arc<str>,
     spec: &mut Spec,
     checks_liveness: bool,
+    engine: LivenessEngine,
 ) -> Result<Vec<String>, String> {
     let expr_clone = match spec.definitions.get(spec_name.as_ref()) {
         Some((params, expr)) if params.is_empty() => expr.clone(),
@@ -977,7 +1008,9 @@ fn resolve_specification(
         }
     };
     if let Some(next_expr) = find_box_action(&expr_clone) {
-        spec.init = Some(collect_init(&expr_clone).unwrap_or(Expr::Lit(Value::Bool(true))));
+        let inlined =
+            crate::ast::inline_temporal_definitions(&expr_clone, &spec.vars, &spec.definitions);
+        spec.init = Some(collect_init(&inlined).unwrap_or(Expr::Lit(Value::Bool(true))));
         spec.next = Some(next_expr);
         let mut assumptions = Vec::new();
         let mut warnings = Vec::new();
@@ -988,6 +1021,10 @@ fn resolve_specification(
             &mut spec.quantified_fairness,
             &mut warnings,
         );
+        collect_assumptions(&inlined, &mut spec.temporal_assumptions);
+        if engine == LivenessEngine::Tableau {
+            return Ok(Vec::new());
+        }
         if checks_liveness && !assumptions.is_empty() {
             warnings.push(format!(
                 "SPECIFICATION '{spec_name}': its temporal conjuncts other than WF/SF are \
@@ -1400,6 +1437,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
             constants: vec![],
         };
         spec.definitions.insert(
@@ -1444,6 +1482,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
             constants: vec![],
         };
 
@@ -1496,6 +1535,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
             constants: vec![],
         };
 
@@ -1550,6 +1590,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
             constants: vec![],
         };
 
@@ -1606,6 +1647,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
             constants: vec![],
         };
 
@@ -1667,6 +1709,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
             constants: vec![],
         };
 

@@ -6,8 +6,8 @@ use std::sync::Arc;
 use crate::Source;
 use crate::ast::{Env, Spec};
 use crate::checker::{
-    CheckResult, CheckStats, CheckerConfig, Counterexample, PrepareSpecError, PropertyStats,
-    PropertyViolationKind, check,
+    CheckResult, CheckStats, CheckerConfig, Counterexample, LivenessEngine, PrepareSpecError,
+    PropertyStats, PropertyViolationKind, check,
 };
 use crate::config::{apply_config, parse_cfg, parse_constant_value};
 use crate::demo::{self, Beat, BeatReport, Manifest, run_beat};
@@ -21,9 +21,9 @@ use super::schema::{
     CheckSpecInput, CheckSpecOutput, CheckStatsSummary, ConstantBinding, DemoStatus,
     DemoTraceState, ErrorPhase, ExportDemoDocInput, ExportDemoDocOutput, ExportDemoHtmlInput,
     ExportDemoHtmlOutput, InvariantSummary, LimitKind, ListInvariantsInput, ListInvariantsOutput,
-    ParseWarning, PropertySummary, PropertyViolationKindOutput, ReplayScenarioInput,
-    ReplayScenarioOutput, ScenarioFailureInfo, ScenarioTraceState, SourceSpan, SpecSummary,
-    StateSnapshot, StructuredError, TlaValue, ValidateDemoInput, ValidateDemoOutput,
+    LivenessEngineInput, ParseWarning, PropertySummary, PropertyViolationKindOutput,
+    ReplayScenarioInput, ReplayScenarioOutput, ScenarioFailureInfo, ScenarioTraceState, SourceSpan,
+    SpecSummary, StateSnapshot, StructuredError, TlaValue, ValidateDemoInput, ValidateDemoOutput,
     ValidateSpecInput, ValidateSpecOutput, VariantRunSummary, ViolationKind, ViolationSummary,
 };
 
@@ -40,6 +40,7 @@ pub fn prepare(
     spec_path: &str,
     config_path: Option<&str>,
     user_constants: &BTreeMap<String, String>,
+    liveness_engine: LivenessEngine,
 ) -> Result<LoadedSpec, StructuredError> {
     crate::intern::clear();
     let path = PathBuf::from(spec_path);
@@ -62,6 +63,7 @@ pub fn prepare(
     let mut checker_config = CheckerConfig {
         spec_path: Some(path.clone()),
         quiet: true,
+        liveness_engine,
         ..CheckerConfig::default()
     };
 
@@ -121,11 +123,19 @@ pub fn prepare(
     })
 }
 
+fn liveness_engine(input: Option<LivenessEngineInput>) -> LivenessEngine {
+    match input {
+        Some(LivenessEngineInput::Tableau) => LivenessEngine::Tableau,
+        Some(LivenessEngineInput::Legacy) | None => LivenessEngine::Legacy,
+    }
+}
+
 pub fn validate_spec(input: &ValidateSpecInput) -> ValidateSpecOutput {
     match prepare(
         &input.spec_path,
         input.config_path.as_deref(),
         &input.constants,
+        liveness_engine(input.liveness_engine),
     ) {
         Ok(loaded) => ValidateSpecOutput::ok(
             summarize_spec(&loaded.spec, &loaded.domains),
@@ -140,6 +150,7 @@ pub fn list_invariants(input: &ListInvariantsInput) -> ListInvariantsOutput {
         &input.spec_path,
         input.config_path.as_deref(),
         &input.constants,
+        liveness_engine(input.liveness_engine),
     ) {
         Ok(loaded) => ListInvariantsOutput::ok(invariant_summaries(&loaded.spec), loaded.warnings),
         Err(err) => ListInvariantsOutput::error(err),
@@ -151,6 +162,7 @@ pub fn replay_scenario(input: &ReplayScenarioInput) -> ReplayScenarioOutput {
         &input.spec_path,
         input.config_path.as_deref(),
         &input.constants,
+        liveness_engine(input.liveness_engine),
     ) {
         Ok(loaded) => loaded,
         Err(err) => return ReplayScenarioOutput::error(err),
@@ -199,6 +211,7 @@ pub fn check_spec(input: &CheckSpecInput) -> CheckSpecOutput {
         &input.spec_path,
         input.config_path.as_deref(),
         &input.constants,
+        liveness_engine(input.liveness_engine),
     ) {
         Ok(loaded) => loaded,
         Err(err) => {
@@ -479,6 +492,9 @@ fn map_prepare_error(err: PrepareSpecError, source: &Source) -> CheckOutcome {
         ),
         PrepareSpecError::RefinementConfigError(message) => {
             (ErrorPhase::Config, StructuredError::internal(message))
+        }
+        PrepareSpecError::LivenessProperty(message) => {
+            (ErrorPhase::Config, StructuredError::config(message))
         }
     };
     CheckOutcome::Error {
@@ -898,6 +914,7 @@ mod tests {
             count_satisfying: Vec::new(),
             continue_on_violation: false,
             state_constraint: None,
+            liveness_engine: None,
             config_path: None,
         }
     }

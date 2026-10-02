@@ -4,11 +4,13 @@
 //! running real TLC (`scripts/liveness-oracle.sh` re-derives them locally). This test
 //! needs no Java: it runs tla-rs on each case and compares against the recorded
 //! verdict. Cases marked `xfail_until_phase` document known divergences and must still
-//! diverge; once one starts agreeing with TLC its xfail marker has to be removed. A
+//! diverge; once one starts agreeing with TLC, with a counterexample the validator
+//! accepts when it reports a violation, its xfail marker has to be removed. A
 //! divergence may be an error or a false alarm, but never a false pass: an xfail case
 //! that TLC reports as violated fails the test if tla-rs reports it ok.
 //! Every violation reported on a non-xfail case is re-validated by an independent
-//! lasso evaluator (`lasso.rs`).
+//! lasso evaluator (`lasso.rs`). The corpus runs once per liveness engine; the
+//! tableau engine has its own markers, `tableau_xfail_until_phase`.
 
 #[path = "liveness_oracle/lasso.rs"]
 mod lasso;
@@ -18,9 +20,11 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value as Json;
 use tla_checker::ast::{Env, Expr, State};
-use tla_checker::checker::{CheckResult, PropertyViolationKind, check, prepare_spec};
+use tla_checker::checker::{
+    CheckResult, LivenessEngine, PropertyViolationKind, check, prepare_spec,
+};
 use tla_checker::config::parse_cfg;
-use tla_checker::load::{Prepared, prepare_from_path};
+use tla_checker::load::{Prepared, prepare_from_path_with_engine};
 
 use lasso::{Lasso, Model};
 
@@ -31,6 +35,7 @@ struct Case {
     expected: String,
     kind: Option<String>,
     xfail: Option<String>,
+    tableau_xfail: Option<String>,
 }
 
 enum Counterexample {
@@ -67,19 +72,20 @@ fn load_cases() -> Vec<Case> {
                 expected: json_str(entry, "expected").expect("case expected"),
                 kind: json_str(entry, "kind"),
                 xfail: json_str(entry, "xfail_until_phase"),
+                tableau_xfail: json_str(entry, "tableau_xfail_until_phase"),
                 id,
             }
         })
         .collect()
 }
 
-fn prepare(case: &Case) -> Prepared {
-    prepare_from_path(&case.spec, Some(&case.cfg), &[])
+fn prepare(case: &Case, engine: LivenessEngine) -> Prepared {
+    prepare_from_path_with_engine(&case.spec, Some(&case.cfg), &[], engine)
         .unwrap_or_else(|e| panic!("{}: failed to prepare: {e}", case.id))
 }
 
-fn observe(case: &Case) -> Observed {
-    let prepared = match prepare_from_path(&case.spec, Some(&case.cfg), &[]) {
+fn observe(case: &Case, engine: LivenessEngine) -> Observed {
+    let prepared = match prepare_from_path_with_engine(&case.spec, Some(&case.cfg), &[], engine) {
         Ok(prepared) => prepared,
         Err(e) => {
             return Observed {
@@ -135,8 +141,12 @@ fn definition(defs: &tla_checker::eval::Definitions, name: &str) -> Result<Expr,
         .ok_or_else(|| format!("definition {name} not found"))
 }
 
-fn validate(case: &Case, counterexample: &Counterexample) -> Result<(), String> {
-    let prepared = prepare(case);
+fn validate(
+    case: &Case,
+    engine: LivenessEngine,
+    counterexample: &Counterexample,
+) -> Result<(), String> {
+    let prepared = prepare(case, engine);
     let cfg_text = fs::read_to_string(&case.cfg).map_err(|e| e.to_string())?;
     let cfg = parse_cfg(&cfg_text)?;
     let (constants, defs) = prepare_spec(&prepared.spec, &prepared.domains, Some(&case.spec), true)
@@ -182,6 +192,15 @@ fn validate(case: &Case, counterexample: &Counterexample) -> Result<(), String> 
 
 #[test]
 fn liveness_corpus_matches_tlc() {
+    corpus_matches_tlc(LivenessEngine::Legacy);
+}
+
+#[test]
+fn liveness_corpus_matches_tlc_with_the_tableau_engine() {
+    corpus_matches_tlc(LivenessEngine::Tableau);
+}
+
+fn corpus_matches_tlc(engine: LivenessEngine) {
     let cases = load_cases();
     assert!(!cases.is_empty(), "manifest has no cases");
     let mut rows = Vec::new();
@@ -194,12 +213,16 @@ fn liveness_corpus_matches_tlc() {
             ));
             continue;
         }
-        let observed = observe(case);
+        let observed = observe(case, engine);
         let agrees = observed.verdict == case.expected
             && (observed.verdict != "violated" || observed.kind == case.kind.as_deref());
-        let status = match (&case.xfail, agrees) {
+        let (xfail, marker) = match engine {
+            LivenessEngine::Legacy => (&case.xfail, "xfail_until_phase"),
+            LivenessEngine::Tableau => (&case.tableau_xfail, "tableau_xfail_until_phase"),
+        };
+        let status = match (xfail, agrees) {
             (None, true) => match (&observed.counterexample, observed.verdict) {
-                (Some(cex), "violated") => match validate(case, cex) {
+                (Some(cex), "violated") => match validate(case, engine, cex) {
                     Ok(()) => "PASS (counterexample validated)".to_string(),
                     Err(reason) => {
                         failures += 1;
@@ -218,7 +241,7 @@ fn liveness_corpus_matches_tlc() {
                     .to_string()
             }
             (Some(_), false) => match (&observed.counterexample, case.expected.as_str()) {
-                (Some(cex), "ok") => match validate(case, cex) {
+                (Some(cex), "ok") => match validate(case, engine, cex) {
                     Err(_) => "XFAIL (validator rejects the false alarm)".to_string(),
                     Ok(()) => {
                         failures += 1;
@@ -227,10 +250,17 @@ fn liveness_corpus_matches_tlc() {
                 },
                 _ => "XFAIL".to_string(),
             },
+            (Some(_), true)
+                if observed.counterexample.as_ref().is_some_and(|cex| {
+                    observed.verdict == "violated" && validate(case, engine, cex).is_err()
+                }) =>
+            {
+                "XFAIL (verdict agrees, but the validator rejects the counterexample)".to_string()
+            }
             (Some(phase), true) => {
                 failures += 1;
                 format!(
-                    "FAIL: now agrees with TLC; remove xfail_until_phase \"{phase}\" from {} in manifest.json",
+                    "FAIL: now agrees with TLC; remove {marker} \"{phase}\" from {} in manifest.json",
                     case.id
                 )
             }
@@ -240,7 +270,7 @@ fn liveness_corpus_matches_tlc() {
             case.id,
             format!("{}/{}", case.expected, case.kind.as_deref().unwrap_or("-")),
             format!("{}/{}", observed.verdict, observed.kind.unwrap_or("-")),
-            case.xfail.as_deref().unwrap_or("-"),
+            xfail.as_deref().unwrap_or("-"),
             status
         ));
     }
@@ -251,6 +281,6 @@ fn liveness_corpus_matches_tlc() {
     let table = format!("{header}\n{}", rows.join("\n"));
     println!("{table}");
     if failures > 0 {
-        panic!("{failures} liveness oracle case(s) failed\n{table}");
+        panic!("{failures} liveness oracle case(s) failed with the {engine:?} engine\n{table}");
     }
 }

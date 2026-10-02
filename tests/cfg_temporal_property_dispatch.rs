@@ -620,3 +620,170 @@ fn disjunction_with_a_non_liveness_disjunct_is_a_config_error() {
         "a disjunction of liveness properties keeps the documented over-approximation"
     );
 }
+
+fn apply_with_engine(
+    spec_src: &str,
+    cfg_src: &str,
+    engine: tla_checker::checker::LivenessEngine,
+) -> (tla_checker::ast::Spec, Vec<String>) {
+    let mut spec = parse(spec_src).expect("spec parses");
+    let mut checker_config = CheckerConfig {
+        liveness_engine: engine,
+        ..CheckerConfig::default()
+    };
+    let warnings = apply_config(
+        &parse_cfg(cfg_src).expect("cfg parses"),
+        &mut spec,
+        &mut Env::new(),
+        &mut checker_config,
+        &[],
+        &[],
+        false,
+    )
+    .expect("apply_config ok");
+    (spec, warnings)
+}
+
+const SYNTACTIC_MODULE: &str = "---- MODULE M ----\n\
+    EXTENDS Naturals\n\
+    VARIABLE x\n\
+    Init == x = 0\n\
+    Step == x < 2 /\\ x' = x + 1\n\
+    Next == Step \\/ UNCHANGED x\n\
+    SpecA == Init /\\ [][Next]_x /\\ WF_x(Step) /\\ <>(x = 2)\n\
+    NotEv == ~<>(x = 5)\n\
+    StateOrLive == x = 1 \\/ <>(x = 1)\n\
+    Mixed == x = 0 /\\ [](x < 5) /\\ [][x' >= x]_x /\\ <>(x = 2)\n\
+    ====\n";
+
+#[test]
+fn tableau_engine_classifies_properties_on_their_syntax() {
+    use tla_checker::checker::LivenessEngine::Tableau;
+    let (spec, _) = apply_with_engine(
+        SYNTACTIC_MODULE,
+        "SPECIFICATION SpecA\nPROPERTY NotEv\n",
+        Tableau,
+    );
+    assert!(
+        spec.invariant_names
+            .iter()
+            .flatten()
+            .all(|n| n.as_ref() != "NotEv")
+    );
+    assert_eq!(
+        spec.liveness_properties.len(),
+        1,
+        "~<>P stays temporal, as in TLC"
+    );
+    assert!(matches!(spec.liveness_properties[0].formula, Expr::Not(_)));
+
+    let (spec, _) = apply_with_engine(
+        SYNTACTIC_MODULE,
+        "SPECIFICATION SpecA\nPROPERTY StateOrLive\n",
+        Tableau,
+    );
+    assert!(
+        matches!(spec.liveness_properties[0].formula, Expr::Or(_, _)),
+        "a disjunction with a temporal disjunct goes to the tableau whole"
+    );
+
+    let (spec, _) = apply_with_engine(
+        SYNTACTIC_MODULE,
+        "SPECIFICATION SpecA\nPROPERTY Mixed\n",
+        Tableau,
+    );
+    assert_eq!(
+        spec.safety_properties.len(),
+        2,
+        "the state predicate and [][A]_x"
+    );
+    assert_eq!(
+        spec.invariant_names.last().cloned().flatten().as_deref(),
+        Some("Mixed")
+    );
+    assert!(matches!(
+        spec.liveness_properties[0].formula,
+        Expr::Eventually(_)
+    ));
+}
+
+#[test]
+fn tableau_engine_keeps_specification_assumptions_without_a_warning() {
+    use tla_checker::checker::LivenessEngine::{Legacy, Tableau};
+    let cfg = "SPECIFICATION SpecA\nPROPERTY NotEv\n";
+    let (spec, warnings) = apply_with_engine(SYNTACTIC_MODULE, cfg, Tableau);
+    assert_eq!(
+        spec.temporal_assumptions.len(),
+        1,
+        "<>(x = 2) is an assumption"
+    );
+    assert_eq!(spec.fairness.len(), 1);
+    assert!(
+        !warnings.iter().any(|w| w.contains("assumptions")),
+        "the tableau engine enforces the assumption: {warnings:?}"
+    );
+    let (_, legacy_warnings) = apply_with_engine(SYNTACTIC_MODULE, cfg, Legacy);
+    assert!(legacy_warnings.iter().any(|w| w.contains("assumptions")));
+}
+
+fn check_with_engine(name: &str, module: &str, cfg: Option<&str>) -> CheckResult {
+    let dir = std::env::temp_dir().join(format!("tla_cfg_engine_{name}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join(format!("{name}.tla"));
+    std::fs::write(&spec_path, module).unwrap();
+    if let Some(cfg) = cfg {
+        std::fs::write(dir.join(format!("{name}.cfg")), cfg).unwrap();
+    }
+    let prepared = tla_checker::load::prepare_from_path_with_engine(
+        &spec_path,
+        None,
+        &[],
+        tla_checker::checker::LivenessEngine::Tableau,
+    )
+    .unwrap();
+    let mut cc = prepared.checker_config;
+    cc.check_liveness = true;
+    cc.allow_deadlock = true;
+    let result = tla_checker::checker::check(&prepared.spec, &prepared.domains, &cc);
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+#[test]
+fn tableau_engine_accepts_builtin_operators_in_atoms() {
+    let module = "---- MODULE Bits ----\n\
+        EXTENDS Naturals, Bits\n\
+        VARIABLE x\n\
+        Init == x = 0\n\
+        Step == x < 3 /\\ x' = x + 1\n\
+        Next == Step \\/ UNCHANGED x\n\
+        Spec == Init /\\ [][Next]_x /\\ WF_x(Step)\n\
+        Ev == <>(BitAnd(x, 2) = 2)\n\
+        ====\n";
+    match check_with_engine(
+        "Bits",
+        module,
+        Some("SPECIFICATION Spec\nPROPERTY Ev\nCHECK_DEADLOCK FALSE\n"),
+    ) {
+        CheckResult::Ok(_) => {}
+        other => panic!("BitAnd is an ordinary state function; got {other:?}"),
+    }
+}
+
+#[test]
+fn tableau_engine_drops_fairness_from_legacy_spec_formulas() {
+    let module = "---- MODULE Procs ----\n\
+        EXTENDS Naturals\n\
+        VARIABLE x\n\
+        P == {1, 2}\n\
+        vars == <<x>>\n\
+        Init == x = [p \\in P |-> 0]\n\
+        A(p) == x[p] < 2 /\\ x' = [x EXCEPT ![p] = x[p] + 1]\n\
+        Next == \\E p \\in P : A(p)\n\
+        Spec == Init /\\ [][Next]_vars /\\ \\A p \\in P : (WF_vars(A(p)) /\\ <>(x[p] = 2))\n\
+        ====\n";
+    match check_with_engine("Procs", module, None) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 9),
+        other => panic!("each process is driven to 2 by its own WF; got {other:?}"),
+    }
+}

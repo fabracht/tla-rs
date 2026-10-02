@@ -282,7 +282,8 @@
     "tla_rs_now": "error",
     "tla_rs_now_kind": null,
     "xfail_until_phase": "3",
-    "note": "ENABLED inside a temporal property cannot be evaluated ('ENABLED operator cannot be evaluated in explicit-state model checking')."
+    "note": "ENABLED inside a temporal property cannot be evaluated ('ENABLED operator cannot be evaluated in explicit-state model checking').",
+    "tableau_xfail_until_phase": "3"
   },
   {
     "id": "C16",
@@ -1080,7 +1081,8 @@
     "tla_rs_now": "error",
     "tla_rs_now_kind": null,
     "xfail_until_phase": "2",
-    "note": "A WF formula inside a PROPERTY is an obligation in TLC; tla-rs 0.10.1 added it to the fairness assumptions instead (false pass). Now a config-time error."
+    "note": "A WF formula inside a PROPERTY is an obligation in TLC; tla-rs 0.10.1 added it to the fairness assumptions instead (false pass). Now a config-time error.",
+    "tableau_xfail_until_phase": "3"
   },
   {
     "id": "C54",
@@ -2030,7 +2032,8 @@
     "tla_rs_now": "error",
     "tla_rs_now_kind": null,
     "xfail_until_phase": "2",
-    "note": "TLCGet(\"level\") depends on the behavior, so the guard cannot be pushed under []; a state-dependent guard is a config error until the general LTL engine (it used to be pushed as if constant: false pass)."
+    "note": "TLCGet(\"level\") depends on the behavior, so the guard cannot be pushed under []; a state-dependent guard is a config error until the general LTL engine (it used to be pushed as if constant: false pass).",
+    "tableau_xfail_until_phase": "tlcget"
   },
   {
     "id": "C104",
@@ -2049,7 +2052,8 @@
     "tla_rs_now": "error",
     "tla_rs_now_kind": null,
     "xfail_until_phase": "2",
-    "note": "Same with TLCGet(\"distinct\")."
+    "note": "Same with TLCGet(\"distinct\").",
+    "tableau_xfail_until_phase": "tlcget"
   },
   {
     "id": "C105",
@@ -2068,7 +2072,8 @@
     "tla_rs_now": "error",
     "tla_rs_now_kind": null,
     "xfail_until_phase": "2",
-    "note": "IF on a TLCGet condition: a state-dependent guard (config error until phase 2)."
+    "note": "IF on a TLCGet condition: a state-dependent guard (config error until phase 2).",
+    "tableau_xfail_until_phase": "tlcget"
   },
   {
     "id": "C106",
@@ -2316,5 +2321,252 @@
     "tla_rs_now_kind": "liveness",
     "xfail_until_phase": "2",
     "note": "A disjunction of liveness properties is still checked as their conjunction (documented over-approximation): a false alarm, never a false pass."
+  },
+  {
+    "id": "C119",
+    "spec": "specs/InitBox.tla",
+    "cfg": "cfgs/C119.cfg",
+    "specification": "Spec",
+    "property": "Differ",
+    "property_text": "[](x # y)",
+    "expected": "violated",
+    "kind": "invariant",
+    "tlc": {
+      "verdict_raw": "Error: Invariant Differ is violated by the initial state:",
+      "exit_code": 12,
+      "version": "2.19 (rev 5a47802)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": null,
+    "note": "A [] property violated by an initial state: TLC reports it as an invariant violation ('Invariant ... is violated by the initial state'), not as an initial-state property violation."
+  },
+  {
+    "id": "C120",
+    "spec": "specs/InitOrder.tla",
+    "cfg": "cfgs/C120.cfg",
+    "specification": "Spec",
+    "property": "Both",
+    "property_text": "[](x = 1) /\\ x = 1",
+    "expected": "violated",
+    "kind": "invariant",
+    "tlc": {
+      "verdict_raw": "Error: Invariant line 7, col 9 to line 7, col 17 of module InitOrder is violated by the initial state:",
+      "exit_code": 12,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": null,
+    "note": "An initial state violating both an implied invariant and an initial-state predicate of the same PROPERTY: TLC reports the invariant first."
+  },
+  {
+    "id": "C121",
+    "spec": "specs/Assumptions.tla",
+    "cfg": "cfgs/C121.cfg",
+    "specification": "SpecE",
+    "property": "Reach2",
+    "property_text": "<>(x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "2",
+    "note": "SPECIFICATION assumption (SpecE) whose temporal conjunct is not a plain [] / <> shape is enforced, not folded into Init."
+  },
+  {
+    "id": "C122",
+    "spec": "specs/Assumptions.tla",
+    "cfg": "cfgs/C122.cfg",
+    "specification": "SpecImp",
+    "property": "Reach2",
+    "property_text": "<>(x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "2",
+    "note": "SPECIFICATION assumption (SpecImp) whose temporal conjunct is not a plain [] / <> shape is enforced, not folded into Init."
+  },
+  {
+    "id": "C123",
+    "spec": "specs/Assumptions.tla",
+    "cfg": "cfgs/C123.cfg",
+    "specification": "SpecNot",
+    "property": "Reach2",
+    "property_text": "<>(x = 2)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property Reach2 was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "2",
+    "note": "SPECIFICATION assumption (SpecNot) whose temporal conjunct is not a plain [] / <> shape is enforced, not folded into Init."
+  },
+  {
+    "id": "C124",
+    "spec": "specs/Assumptions.tla",
+    "cfg": "cfgs/C124.cfg",
+    "specification": "SpecCall",
+    "property": "Reach2",
+    "property_text": "<>(x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "2",
+    "note": "SPECIFICATION assumption (SpecCall) whose temporal conjunct is not a plain [] / <> shape is enforced, not folded into Init."
+  },
+  {
+    "id": "C125",
+    "spec": "specs/Assumptions.tla",
+    "cfg": "cfgs/C125.cfg",
+    "specification": "SpecQCall",
+    "property": "Reach2",
+    "property_text": "<>(x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "2",
+    "note": "SPECIFICATION assumption (SpecQCall) whose temporal conjunct is not a plain [] / <> shape is enforced, not folded into Init."
+  },
+  {
+    "id": "C126",
+    "spec": "specs/Assumptions.tla",
+    "cfg": "cfgs/C126.cfg",
+    "specification": "SpecMix",
+    "property": "Reach2",
+    "property_text": "<>(x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "2",
+    "note": "SPECIFICATION assumption (SpecMix) whose temporal conjunct is not a plain [] / <> shape is enforced, not folded into Init."
+  },
+  {
+    "id": "C127",
+    "spec": "specs/Assumptions.tla",
+    "cfg": "cfgs/C127.cfg",
+    "specification": "SpecF",
+    "property": "LetTemp",
+    "property_text": "LET a == <>(x = 2) IN a",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "A LET-bound temporal formula referenced by name is inlined."
+  },
+  {
+    "id": "C128",
+    "spec": "specs/Assumptions.tla",
+    "cfg": "cfgs/C128.cfg",
+    "specification": "SpecF",
+    "property": "LetNot",
+    "property_text": "LET a == <>(x = 2) IN ~a",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property LetNot was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": "2",
+    "note": "The negation of a LET-bound temporal formula."
+  },
+  {
+    "id": "C129",
+    "spec": "specs/Assumptions.tla",
+    "cfg": "cfgs/C129.cfg",
+    "specification": "SpecF",
+    "property": "LetDom",
+    "property_text": "LET w(p) == x = p IN \\A p \\in {0, 1} : w(p) ~> (x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "A LET-defined operator in scope does not make a constant quantifier domain look state-dependent."
+  },
+  {
+    "id": "C130",
+    "spec": "specs/Many.tla",
+    "cfg": "cfgs/C130.cfg",
+    "specification": "Spec",
+    "property": "SomeStable",
+    "property_text": "\\E i \\in 1..12 : <>[](c[i] # 0)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property SomeStable was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "2",
+    "note": "\\\\E over 12 <>[] instances: its negation is 12 []<> conditions, checked outside the tableau."
+  },
+  {
+    "id": "C131",
+    "spec": "specs/Many.tla",
+    "cfg": "cfgs/C131.cfg",
+    "specification": "Spec",
+    "property": "AllRecur",
+    "property_text": "\\A i \\in 1..12 : []<>(c[i] = 1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "12 []<> conditions under quantified WF."
   }
 ]

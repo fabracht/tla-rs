@@ -8,7 +8,7 @@
 //! instances over a constant `S`.
 
 use crate::ast::{Expr, Value, has_temporal_operator};
-use crate::eval::{Definitions, contains_prime_ref};
+use crate::eval::{Definitions, contains_prime_ref_resolving_lets};
 
 /// What an atom constrains: a state predicate holds at a position of a behavior, a
 /// step `[A]_v` holds on the transition from that position to the next.
@@ -30,6 +30,11 @@ impl AtomTable {
 
     pub fn atoms(&self) -> &[Atom] {
         &self.atoms
+    }
+
+    #[cfg(test)]
+    pub(crate) fn intern_for_test(&mut self, atom: Atom) -> usize {
+        self.intern(atom)
     }
 
     fn intern(&mut self, atom: Atom) -> usize {
@@ -188,7 +193,11 @@ impl Builder<'_, '_> {
                 Ltl::False
             });
         }
-        if contains_prime_ref(expr, self.defs) {
+        self.reject_run_dependent(expr)?;
+        if crate::eval::uses_enabled(expr, self.defs) {
+            return Err("ENABLED is not supported in a temporal formula yet".to_string());
+        }
+        if contains_prime_ref_resolving_lets(expr, self.defs) {
             return Err(
                 "an action formula must appear as `[][A]_v` or `<<A>>_v` in a temporal formula"
                     .to_string(),
@@ -198,7 +207,20 @@ impl Builder<'_, '_> {
         Ok(Ltl::Literal(Literal { atom, positive }))
     }
 
+    fn reject_run_dependent(&self, expr: &Expr) -> Result<(), String> {
+        if crate::eval::uses_run_dependent_builtin(expr, self.defs) {
+            return Err(
+                "TLCGet, RandomElement and the time built-ins are not supported in a temporal \
+                 formula: their value depends on the run, not on the state"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
     fn step(&mut self, action: &Expr, subscript: &Expr, positive: bool) -> Result<Ltl, String> {
+        self.reject_run_dependent(action)?;
+        self.reject_run_dependent(subscript)?;
         let atom = self.atoms.intern(Atom::Step {
             action: action.clone(),
             subscript: subscript.clone(),

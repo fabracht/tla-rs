@@ -476,6 +476,9 @@ fn result_to_wasm(
         CheckResult::PrepareError(PrepareSpecError::RefinementConfigError(message)) => {
             WasmCheckResult::err("RefinementConfigError", message, warnings)
         }
+        CheckResult::PrepareError(PrepareSpecError::LivenessProperty(message)) => {
+            WasmCheckResult::err("LivenessPropertyError", message, warnings)
+        }
     }
 }
 
