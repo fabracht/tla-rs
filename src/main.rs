@@ -939,6 +939,14 @@ fn main() -> ExitCode {
         println!("  Invariants: {} detected", spec.invariants.len());
         println!("  Definitions: {} declared", spec.definitions.len());
 
+        config.spec_path = Some(PathBuf::from(&spec_path));
+        if let Some(message) =
+            tla_checker::checker::liveness_property_error(&spec, &domains, &config)
+        {
+            eprintln!("  Liveness property: {message}");
+            has_issues = true;
+        }
+
         if !spec.assumes.is_empty() {
             println!("  ASSUME expressions: {}", spec.assumes.len());
         }

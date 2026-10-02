@@ -13,6 +13,8 @@
 - `ENABLED A` holds in a state when `A` has a successor from it, computed from `A` itself, whether or not `Next` takes it; `ENABLED <<A>>_v` holds when one of those successors changes `v`. As in TLC, `A` may leave unassigned a variable that `v` does not depend on; leaving one that `v` depends on is an error.
 - `ENABLED` is evaluated wherever it appears in an invariant, a `PROPERTY` or a liveness check: under `<=>`, `CASE`, set comprehensions, `Cardinality`, function constructors and the like, and with the action given through a `LET` definition or as an operator argument. Library API: `eval::EvalContext` now holds only `state_vars`, since `ENABLED` reads the current state and the constants from the evaluation environment.
 - With the legacy engine, a `PROPERTY` it cannot check is rejected with a message that points to `--liveness-engine tableau`.
+- Under the tableau engine, `--validate` and MCP `validate_spec` report a property the engine cannot check (one using `TLCGet`, say), the error `check_spec` would give before the state search.
+- The `tla-mcp` server instructions say when to use `liveness_engine: "tableau"` (a property the default engine rejects, nested temporal operators, `ENABLED`, fairness to prove such as a refinement property) and how to read a `liveness_violation` cycle.
 
 ### Fixed
 

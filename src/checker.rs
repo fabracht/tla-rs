@@ -425,6 +425,32 @@ pub fn prepare_spec(
     Ok((domains, defs))
 }
 
+fn needs_liveness_check(spec: &Spec, config: &CheckerConfig) -> bool {
+    config.check_liveness
+        && (!spec.fairness.is_empty()
+            || !spec.liveness_properties.is_empty()
+            || !spec.quantified_fairness.is_empty())
+}
+
+/// The error [`check`] would report as `liveness_property_error`, found without a
+/// state search: under the tableau engine every liveness property is translated, and
+/// its tableau built, before exploring. `None` when there is none, or when the spec
+/// cannot be prepared (missing constants, say), a failure `check` reports itself.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn liveness_property_error(
+    spec: &Spec,
+    domains: &Env,
+    config: &CheckerConfig,
+) -> Option<String> {
+    if config.liveness_engine != LivenessEngine::Tableau || !needs_liveness_check(spec, config) {
+        return None;
+    }
+    crate::eval::set_symbolic_integers(config.symbolic_integers);
+    let (domains, defs) =
+        prepare_spec(spec, domains, config.spec_path.as_ref(), config.quiet).ok()?;
+    tableau_properties(spec, &domains, &defs).err()
+}
+
 pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult {
     let _engine = crate::eval::EngineOverride::new(
         config.use_inference_engine,
@@ -557,10 +583,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     let mut parent_action: Vec<Option<Arc<str>>> = Vec::new();
     let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
 
-    let needs_liveness_check = config.check_liveness
-        && (!spec.fairness.is_empty()
-            || !spec.liveness_properties.is_empty()
-            || !spec.quantified_fairness.is_empty());
+    let needs_liveness_check = needs_liveness_check(spec, config);
 
     #[cfg(not(target_arch = "wasm32"))]
     let collect_edges =

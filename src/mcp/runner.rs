@@ -137,10 +137,17 @@ pub fn validate_spec(input: &ValidateSpecInput) -> ValidateSpecOutput {
         &input.constants,
         liveness_engine(input.liveness_engine),
     ) {
-        Ok(loaded) => ValidateSpecOutput::ok(
-            summarize_spec(&loaded.spec, &loaded.domains),
-            loaded.warnings,
-        ),
+        Ok(loaded) => match crate::checker::liveness_property_error(
+            &loaded.spec,
+            &loaded.domains,
+            &loaded.checker_config,
+        ) {
+            Some(message) => ValidateSpecOutput::error(StructuredError::config(message)),
+            None => ValidateSpecOutput::ok(
+                summarize_spec(&loaded.spec, &loaded.domains),
+                loaded.warnings,
+            ),
+        },
         Err(err) => ValidateSpecOutput::error(err),
     }
 }
