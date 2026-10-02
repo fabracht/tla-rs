@@ -429,6 +429,17 @@ fn map_check_result(result: CheckResult, spec: &Spec, source: &Source) -> CheckO
             error: StructuredError::from_eval(&err, Some(source)),
             partial_stats: None,
         },
+        CheckResult::LivenessError(liveness, stats) => {
+            let mut error = StructuredError::from_eval(&liveness.error, Some(source));
+            if let Some(property) = &liveness.property {
+                error.message = format!("PROPERTY '{property}': {}", error.message);
+            }
+            CheckOutcome::Error {
+                phase: ErrorPhase::Liveness,
+                error,
+                partial_stats: Some(summarize_stats(&stats)),
+            }
+        }
         CheckResult::NoInitialStates => CheckOutcome::Error {
             phase: ErrorPhase::Init,
             error: StructuredError::internal("no initial states found"),

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.0] - 2026-10-02
+
+### Fixed
+
+- An evaluation error while checking liveness, after the state search, was reported as an invariant error (`invariant_error`, MCP `phase: "invariant"`, "error occurred while evaluating invariant"). It is now its own result (#137): `liveness_error` in `--json` output, with the property it occurred in and the search statistics; MCP `phase: "liveness"`, with the property named in the message and `partial_stats` set; and in the CLI, a note naming the property, or the fairness constraints when the error is in them. Library API: `CheckResult::LivenessError`.
+
 ## [0.13.0] - 2026-10-02
 
 ### Added
