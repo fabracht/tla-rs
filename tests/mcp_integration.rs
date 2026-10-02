@@ -5,8 +5,8 @@ use serde_json::json;
 use tla_checker::mcp::runner;
 use tla_checker::mcp::schema::{
     AppendBeatInput, CheckOutcome, CheckSpecInput, DemoStatus, ErrorPhase, ExportDemoDocInput,
-    ExportDemoHtmlInput, LimitKind, ListInvariantsInput, ReplayScenarioInput, ScenarioStatus,
-    ValidateDemoInput, ValidateSpecInput, ValidationStatus,
+    ExportDemoHtmlInput, LimitKind, ListInvariantsInput, LivenessEngineInput, ReplayScenarioInput,
+    ScenarioStatus, ValidateDemoInput, ValidateSpecInput, ValidationStatus,
 };
 
 fn pass_spec(name: &str) -> String {
@@ -25,6 +25,7 @@ fn validate_spec_returns_summary_for_valid_spec() {
             .into_iter()
             .collect(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::validate_spec(&input);
     assert_eq!(out.schema_version, "2");
@@ -46,6 +47,7 @@ fn validate_spec_reports_io_error_for_missing_file() {
         spec_path: "does_not_exist.tla".into(),
         constants: BTreeMap::new(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::validate_spec(&input);
     assert!(matches!(out.status, ValidationStatus::Error));
@@ -68,6 +70,7 @@ fn list_invariants_returns_invariant_names() {
             .into_iter()
             .collect(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::list_invariants(&input);
     assert_eq!(out.schema_version, "2");
@@ -356,6 +359,7 @@ fn validate_spec_surfaces_parser_warnings() {
         spec_path: path.to_string_lossy().into_owned(),
         constants: BTreeMap::new(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::validate_spec(&input);
     let _ = std::fs::remove_file(&path);
@@ -381,6 +385,7 @@ fn replay_scenario_returns_step_by_step_trace() {
             .into_iter()
             .collect(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::replay_scenario(&input);
     assert_eq!(out.schema_version, "2");
@@ -408,6 +413,7 @@ fn replay_scenario_reports_failure_with_available_actions() {
             .into_iter()
             .collect(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::replay_scenario(&input);
     assert!(
@@ -1081,6 +1087,7 @@ fn validate_spec_surfaces_resolved_constants() {
             .into_iter()
             .collect(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::validate_spec(&input);
     assert!(matches!(out.status, ValidationStatus::Ok));
@@ -1099,6 +1106,7 @@ fn validate_spec_lists_unbound_constants_with_no_value() {
         spec_path: pass_spec("base_counter"),
         constants: BTreeMap::new(),
         config_path: None,
+        liveness_engine: None,
     };
     let out = runner::validate_spec(&input);
     let summary = out.spec.expect("summary present");
@@ -1685,4 +1693,45 @@ fn export_demo_html_explorable_requires_embed_wasm() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn validate_spec_classifies_properties_for_the_requested_liveness_engine() {
+    let dir = std::env::temp_dir().join("tla_mcp_validate_engine");
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join("Either.tla");
+    std::fs::write(
+        &spec_path,
+        "---- MODULE Either ----\n\
+         EXTENDS Naturals\n\
+         VARIABLE x\n\
+         Init == x = 0\n\
+         Next == x < 2 /\\ x' = x + 1\n\
+         Spec == Init /\\ [][Next]_x\n\
+         Either == [](x < 5) \\/ [](x > 7)\n\
+         ====\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("Either.cfg"),
+        "SPECIFICATION Spec\nPROPERTY Either\n",
+    )
+    .unwrap();
+    let input = |engine| ValidateSpecInput {
+        spec_path: spec_path.to_string_lossy().into_owned(),
+        constants: BTreeMap::new(),
+        config_path: None,
+        liveness_engine: engine,
+    };
+    let tableau = runner::validate_spec(&input(Some(LivenessEngineInput::Tableau)));
+    let legacy = runner::validate_spec(&input(None));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        matches!(tableau.status, ValidationStatus::Ok),
+        "the tableau engine checks a disjunction of [] formulas"
+    );
+    assert!(
+        matches!(legacy.status, ValidationStatus::Error),
+        "the legacy engine rejects it"
+    );
 }

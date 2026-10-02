@@ -1594,7 +1594,10 @@ struct TableauProperty {
 }
 
 /// The tableau formulas of the liveness properties, built before the state search
-/// so a property the tableau checker cannot express is reported up front.
+/// so a property the tableau checker cannot express is reported up front. The
+/// `WF`/`SF` parts a legacy `*Spec` extraction leaves in a quantified formula are
+/// fairness, already applied, not obligations; in a cfg `PROPERTY` they are
+/// obligations and stay.
 fn tableau_properties(
     spec: &Spec,
     domains: &Env,
@@ -1602,13 +1605,18 @@ fn tableau_properties(
 ) -> Result<Vec<TableauProperty>, String> {
     spec.liveness_properties
         .iter()
-        .map(|property| {
-            let formula = if crate::ast::has_temporal_operator(&property.formula) {
-                property.formula.clone()
+        .filter_map(|property| {
+            if property.from_specification {
+                crate::ast::without_fairness(&property.formula).map(|formula| (property, formula))
             } else {
-                Expr::Always(Box::new(Expr::Eventually(Box::new(
-                    property.formula.clone(),
-                ))))
+                Some((property, property.formula.clone()))
+            }
+        })
+        .map(|(property, formula)| {
+            let formula = if crate::ast::has_temporal_operator(&formula) {
+                formula
+            } else {
+                Expr::Always(Box::new(Expr::Eventually(Box::new(formula))))
             };
             let mut atoms = crate::ltl::AtomTable::new();
             let mut domain = |set: &Expr| {

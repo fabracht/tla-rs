@@ -23,6 +23,10 @@ pub struct ValidateSpecInput {
     pub constants: BTreeMap<String, String>,
     #[serde(default)]
     pub config_path: Option<String>,
+    /// The liveness engine whose `PROPERTY` classification to use, as in
+    /// `check_spec`.
+    #[serde(default)]
+    pub liveness_engine: Option<LivenessEngineInput>,
 }
 
 #[derive(Serialize, JsonSchema, Debug)]
@@ -112,6 +116,10 @@ pub struct ListInvariantsInput {
     pub constants: BTreeMap<String, String>,
     #[serde(default)]
     pub config_path: Option<String>,
+    /// The liveness engine whose `PROPERTY` classification to use, as in
+    /// `check_spec`.
+    #[serde(default)]
+    pub liveness_engine: Option<LivenessEngineInput>,
 }
 
 #[derive(Serialize, JsonSchema, Debug)]
@@ -354,6 +362,10 @@ pub struct ReplayScenarioInput {
     pub constants: BTreeMap<String, String>,
     #[serde(default)]
     pub config_path: Option<String>,
+    /// The liveness engine whose `PROPERTY` classification to use, as in
+    /// `check_spec`.
+    #[serde(default)]
+    pub liveness_engine: Option<LivenessEngineInput>,
 }
 
 #[derive(Serialize, JsonSchema, Debug)]

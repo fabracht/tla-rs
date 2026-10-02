@@ -142,18 +142,48 @@ enum LetScope {
     Resolved,
 }
 
-/// [`contains_prime_ref`] that looks into `LET`-defined operators instead of
-/// treating calls to them as possibly primed.
+/// How [`refers_through_defs`] walks: how it treats `LET` operators, and whether a
+/// call it cannot resolve (an operator outside the definitions, such as one the
+/// evaluator provides by name, or an unresolved instance) counts as a match. It
+/// must for checks where a missed match is unsafe (primes, state, temporal
+/// operators); it must not for checks that reject what they match.
+#[derive(Debug, Clone, Copy)]
+struct Walk {
+    lets: LetScope,
+    unknown_calls_match: bool,
+}
+
+/// [`contains_prime_ref`] for a complete set of definitions: it looks into
+/// `LET`-defined operators, and an operator still unknown is one the evaluator
+/// provides by name, which never refers to a primed variable.
 pub(crate) fn contains_prime_ref_resolving_lets(expr: &Expr, defs: &Definitions) -> bool {
     let mut visited = BTreeSet::new();
     let is_prime = |e: &Expr| matches!(e, Expr::Prime(_) | Expr::Unchanged(_));
-    refers_through_defs(expr, defs, &mut visited, &is_prime, LetScope::Resolved)
+    refers_through_defs(
+        expr,
+        defs,
+        &mut visited,
+        &is_prime,
+        Walk {
+            lets: LetScope::Resolved,
+            unknown_calls_match: false,
+        },
+    )
 }
 
 pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
     let mut visited = BTreeSet::new();
     let is_prime = |e: &Expr| matches!(e, Expr::Prime(_) | Expr::Unchanged(_));
-    refers_through_defs(expr, defs, &mut visited, &is_prime, LetScope::Opaque)
+    refers_through_defs(
+        expr,
+        defs,
+        &mut visited,
+        &is_prime,
+        Walk {
+            lets: LetScope::Opaque,
+            unknown_calls_match: true,
+        },
+    )
 }
 
 /// Whether `expr` can take different values in different states: it refers to a
@@ -173,7 +203,16 @@ pub(crate) fn references_state(expr: &Expr, vars: &[Arc<str>], defs: &Definition
         Expr::Var(name) => vars.contains(name),
         _ => false,
     };
-    refers_through_defs(expr, defs, &mut visited, &is_state, LetScope::Resolved)
+    refers_through_defs(
+        expr,
+        defs,
+        &mut visited,
+        &is_state,
+        Walk {
+            lets: LetScope::Resolved,
+            unknown_calls_match: true,
+        },
+    )
 }
 
 /// Whether `expr` uses a built-in whose value depends on the run rather than on the
@@ -191,7 +230,10 @@ pub(crate) fn uses_run_dependent_builtin(expr: &Expr, defs: &Definitions) -> boo
         defs,
         &mut visited,
         &is_run_dependent,
-        LetScope::Resolved,
+        Walk {
+            lets: LetScope::Resolved,
+            unknown_calls_match: false,
+        },
     )
 }
 
@@ -199,7 +241,16 @@ pub(crate) fn uses_run_dependent_builtin(expr: &Expr, defs: &Definitions) -> boo
 pub(crate) fn uses_enabled(expr: &Expr, defs: &Definitions) -> bool {
     let mut visited = BTreeSet::new();
     let is_enabled = |e: &Expr| matches!(e, Expr::EnabledOp(_));
-    refers_through_defs(expr, defs, &mut visited, &is_enabled, LetScope::Resolved)
+    refers_through_defs(
+        expr,
+        defs,
+        &mut visited,
+        &is_enabled,
+        Walk {
+            lets: LetScope::Resolved,
+            unknown_calls_match: false,
+        },
+    )
 }
 
 /// Whether `expr` contains a temporal operator, directly or through the definitions
@@ -218,7 +269,16 @@ pub(crate) fn reaches_temporal(expr: &Expr, defs: &Definitions) -> bool {
                 | Expr::DiamondAction(_, _)
         )
     };
-    refers_through_defs(expr, defs, &mut visited, &is_temporal, LetScope::Resolved)
+    refers_through_defs(
+        expr,
+        defs,
+        &mut visited,
+        &is_temporal,
+        Walk {
+            lets: LetScope::Resolved,
+            unknown_calls_match: true,
+        },
+    )
 }
 
 /// Whether some subexpression satisfies `leaf`, following zero-argument and
@@ -230,7 +290,7 @@ fn refers_through_defs(
     defs: &Definitions,
     visited: &mut BTreeSet<Arc<str>>,
     leaf: &dyn Fn(&Expr) -> bool,
-    scope: LetScope,
+    scope: Walk,
 ) -> bool {
     if leaf(expr) {
         return true;
@@ -379,7 +439,7 @@ fn refers_through_defs(
                     visited.remove(name);
                     result
                 }
-                None => true,
+                None => scope.unknown_calls_match,
             }
         }
         Expr::QualifiedCall(instance_expr, op, args) => {
@@ -405,15 +465,15 @@ fn refers_through_defs(
                             visited.remove(&marker);
                             return result;
                         }
-                        true
+                        scope.unknown_calls_match
                     })
                 }
-                _ => true,
+                _ => scope.unknown_calls_match,
             }
         }
         Expr::Lambda(_, body) => refers_through_defs(body, defs, visited, leaf, scope),
         Expr::Let(name, binding, body) => match parameterized_let_op(binding) {
-            Some((params, op_body)) if scope == LetScope::Resolved => {
+            Some((params, op_body)) if scope.lets == LetScope::Resolved => {
                 let mut with_local = defs.clone();
                 with_local.insert(name.clone(), (params, Arc::new(op_body.clone())));
                 refers_through_defs(body, &with_local, visited, leaf, scope)

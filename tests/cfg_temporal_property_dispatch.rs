@@ -725,3 +725,65 @@ fn tableau_engine_keeps_specification_assumptions_without_a_warning() {
     let (_, legacy_warnings) = apply_with_engine(SYNTACTIC_MODULE, cfg, Legacy);
     assert!(legacy_warnings.iter().any(|w| w.contains("assumptions")));
 }
+
+fn check_with_engine(name: &str, module: &str, cfg: Option<&str>) -> CheckResult {
+    let dir = std::env::temp_dir().join(format!("tla_cfg_engine_{name}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec_path = dir.join(format!("{name}.tla"));
+    std::fs::write(&spec_path, module).unwrap();
+    if let Some(cfg) = cfg {
+        std::fs::write(dir.join(format!("{name}.cfg")), cfg).unwrap();
+    }
+    let prepared = tla_checker::load::prepare_from_path_with_engine(
+        &spec_path,
+        None,
+        &[],
+        tla_checker::checker::LivenessEngine::Tableau,
+    )
+    .unwrap();
+    let mut cc = prepared.checker_config;
+    cc.check_liveness = true;
+    cc.allow_deadlock = true;
+    let result = tla_checker::checker::check(&prepared.spec, &prepared.domains, &cc);
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+#[test]
+fn tableau_engine_accepts_builtin_operators_in_atoms() {
+    let module = "---- MODULE Bits ----\n\
+        EXTENDS Naturals, Bits\n\
+        VARIABLE x\n\
+        Init == x = 0\n\
+        Step == x < 3 /\\ x' = x + 1\n\
+        Next == Step \\/ UNCHANGED x\n\
+        Spec == Init /\\ [][Next]_x /\\ WF_x(Step)\n\
+        Ev == <>(BitAnd(x, 2) = 2)\n\
+        ====\n";
+    match check_with_engine(
+        "Bits",
+        module,
+        Some("SPECIFICATION Spec\nPROPERTY Ev\nCHECK_DEADLOCK FALSE\n"),
+    ) {
+        CheckResult::Ok(_) => {}
+        other => panic!("BitAnd is an ordinary state function; got {other:?}"),
+    }
+}
+
+#[test]
+fn tableau_engine_drops_fairness_from_legacy_spec_formulas() {
+    let module = "---- MODULE Procs ----\n\
+        EXTENDS Naturals\n\
+        VARIABLE x\n\
+        P == {1, 2}\n\
+        vars == <<x>>\n\
+        Init == x = [p \\in P |-> 0]\n\
+        A(p) == x[p] < 2 /\\ x' = [x EXCEPT ![p] = x[p] + 1]\n\
+        Next == \\E p \\in P : A(p)\n\
+        Spec == Init /\\ [][Next]_vars /\\ \\A p \\in P : (WF_vars(A(p)) /\\ <>(x[p] = 2))\n\
+        ====\n";
+    match check_with_engine("Procs", module, None) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 9),
+        other => panic!("each process is driven to 2 by its own WF; got {other:?}"),
+    }
+}

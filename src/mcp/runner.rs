@@ -123,12 +123,19 @@ pub fn prepare(
     })
 }
 
+fn liveness_engine(input: Option<LivenessEngineInput>) -> LivenessEngine {
+    match input {
+        Some(LivenessEngineInput::Tableau) => LivenessEngine::Tableau,
+        Some(LivenessEngineInput::Legacy) | None => LivenessEngine::Legacy,
+    }
+}
+
 pub fn validate_spec(input: &ValidateSpecInput) -> ValidateSpecOutput {
     match prepare(
         &input.spec_path,
         input.config_path.as_deref(),
         &input.constants,
-        LivenessEngine::default(),
+        liveness_engine(input.liveness_engine),
     ) {
         Ok(loaded) => ValidateSpecOutput::ok(
             summarize_spec(&loaded.spec, &loaded.domains),
@@ -143,7 +150,7 @@ pub fn list_invariants(input: &ListInvariantsInput) -> ListInvariantsOutput {
         &input.spec_path,
         input.config_path.as_deref(),
         &input.constants,
-        LivenessEngine::default(),
+        liveness_engine(input.liveness_engine),
     ) {
         Ok(loaded) => ListInvariantsOutput::ok(invariant_summaries(&loaded.spec), loaded.warnings),
         Err(err) => ListInvariantsOutput::error(err),
@@ -155,7 +162,7 @@ pub fn replay_scenario(input: &ReplayScenarioInput) -> ReplayScenarioOutput {
         &input.spec_path,
         input.config_path.as_deref(),
         &input.constants,
-        LivenessEngine::default(),
+        liveness_engine(input.liveness_engine),
     ) {
         Ok(loaded) => loaded,
         Err(err) => return ReplayScenarioOutput::error(err),
@@ -204,10 +211,7 @@ pub fn check_spec(input: &CheckSpecInput) -> CheckSpecOutput {
         &input.spec_path,
         input.config_path.as_deref(),
         &input.constants,
-        match input.liveness_engine {
-            Some(LivenessEngineInput::Tableau) => LivenessEngine::Tableau,
-            Some(LivenessEngineInput::Legacy) | None => LivenessEngine::Legacy,
-        },
+        liveness_engine(input.liveness_engine),
     ) {
         Ok(loaded) => loaded,
         Err(err) => {
