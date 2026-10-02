@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.13.0] - 2026-10-02
+
+### Added
+
+- The tableau liveness engine (`--liveness-engine tableau`) checks `ENABLED` and `WF`/`SF` inside a temporal property (#120). A `WF_v(A)` in a `PROPERTY` is an obligation, checked as `[]<>~ENABLED <<A>>_v \/ []<><<A>>_v` (`SF_v(A)` as `<>[]~ENABLED <<A>>_v \/ []<><<A>>_v`), so a property can be a whole abstract specification such as `AInit /\ [][ANext]_v /\ WF_v(A)`. The `SPECIFICATION`'s temporal assumptions may use `ENABLED` too.
+- The legacy engine also evaluates `ENABLED` in the state predicates of the properties it checks (`[]<>~ENABLED A`).
+- The liveness oracle has 65 new TLC-confirmed cases; under the tableau engine it agrees with TLC on 193 of its 198 cases. 1500 random properties using `ENABLED`, `WF` and `SF`, and 1833 cases written by an adversarial reviewer, gave no false passes or false alarms against TLC.
+
+### Changed
+
+- `ENABLED A` holds in a state when `A` has a successor from it, computed from `A` itself, whether or not `Next` takes it; `ENABLED <<A>>_v` holds when one of those successors changes `v`. As in TLC, `A` may leave unassigned a variable that `v` does not depend on; leaving one that `v` depends on is an error.
+- `ENABLED` is evaluated wherever it appears in an invariant, a `PROPERTY` or a liveness check: under `<=>`, `CASE`, set comprehensions, `Cardinality`, function constructors and the like, and with the action given through a `LET` definition or as an operator argument. Library API: `eval::EvalContext` now holds only `state_vars`, since `ENABLED` reads the current state and the constants from the evaluation environment.
+- With the legacy engine, a `PROPERTY` it cannot check is rejected with a message that points to `--liveness-engine tableau`.
+- Under the tableau engine, `--validate` and MCP `validate_spec` report a property the engine cannot check (one using `TLCGet`, say), the error `check_spec` would give before the state search.
+- The `tla-mcp` server instructions say when to use `liveness_engine: "tableau"` (a property the default engine rejects, nested temporal operators, `ENABLED`, fairness to prove such as a refinement property) and how to read a `liveness_violation` cycle.
+
+### Fixed
+
+- `ENABLED` of an action that refers to a bound variable or an operator parameter (`\A p \in P : ... => ENABLED Enter(p)`) in an invariant or in a `PROPERTY`'s initial-state or action part failed with "undefined variable": the action was evaluated without the binding. `ENABLED` inside a `LET`, under `<=>` or `CASE`, or inside a set comprehension failed with "ENABLED operator cannot be evaluated", and `ENABLED <<A>>_v` failed with "diamond action reached eval".
+
 ## [0.12.1] - 2026-10-01
 
 ### Changed

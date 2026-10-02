@@ -11,7 +11,10 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use tla_checker::ast::{Env, Expr, State, Value};
-use tla_checker::eval::{Definitions, eval, make_primed_names, next_states};
+use tla_checker::eval::{
+    Definitions, EngineOverride, EvalContext, eval, eval_with_context, make_primed_names,
+    next_states,
+};
 use tla_checker::intern::primed_name;
 
 pub type Verdict<T> = Result<T, String>;
@@ -86,8 +89,12 @@ impl Model<'_> {
         env
     }
 
+    /// `expr` in `env`; an `ENABLED` nested in it reads the current state from `env`.
     fn eval_bool(&self, expr: &Expr, env: &mut Env) -> Verdict<bool> {
-        match eval(expr, env, self.defs) {
+        let context = EvalContext {
+            state_vars: self.vars.to_vec(),
+        };
+        match eval_with_context(expr, env, self.defs, &context) {
             Ok(Value::Bool(b)) => Ok(b),
             Ok(other) => Err(format!("expected a boolean, got {other:?} from {expr:?}")),
             Err(e) => Err(format!("eval error {e:?} in {expr:?}")),
@@ -103,6 +110,14 @@ impl Model<'_> {
         next_states(action, state, self.vars, &primed, &mut env, self.defs)
             .map(|transitions| transitions.into_iter().map(|t| t.state).collect())
             .map_err(|e| format!("successor enumeration failed for {action:?}: {e:?}"))
+    }
+
+    /// Successors of `action` that `ENABLED` and fairness inspect. `ENABLED A` is
+    /// `\E vars' : A`, so a variable `A` leaves unassigned may take any value; it
+    /// keeps its current one here.
+    fn enabled_successors(&self, action: &Expr, state: &State, bound: &Env) -> Verdict<Vec<State>> {
+        let _unassigned_stutter = EngineOverride::new(false, true);
+        self.successors(action, state, bound)
     }
 
     fn subscript_changes(
@@ -140,7 +155,7 @@ impl Model<'_> {
         state: &State,
         bound: &Env,
     ) -> Verdict<bool> {
-        for next in self.successors(action, state, bound)? {
+        for next in self.enabled_successors(action, state, bound)? {
             if self.subscript_changes(subscript, state, &next, bound)? {
                 return Ok(true);
             }
@@ -322,9 +337,14 @@ impl Model<'_> {
             Expr::StrongFairness(subscript, action) => {
                 self.fairness_holds(lasso, true, subscript, action, bound)
             }
-            Expr::EnabledOp(action) => Ok(!self
-                .successors(action, &lasso.states[pos], bound)?
-                .is_empty()),
+            Expr::EnabledOp(action) => match action.as_ref() {
+                Expr::DiamondAction(action, subscript) => {
+                    self.angle_enabled(action, subscript, &lasso.states[pos], bound)
+                }
+                _ => Ok(!self
+                    .enabled_successors(action, &lasso.states[pos], bound)?
+                    .is_empty()),
+            },
             Expr::Var(name) => match self.temporal_definition(name, bound) {
                 Some(body) => self.holds(lasso, body, pos, bound),
                 None => self.leaf(lasso, formula, pos, bound),
@@ -393,7 +413,8 @@ fn temporal(expr: &Expr) -> bool {
         | Expr::BoxAction(_, _)
         | Expr::DiamondAction(_, _)
         | Expr::WeakFairness(_, _)
-        | Expr::StrongFairness(_, _) => true,
+        | Expr::StrongFairness(_, _)
+        | Expr::EnabledOp(_) => true,
         Expr::Not(e) => temporal(e),
         Expr::And(l, r) | Expr::Or(l, r) | Expr::Implies(l, r) | Expr::Equiv(l, r) => {
             temporal(l) || temporal(r)

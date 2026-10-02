@@ -425,6 +425,32 @@ pub fn prepare_spec(
     Ok((domains, defs))
 }
 
+fn needs_liveness_check(spec: &Spec, config: &CheckerConfig) -> bool {
+    config.check_liveness
+        && (!spec.fairness.is_empty()
+            || !spec.liveness_properties.is_empty()
+            || !spec.quantified_fairness.is_empty())
+}
+
+/// The error [`check`] would report as `liveness_property_error`, found without a
+/// state search: under the tableau engine every liveness property is translated, and
+/// its tableau built, before exploring. `None` when there is none, or when the spec
+/// cannot be prepared (missing constants, say), a failure `check` reports itself.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn liveness_property_error(
+    spec: &Spec,
+    domains: &Env,
+    config: &CheckerConfig,
+) -> Option<String> {
+    if config.liveness_engine != LivenessEngine::Tableau || !needs_liveness_check(spec, config) {
+        return None;
+    }
+    crate::eval::set_symbolic_integers(config.symbolic_integers);
+    let (domains, defs) =
+        prepare_spec(spec, domains, config.spec_path.as_ref(), config.quiet).ok()?;
+    tableau_properties(spec, &domains, &defs).err()
+}
+
 pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult {
     let _engine = crate::eval::EngineOverride::new(
         config.use_inference_engine,
@@ -557,10 +583,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     let mut parent_action: Vec<Option<Arc<str>>> = Vec::new();
     let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
 
-    let needs_liveness_check = config.check_liveness
-        && (!spec.fairness.is_empty()
-            || !spec.liveness_properties.is_empty()
-            || !spec.quantified_fairness.is_empty());
+    let needs_liveness_check = needs_liveness_check(spec, config);
 
     #[cfg(not(target_arch = "wasm32"))]
     let collect_edges =
@@ -719,7 +742,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
         };
         if !init_properties.is_empty() {
             if !config.continue_on_violation {
-                match violated_invariants(spec, &state, &base_env, &domains, &defs) {
+                match violated_invariants(spec, &state, &base_env, &defs) {
                     Ok(violated) => {
                         if let Some(&first) = violated.first() {
                             stats.elapsed_secs = elapsed_secs();
@@ -740,8 +763,6 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             bind_state(&mut env, &spec.vars, &state);
             let init_ctx = EvalContext {
                 state_vars: spec.vars.clone(),
-                constants: domains.clone(),
-                current_state: state.clone(),
             };
             for (name, predicate) in &init_properties {
                 match eval_with_context(predicate, &mut env, &defs, &init_ctx) {
@@ -771,7 +792,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             if spec.invariants.is_empty() || !excluded_checked.insert(state.clone()) {
                 continue;
             }
-            let violated = match violated_invariants(spec, &state, &base_env, &domains, &defs) {
+            let violated = match violated_invariants(spec, &state, &base_env, &defs) {
                 Ok(violated) => violated,
                 Err(e) => return CheckResult::InvariantError(e, vec![state.clone()], None),
             };
@@ -977,8 +998,6 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
 
         let ctx = EvalContext {
             state_vars: spec.vars.clone(),
-            constants: domains.clone(),
-            current_state: current.clone(),
         };
 
         for (idx, invariant) in spec.invariants.iter().enumerate() {
@@ -1144,8 +1163,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                     {
                         continue;
                     }
-                    let violated =
-                        violated_invariants(spec, &transition.state, &base_env, &domains, &defs);
+                    let violated = violated_invariants(spec, &transition.state, &base_env, &defs);
                     let with_successor = || {
                         let (mut trace, mut actions) =
                             reconstruct_trace(current_idx, &states, &parent, &parent_action);
@@ -1197,14 +1215,11 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                     return CheckResult::NextError(e, trace, dot);
                 }
             }
-            if let Some(refinement) = &refinement {
-                match refinement.step_refines(
-                    &ctx.current_state,
-                    &transition.state,
-                    &spec.vars,
-                    &base_env,
-                    &defs,
-                ) {
+            if let Some(refinement) = &refinement
+                && let Some(from) = states.get_index(current_idx)
+            {
+                match refinement.step_refines(from, &transition.state, &spec.vars, &base_env, &defs)
+                {
                     Ok(true) => {}
                     Ok(false) => {
                         let (mut trace, mut actions) =
@@ -1303,7 +1318,6 @@ fn violated_invariants(
     spec: &Spec,
     state: &State,
     base_env: &Env,
-    domains: &Env,
     defs: &Definitions,
 ) -> Result<Vec<usize>, EvalError> {
     if spec.invariants.is_empty() {
@@ -1313,8 +1327,6 @@ fn violated_invariants(
     bind_state(&mut env, &spec.vars, state);
     let ctx = EvalContext {
         state_vars: spec.vars.clone(),
-        constants: domains.clone(),
-        current_state: state.clone(),
     };
     let mut violated = Vec::new();
     for (idx, invariant) in spec.invariants.iter().enumerate() {

@@ -172,6 +172,7 @@ fn walk_next_states(effective: &Expr, env: &mut Env, ctx: &EnumCtx<'_>) -> Resul
         defs: ctx.defs,
         phase: Phase::Next,
         require_total: true,
+        partial_successors: false,
     };
     let mut all = indexmap::IndexSet::new();
     for (disjunct, action) in collect_disjuncts_with_labels(effective, ctx.defs) {

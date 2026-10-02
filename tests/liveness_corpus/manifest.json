@@ -279,11 +279,10 @@
       "exit_code": 0,
       "version": "2026.09.23.154203"
     },
-    "tla_rs_now": "error",
+    "tla_rs_now": "ok",
     "tla_rs_now_kind": null,
-    "xfail_until_phase": "3",
-    "note": "ENABLED inside a temporal property cannot be evaluated ('ENABLED operator cannot be evaluated in explicit-state model checking').",
-    "tableau_xfail_until_phase": "3"
+    "xfail_until_phase": null,
+    "note": "ENABLED inside a temporal property; both engines evaluate it from the action's own successors."
   },
   {
     "id": "C16",
@@ -1081,8 +1080,7 @@
     "tla_rs_now": "error",
     "tla_rs_now_kind": null,
     "xfail_until_phase": "2",
-    "note": "A WF formula inside a PROPERTY is an obligation in TLC; tla-rs 0.10.1 added it to the fairness assumptions instead (false pass). Now a config-time error.",
-    "tableau_xfail_until_phase": "3"
+    "note": "A WF formula inside a PROPERTY is an obligation in TLC; tla-rs 0.10.1 added it to the fairness assumptions instead (false pass). Now a config-time error."
   },
   {
     "id": "C54",
@@ -2568,5 +2566,1242 @@
     "tla_rs_now_kind": null,
     "xfail_until_phase": null,
     "note": "12 []<> conditions under quantified WF."
+  },
+  {
+    "id": "C132",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C132.cfg",
+    "specification": "SpecF",
+    "property": "StableDisabled",
+    "property_text": "<>[](~ENABLED Step)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED under <>[] in a temporal property."
+  },
+  {
+    "id": "C133",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C133.cfg",
+    "specification": "SpecNF",
+    "property": "StableDisabled",
+    "property_text": "<>[](~ENABLED Step)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property StableDisabled was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "ENABLED under <>[] in a temporal property."
+  },
+  {
+    "id": "C134",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C134.cfg",
+    "specification": "SpecF",
+    "property": "JumpEventuallyDisabled",
+    "property_text": "<>(~ENABLED Jump)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property JumpEventuallyDisabled was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "ENABLED of an action Next never takes: decided by the action's own successors, not by the state graph."
+  },
+  {
+    "id": "C135",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C135.cfg",
+    "specification": "SpecNF",
+    "property": "AngleKeep",
+    "property_text": "[]<>(~ENABLED <<Keep>>_x)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED <<A>>_v is false when every A step leaves v unchanged."
+  },
+  {
+    "id": "C136",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C136.cfg",
+    "specification": "SpecF",
+    "property": "AngleStep",
+    "property_text": "[]<>(~ENABLED <<Step>>_x)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED <<A>>_v under []<>."
+  },
+  {
+    "id": "C137",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C137.cfg",
+    "specification": "SpecNF",
+    "property": "AngleStep",
+    "property_text": "[]<>(~ENABLED <<Step>>_x)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property AngleStep was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "ENABLED <<A>>_v under []<>."
+  },
+  {
+    "id": "C138",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C138.cfg",
+    "specification": "SpecF",
+    "property": "EnabledImplies",
+    "property_text": "[](ENABLED Step => <>(x = 2))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED in the antecedent of an implication under []."
+  },
+  {
+    "id": "C139",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C139.cfg",
+    "specification": "SpecNF",
+    "property": "EnabledImplies",
+    "property_text": "[](ENABLED Step => <>(x = 2))",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property EnabledImplies was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "ENABLED in the antecedent of an implication under []."
+  },
+  {
+    "id": "C140",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C140.cfg",
+    "specification": "SpecF",
+    "property": "EnabledLeads",
+    "property_text": "ENABLED Step ~> ~ENABLED Step",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED on both sides of ~>."
+  },
+  {
+    "id": "C141",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C141.cfg",
+    "specification": "SpecF",
+    "property": "EnabledInQuant",
+    "property_text": "\\A v \\in {0, 1} : [](x = v => <>~ENABLED Step)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED inside a temporal formula quantified over a constant set."
+  },
+  {
+    "id": "C142",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C142.cfg",
+    "specification": "SpecCycle",
+    "property": "ResetOften",
+    "property_text": "[]<>ENABLED Reset",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "[]<>ENABLED A."
+  },
+  {
+    "id": "C143",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C143.cfg",
+    "specification": "SpecNF",
+    "property": "ResetOften",
+    "property_text": "[]<>ENABLED Reset",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property ResetOften was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "[]<>ENABLED A."
+  },
+  {
+    "id": "C144",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C144.cfg",
+    "specification": "SpecF",
+    "property": "WFStep",
+    "property_text": "WF_x(Step)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF in a PROPERTY is an obligation, checked as []<>~ENABLED <<A>>_v \\/ []<><<A>>_v."
+  },
+  {
+    "id": "C145",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C145.cfg",
+    "specification": "SpecNF",
+    "property": "WFStep",
+    "property_text": "WF_x(Step)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property WFStep was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF in a PROPERTY is an obligation, checked as []<>~ENABLED <<A>>_v \\/ []<><<A>>_v."
+  },
+  {
+    "id": "C146",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C146.cfg",
+    "specification": "SpecF",
+    "property": "SFStep",
+    "property_text": "SF_x(Step)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "SF in a PROPERTY is an obligation."
+  },
+  {
+    "id": "C147",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C147.cfg",
+    "specification": "SpecF",
+    "property": "WFProp",
+    "property_text": "WF_x(Step) /\\ <>(x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF conjoined with an eventuality in a PROPERTY (cf. C53)."
+  },
+  {
+    "id": "C148",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C148.cfg",
+    "specification": "SpecF",
+    "property": "NotWF",
+    "property_text": "~WF_x(Step)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property NotWF was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "Negated WF in a PROPERTY."
+  },
+  {
+    "id": "C149",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C149.cfg",
+    "specification": "SpecNF",
+    "property": "WFTuple",
+    "property_text": "WF_<<x>>(Step)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property WFTuple was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF with a tuple subscript in a PROPERTY."
+  },
+  {
+    "id": "C150",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C150.cfg",
+    "specification": "SpecF",
+    "property": "WFJump",
+    "property_text": "WF_x(Jump)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property WFJump was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF in a PROPERTY over an action Next never takes but that is always enabled."
+  },
+  {
+    "id": "C151",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C151.cfg",
+    "specification": "SpecNF",
+    "property": "WFKeep",
+    "property_text": "WF_x(Keep)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF in a PROPERTY over an action that never changes its subscript holds vacuously."
+  },
+  {
+    "id": "C152",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C152.cfg",
+    "specification": "SpecNF",
+    "property": "HandWF",
+    "property_text": "<>[](ENABLED <<Step>>_x) => []<><<Step>>_x",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property HandWF was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF written out with ENABLED and <<A>>_v."
+  },
+  {
+    "id": "C153",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C153.cfg",
+    "specification": "SpecF",
+    "property": "HandWF",
+    "property_text": "<>[](ENABLED <<Step>>_x) => []<><<Step>>_x",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF written out with ENABLED and <<A>>_v."
+  },
+  {
+    "id": "C154",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C154.cfg",
+    "specification": "SpecF",
+    "property": "ASpec",
+    "property_text": "Init /\\ [][Next]_x /\\ WF_x(Step)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "A refinement-style PROPERTY: Init, [][Next]_v and WF together; the WF conjunct is checked as liveness."
+  },
+  {
+    "id": "C155",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C155.cfg",
+    "specification": "SpecNF",
+    "property": "ASpec",
+    "property_text": "Init /\\ [][Next]_x /\\ WF_x(Step)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property ASpec was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "A refinement-style PROPERTY: Init, [][Next]_v and WF together; the WF conjunct is checked as liveness."
+  },
+  {
+    "id": "C156",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C156.cfg",
+    "specification": "SpecCycle",
+    "property": "SFReset",
+    "property_text": "SF_x(Reset)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "SF in a PROPERTY satisfied by a cycling spec."
+  },
+  {
+    "id": "C157",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C157.cfg",
+    "specification": "SpecNF",
+    "property": "WFOrBox",
+    "property_text": "WF_x(Step) \\/ [](x = 0)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property WFOrBox was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF in a disjunction with a temporal formula."
+  },
+  {
+    "id": "C158",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C158.cfg",
+    "specification": "SpecNF",
+    "property": "SFImpliesWF",
+    "property_text": "SF_x(Step) => WF_x(Step)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "SF => WF is valid."
+  },
+  {
+    "id": "C159",
+    "spec": "specs/MutexFair.tla",
+    "cfg": "cfgs/C159.cfg",
+    "specification": "SpecWF",
+    "property": "ExitWF",
+    "property_text": "\\A p \\in P : WF_vars(Exit(p))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "Quantified WF obligation implied by the SPECIFICATION's fairness."
+  },
+  {
+    "id": "C160",
+    "spec": "specs/MutexFair.tla",
+    "cfg": "cfgs/C160.cfg",
+    "specification": "SpecWF",
+    "property": "EnterSF",
+    "property_text": "\\A p \\in P : SF_vars(Enter(p))",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property EnterSF was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "Quantified SF obligation: violated under WF assumptions (Enter is enabled infinitely often but not continuously), satisfied under SF."
+  },
+  {
+    "id": "C161",
+    "spec": "specs/MutexFair.tla",
+    "cfg": "cfgs/C161.cfg",
+    "specification": "SpecSF",
+    "property": "EnterSF",
+    "property_text": "\\A p \\in P : SF_vars(Enter(p))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "Quantified SF obligation: violated under WF assumptions (Enter is enabled infinitely often but not continuously), satisfied under SF."
+  },
+  {
+    "id": "C162",
+    "spec": "specs/MutexFair.tla",
+    "cfg": "cfgs/C162.cfg",
+    "specification": "SpecSF",
+    "property": "EnterWF",
+    "property_text": "\\A p \\in P : WF_vars(Enter(p))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "SF assumptions imply the WF obligation."
+  },
+  {
+    "id": "C163",
+    "spec": "specs/MutexFair.tla",
+    "cfg": "cfgs/C163.cfg",
+    "specification": "SpecWF",
+    "property": "SomeEnterSF",
+    "property_text": "\\E p \\in P : SF_vars(Enter(p))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "Existentially quantified SF obligation."
+  },
+  {
+    "id": "C164",
+    "spec": "specs/MutexFair.tla",
+    "cfg": "cfgs/C164.cfg",
+    "specification": "SpecWF",
+    "property": "WaitEnabled",
+    "property_text": "\\A p \\in P : [](pc[p] = \"wait\" /\\ lock = \"none\" => ENABLED Enter(p))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED of a quantified action inside a []P conjunct (an invariant): the bound variable must reach ENABLED."
+  },
+  {
+    "id": "C165",
+    "spec": "specs/MutexFair.tla",
+    "cfg": "cfgs/C165.cfg",
+    "specification": "SpecWF",
+    "property": "EnterDisabledOften",
+    "property_text": "\\A p \\in P : []<>~ENABLED Enter(p)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "Quantified []<>~ENABLED."
+  },
+  {
+    "id": "C166",
+    "spec": "specs/MutexFair.tla",
+    "cfg": "cfgs/C166.cfg",
+    "specification": "SpecWF",
+    "property": "AbstractFair",
+    "property_text": "Init /\\ [][Next]_vars /\\ \\A p \\in P : SF_vars(Enter(p))",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property AbstractFair was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "A refinement-style PROPERTY whose fairness is SF over a quantified action."
+  },
+  {
+    "id": "C167",
+    "spec": "specs/MutexFair.tla",
+    "cfg": "cfgs/C167.cfg",
+    "specification": "SpecSF",
+    "property": "AbstractFair",
+    "property_text": "Init /\\ [][Next]_vars /\\ \\A p \\in P : SF_vars(Enter(p))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "A refinement-style PROPERTY whose fairness is SF over a quantified action."
+  },
+  {
+    "id": "C168",
+    "spec": "specs/EnabledCon.tla",
+    "cfg": "cfgs/C168.cfg",
+    "specification": "Spec",
+    "property": "UpOften",
+    "property_text": "[]<>ENABLED Up",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED counts successors outside the CONSTRAINT."
+  },
+  {
+    "id": "C169",
+    "spec": "specs/EnabledCon.tla",
+    "cfg": "cfgs/C169.cfg",
+    "specification": "Spec",
+    "property": "UpEventuallyOff",
+    "property_text": "<>~ENABLED Up",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property UpEventuallyOff was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "ENABLED at the CONSTRAINT boundary stays true."
+  },
+  {
+    "id": "C170",
+    "spec": "specs/EnabledCon.tla",
+    "cfg": "cfgs/C170.cfg",
+    "specification": "Spec",
+    "property": "WFUp",
+    "property_text": "WF_x(Up)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property WFUp was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF obligation under a CONSTRAINT."
+  },
+  {
+    "id": "C171",
+    "spec": "specs/EnabledCon.tla",
+    "cfg": "cfgs/C171.cfg",
+    "specification": "SpecF",
+    "property": "WFUp",
+    "property_text": "WF_x(Up)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF obligation under a CONSTRAINT."
+  },
+  {
+    "id": "C172",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C172.cfg",
+    "specification": "SpecWF",
+    "property": "ParamEnabled",
+    "property_text": "\\A p \\in P : [](CanEnter(p) => <>(pc[p] = \"cs\"))",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property ParamEnabled was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "ENABLED reached through an operator with a parameter."
+  },
+  {
+    "id": "C173",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C173.cfg",
+    "specification": "SpecWF",
+    "property": "LetEnabled",
+    "property_text": "LET can(p) == ENABLED Enter(p) IN \\A p \\in P : []<>~can(p)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED inside a LET-defined operator."
+  },
+  {
+    "id": "C174",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C174.cfg",
+    "specification": "SpecWF",
+    "property": "SomeEnter",
+    "property_text": "[]<>~ENABLED (\\E p \\in P : Enter(p))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED of an existentially quantified action."
+  },
+  {
+    "id": "C175",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C175.cfg",
+    "specification": "SpecWF",
+    "property": "SomeEnterWF",
+    "property_text": "WF_vars(\\E p \\in P : Enter(p))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF over an existentially quantified action."
+  },
+  {
+    "id": "C176",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C176.cfg",
+    "specification": "SpecWF",
+    "property": "PartialEnabled",
+    "property_text": "[]<>ENABLED (y' = 1)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED of an action that assigns only some variables."
+  },
+  {
+    "id": "C177",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C177.cfg",
+    "specification": "SpecWF",
+    "property": "PartialWF",
+    "property_text": "WF_y(y' = y + 1)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property PartialWF was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF over an action that assigns only its subscript's variables: the subscript is evaluated on the partial successor, as in TLC."
+  },
+  {
+    "id": "C178",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C178.cfg",
+    "specification": "SpecWF",
+    "property": "BumpWF",
+    "property_text": "WF_y(Bump)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property BumpWF was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "WF obligation for an action the SPECIFICATION gives no fairness."
+  },
+  {
+    "id": "C179",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C179.cfg",
+    "specification": "SpecWF",
+    "property": "BumpEventually",
+    "property_text": "<>(y = 1)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property BumpEventually was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "Eventuality that needs fairness the SPECIFICATION does not give."
+  },
+  {
+    "id": "C180",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C180.cfg",
+    "specification": "SpecWF",
+    "property": "SFAnyEnter",
+    "property_text": "SF_vars(\\E p \\in P : Enter(p))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "SF over an existentially quantified action."
+  },
+  {
+    "id": "C181",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C181.cfg",
+    "specification": "SpecWF",
+    "property": "QuantWFSome",
+    "property_text": "\\E p \\in P : WF_vars(Enter(p))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "Existentially quantified WF obligation."
+  },
+  {
+    "id": "C182",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C182.cfg",
+    "specification": "SpecWF",
+    "property": "EnterOrExitSF",
+    "property_text": "\\A p \\in P : SF_vars(Enter(p) \\/ Exit(p))",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property EnterOrExitSF was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "SF over a disjunction of actions."
+  },
+  {
+    "id": "C183",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C183.cfg",
+    "specification": "SpecAssume",
+    "property": "ParamEnabled",
+    "property_text": "\\A p \\in P : [](CanEnter(p) => <>(pc[p] = \"cs\"))",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property ParamEnabled was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "ENABLED reached through an operator with a parameter."
+  },
+  {
+    "id": "C184",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C184.cfg",
+    "specification": "SpecAssume",
+    "property": "BumpEventually",
+    "property_text": "<>(y = 1)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property BumpEventually was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "Eventuality that needs fairness the SPECIFICATION does not give."
+  },
+  {
+    "id": "C185",
+    "spec": "specs/Enabled2.tla",
+    "cfg": "cfgs/C185.cfg",
+    "specification": "SpecAssume",
+    "property": "SomeEnter",
+    "property_text": "[]<>~ENABLED (\\E p \\in P : Enter(p))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "ENABLED of an existentially quantified action."
+  },
+  {
+    "id": "C186",
+    "spec": "specs/Enabled.tla",
+    "cfg": "cfgs/C186.cfg",
+    "specification": "SpecJump",
+    "property": "NeverTwo",
+    "property_text": "<>(x = 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "fairness-enabledness",
+    "note": "Known divergence: WF in the SPECIFICATION over an action Next never takes (always enabled, never taken) makes every behavior unfair in TLC; tla-rs decides the enabledness of SPECIFICATION fairness from the state graph's steps only, so it reports a false alarm.",
+    "tableau_xfail_until_phase": "fairness-enabledness"
+  },
+  {
+    "id": "C187",
+    "spec": "specs/Enabled3.tla",
+    "cfg": "cfgs/C187.cfg",
+    "specification": "Spec",
+    "property": "LetAction",
+    "property_text": "[]<>(LET a == Inc IN ~ENABLED a)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED of an action bound by a LET definition without parameters."
+  },
+  {
+    "id": "C188",
+    "spec": "specs/Enabled3.tla",
+    "cfg": "cfgs/C188.cfg",
+    "specification": "SpecNF",
+    "property": "LetAction",
+    "property_text": "[]<>(LET a == Inc IN ~ENABLED a)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property LetAction was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "ENABLED of an action bound by a LET definition without parameters."
+  },
+  {
+    "id": "C189",
+    "spec": "specs/Enabled3.tla",
+    "cfg": "cfgs/C189.cfg",
+    "specification": "Spec",
+    "property": "LetActionBox",
+    "property_text": "[](LET a == Inc IN ENABLED a)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property LetActionBox was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": "let-level",
+    "note": "Known difference (kind only): TLC classifies [] over a LET whose definition is an action as a temporal property; tla-rs classifies it as an invariant ([]P over a state predicate) and reports the same violation as an invariant violation.",
+    "tableau_xfail_until_phase": "let-level"
+  },
+  {
+    "id": "C190",
+    "spec": "specs/Enabled3.tla",
+    "cfg": "cfgs/C190.cfg",
+    "specification": "Spec",
+    "property": "ArgAction",
+    "property_text": "[]<>~En(Inc)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED of an action passed as an operator argument."
+  },
+  {
+    "id": "C191",
+    "spec": "specs/Enabled3.tla",
+    "cfg": "cfgs/C191.cfg",
+    "specification": "Spec",
+    "property": "ArgActionBox",
+    "property_text": "[](x < 2 => En(Inc))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED of an action passed as an operator argument, inside a []P conjunct."
+  },
+  {
+    "id": "C192",
+    "spec": "specs/Enabled3.tla",
+    "cfg": "cfgs/C192.cfg",
+    "specification": "Spec",
+    "property": "EquivEnabled",
+    "property_text": "[](ENABLED Inc <=> x < 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED under <=>."
+  },
+  {
+    "id": "C193",
+    "spec": "specs/Enabled3.tla",
+    "cfg": "cfgs/C193.cfg",
+    "specification": "Spec",
+    "property": "CaseEnabled",
+    "property_text": "<>[](CASE x = 2 -> ~ENABLED Inc [] OTHER -> FALSE)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED inside CASE."
+  },
+  {
+    "id": "C194",
+    "spec": "specs/Enabled3.tla",
+    "cfg": "cfgs/C194.cfg",
+    "specification": "SpecNF",
+    "property": "CaseEnabled",
+    "property_text": "<>[](CASE x = 2 -> ~ENABLED Inc [] OTHER -> FALSE)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property CaseEnabled was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "ENABLED inside CASE."
+  },
+  {
+    "id": "C195",
+    "spec": "specs/Enabled3.tla",
+    "cfg": "cfgs/C195.cfg",
+    "specification": "Spec",
+    "property": "SetEnabled",
+    "property_text": "<>[]({v \\in {1} : ENABLED Inc} = {})",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED inside a set comprehension."
+  },
+  {
+    "id": "C196",
+    "spec": "specs/Enabled3.tla",
+    "cfg": "cfgs/C196.cfg",
+    "specification": "SpecNF",
+    "property": "CardEnabled",
+    "property_text": "[]<>(Cardinality({v \\in {1} : ENABLED Inc}) = 0)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property CardEnabled was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "ENABLED inside Cardinality of a set comprehension."
   }
 ]

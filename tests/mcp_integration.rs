@@ -42,6 +42,30 @@ fn validate_spec_returns_summary_for_valid_spec() {
 }
 
 #[test]
+fn validate_spec_reports_what_the_tableau_engine_cannot_check() {
+    let validate = |spec: &str, config: &str| {
+        runner::validate_spec(&ValidateSpecInput {
+            spec_path: format!("tests/liveness_corpus/specs/{spec}.tla"),
+            constants: BTreeMap::new(),
+            config_path: Some(format!("tests/liveness_corpus/cfgs/{config}.cfg")),
+            liveness_engine: Some(LivenessEngineInput::Tableau),
+        })
+    };
+    let rejected = validate("Guards", "C103");
+    assert!(matches!(rejected.status, ValidationStatus::Error));
+    let body = serde_json::to_value(rejected.error.expect("error present")).unwrap();
+    assert_eq!(body["kind"], json!("config"));
+    assert!(
+        body["message"].as_str().unwrap().contains("TLCGet"),
+        "the property check_spec would reject before the state search: {body}"
+    );
+    assert!(
+        matches!(validate("MutexFair", "C167").status, ValidationStatus::Ok),
+        "an SF obligation is checkable by the tableau engine"
+    );
+}
+
+#[test]
 fn validate_spec_reports_io_error_for_missing_file() {
     let input = ValidateSpecInput {
         spec_path: "does_not_exist.tla".into(),

@@ -17,6 +17,7 @@ use super::helpers::{
 use super::recursive::eval_fn_def_recursive;
 use crate::ast::{Env, Expr, Value};
 use crate::checker::format_value;
+use crate::substitution::substitute_expr;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -711,7 +712,15 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 }
                 let mut arg_vals = Vec::with_capacity(args.len());
                 for arg_expr in args {
-                    arg_vals.push(eval(arg_expr, env, defs)?);
+                    match eval(arg_expr, env, defs) {
+                        Ok(value) => arg_vals.push(value),
+                        Err(_) if super::ast_utils::contains_prime_ref(arg_expr, defs) => {
+                            let subs: Vec<(Arc<str>, Expr)> =
+                                params.iter().cloned().zip(args.iter().cloned()).collect();
+                            return eval(&substitute_expr(body, &subs), env, defs);
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
                 let mut prevs = Vec::with_capacity(params.len());
                 for (param, val) in params.iter().zip(arg_vals) {
@@ -1455,7 +1464,14 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 }
                 result
             } else {
-                let val = eval(binding, env, defs)?;
+                let val = match eval(binding, env, defs) {
+                    Ok(value) => value,
+                    Err(_) if super::ast_utils::contains_prime_ref(binding, defs) => {
+                        let subs = [(var.clone(), (**binding).clone())];
+                        return eval(&substitute_expr(body, &subs), env, defs);
+                    }
+                    Err(e) => return Err(e),
+                };
                 let prev = env.insert(var.clone(), val);
                 let result = eval(body, env, defs);
                 match prev {
@@ -1524,9 +1540,30 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             "temporal operator <<A>>_v (diamond action) reached eval — it should be inside the spec body referenced by cfg SPECIFICATION. Cannot be used as a state predicate.",
         )),
 
-        Expr::EnabledOp(_) => Err(EvalError::domain_error(
-            "ENABLED operator cannot be evaluated in explicit-state model checking",
-        )),
+        Expr::EnabledOp(action) => {
+            let Some(vars) = super::global_state::enabled_vars() else {
+                return Err(EvalError::domain_error(
+                    "ENABLED can be evaluated only in an invariant, a PROPERTY, or a liveness \
+                     check, not while generating states",
+                ));
+            };
+            let mut values = Vec::with_capacity(vars.len());
+            for var in &vars {
+                values.push(
+                    env.get(var)
+                        .cloned()
+                        .ok_or_else(|| EvalError::undefined_var_with_env(var.clone(), env, defs))?,
+                );
+            }
+            let current = crate::ast::State { values };
+            let enabled = match action.as_ref() {
+                Expr::DiamondAction(action, subscript) => super::state::is_angle_action_enabled(
+                    action, subscript, &current, &vars, env, defs,
+                )?,
+                _ => super::state::is_action_enabled(action, &current, &vars, env, defs)?,
+            };
+            Ok(Value::Bool(enabled))
+        }
 
         Expr::QualifiedCall(instance_expr, op, args) => match instance_expr.as_ref() {
             Expr::Var(instance_name) => RESOLVED_INSTANCES.with(|inst_ref| {

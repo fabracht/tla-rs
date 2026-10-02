@@ -457,14 +457,16 @@ pub(crate) fn truth(
     defs: &Definitions,
 ) -> Result<Vec<bool>> {
     let mut bindings = Bindings::new(vars, constants, defs);
-    graph
-        .states
-        .iter()
-        .map(|state| {
-            bindings.bind(state);
-            bindings.holds(expr, "liveness property")
-        })
-        .collect()
+    crate::eval::with_enabled_vars(vars, || {
+        graph
+            .states
+            .iter()
+            .map(|state| {
+                bindings.bind(state);
+                bindings.holds(expr, "liveness property")
+            })
+            .collect()
+    })
 }
 
 /// One evaluation environment reused across a whole pass over the graph. Constants

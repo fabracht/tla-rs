@@ -1,7 +1,7 @@
 use super::Definitions;
 use super::candidates::infer_candidates;
 use super::enumerate::{extract_guards_for_action, next_states_impl};
-use super::error::Result;
+use super::error::{EvalError, Result};
 #[cfg(feature = "profiling")]
 use super::global_state::PROFILING_STATS;
 use super::helpers::eval_bool;
@@ -81,10 +81,8 @@ fn next_states_with_guards_impl(
 
     let mut results = Vec::new();
     for transition in transitions {
-        for (i, _var) in vars.iter().enumerate() {
-            if let Some(val) = transition.state.values.get(i) {
-                base_env.insert(primed_vars[i].clone(), val.clone());
-            }
+        for (primed, val) in primed_vars.iter().zip(&transition.state.values) {
+            base_env.insert(primed.clone(), val.clone());
         }
 
         let guards = extract_guards_for_action(next, base_env, defs, transition.action.as_ref())?;
@@ -103,18 +101,81 @@ fn next_states_with_guards_impl(
     Ok(results)
 }
 
+/// The environment `ENABLED` evaluates its action in: the identifiers in `scope`
+/// (constants, and the bound variables and operator parameters around `ENABLED`),
+/// the variables of `current`, and no primed variable, since `ENABLED` binds them.
+fn enabled_env(current: &State, vars: &[Arc<str>], scope: &Env) -> (Env, Vec<Arc<str>>) {
+    let primed_vars = make_primed_names(vars);
+    let mut env = scope.clone();
+    for (var, primed) in vars.iter().zip(&primed_vars) {
+        env.remove(primed);
+        env.remove(var);
+    }
+    for (var, val) in vars.iter().zip(&current.values) {
+        env.insert(var.clone(), val.clone());
+    }
+    (env, primed_vars)
+}
+
+/// `ENABLED <<A>>_v` in `current`: does some `A` step from it change `v`? As in TLC,
+/// `v` is evaluated on each successor `A` produces, which may leave a variable
+/// unassigned only if `v` does not depend on it. `scope` holds the identifiers in
+/// scope, as for [`is_action_enabled`].
+pub fn is_angle_action_enabled(
+    action: &Expr,
+    subscript: &Expr,
+    current: &State,
+    vars: &[Arc<str>],
+    scope: &Env,
+    defs: &Definitions,
+) -> Result<bool> {
+    let (mut env, primed_vars) = enabled_env(current, vars, scope);
+    let successors: Vec<(State, Vec<usize>)> = if super::walk::walk_enabled() {
+        super::walk::walk_action_successors(action, &mut env, vars, &primed_vars, defs)?
+    } else {
+        next_states(action, current, vars, &primed_vars, &mut env, defs)?
+            .into_iter()
+            .map(|transition| (transition.state, Vec::new()))
+            .collect()
+    };
+    let before = super::eval(subscript, &mut env, defs)?;
+    for (successor, unassigned) in &successors {
+        for (index, (var, val)) in vars.iter().zip(&successor.values).enumerate() {
+            if unassigned.contains(&index) {
+                env.remove(var);
+            } else {
+                env.insert(var.clone(), val.clone());
+            }
+        }
+        let after = super::eval(subscript, &mut env, defs).map_err(|error| {
+            if unassigned.is_empty() {
+                return error;
+            }
+            let names: Vec<&str> = unassigned.iter().map(|&i| vars[i].as_ref()).collect();
+            EvalError::domain_error(format!(
+                "the action of ENABLED <<A>>_v (or of WF_v(A) / SF_v(A)) leaves {} unassigned, \
+                 but the subscript v depends on it: {error}",
+                names.join(", ")
+            ))
+        })?;
+        if after != before {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// `ENABLED A` in `current`: does `A` have a successor from it? `scope` holds the
+/// identifiers in scope: the constants, and the bound variables and operator
+/// parameters `A` may refer to.
 pub fn is_action_enabled(
     action: &Expr,
     current: &State,
     vars: &[Arc<str>],
-    constants: &Env,
+    scope: &Env,
     defs: &Definitions,
 ) -> Result<bool> {
-    let mut base_env = state_to_env(current, vars);
-    for (k, v) in constants {
-        base_env.insert(k.clone(), v.clone());
-    }
-    let primed_vars = make_primed_names(vars);
+    let (mut base_env, primed_vars) = enabled_env(current, vars, scope);
     if super::walk::walk_enabled() {
         return super::walk::walk_action_enabled(action, &mut base_env, vars, &primed_vars, defs);
     }
