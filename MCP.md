@@ -61,22 +61,26 @@ To check which build is registered, run `tla-mcp --version` (or `-V`) — it pri
 
 ## Tools
 
-All tools return a `schema_version: "1"` field — the contract is frozen at version 1 and will be bumped explicitly on breaking changes.
+All tools return a `schema_version: "2"` field — the contract is bumped explicitly on breaking changes (version 2 added the `property_violation` outcome and `properties_checked`).
 
 | Tool | Purpose |
 |------|---------|
 | `validate_spec` | Parse a `.tla` file and return a summary (vars, **constants with resolved values**, invariants, init/next presence). Returns a structured parse/config error with source span on failure. Inspect the `constants` array before every `check_spec` call — outlier values are the most common cause of timeouts. |
 | `list_invariants` | Return the detected invariants (definitions matching `Inv*`, `TypeOK*`, `NotSolved*`, plus anything declared in a cfg `INVARIANT` directive). |
-| `check_spec` | Run full model checking. **Requires** `max_states`, `max_depth`, AND `max_seconds` (no defaults — agents must budget all three upfront). The `max_seconds` budget is enforced during both BFS exploration and the liveness phase. Returns one of: `ok`, `invariant_violation` (with trace + invariant name + actions), `deadlock`, `liveness_violation` (with prefix + cycle), `limit_reached` (budget exhausted — not an error; `limit` is one of `max_states`/`max_depth`/`max_seconds`), or `error` (with structured phase + message + optional source span). |
+| `check_spec` | Run full model checking. **Requires** `max_states`, `max_depth`, AND `max_seconds` (no defaults — agents must budget all three upfront). The `max_seconds` budget is enforced during both BFS exploration and the liveness phase. Returns one of: `ok`, `invariant_violation` (with trace + invariant name + actions), `deadlock`, `liveness_violation` (with prefix + cycle), `property_violation` (a cfg `PROPERTY` failing on an initial state, `kind: "init"`, or on a transition, `kind: "action"`; with property name + trace + actions), `limit_reached` (budget exhausted — not an error; `limit` is one of `max_states`/`max_depth`/`max_seconds`), or `error` (with structured phase + message + optional source span). |
 | `replay_scenario` | Walk a spec step-by-step through a guided scenario (text of `step: <TLA+ expression>` lines). Returns the same `StateSnapshot` shape as `check_spec`, plus per-step `changes` descriptions. On a step that no transition satisfies, returns `status: "failed"` with `available_actions` to help diagnose the mismatch. |
 | `validate_demo` | Run a demo manifest (named variants + ordered beats) and report pass/fail per beat and variant, with the failing assertions on a miss. |
 | `append_beat` | Append a beat to a manifest, persisting it only if all its assertions pass. Format-preserving — a `.toml` manifest stays TOML. |
 | `export_demo_doc` | Render a demo manifest to a tested Markdown walkthrough at `out_path`. |
 | `export_demo_html` | Render a demo manifest to a self-contained, offline HTML walkthrough. Pass `explorable: true` to embed the wasm engine as a live in-browser state explorer (step actions via number-key hotkeys, actions grouped by name, combinatorial variants collapsed into per-variable value pickers, live invariants) — requires a `tla-mcp` built with the `embed-wasm` feature, which the prebuilt release binaries are. |
 
+On `ok`, `properties_checked` lists the cfg `PROPERTY` names that were checked. A `[]P` conjunct of a `PROPERTY` fails as an `invariant_violation` naming the property.
+
+`check_spec`, `validate_spec`, `list_invariants` and `replay_scenario` accept `liveness_engine: "legacy" | "tableau"` (default `legacy`, same as the CLI `--liveness-engine`). `tableau` checks any temporal `PROPERTY` by TLC's tableau method and classifies `PROPERTY` conjuncts on their syntax as TLC does; a property it cannot express (`ENABLED`, `WF`/`SF` inside it, `TLCGet`) is reported before the state search as an `error` with `phase: "config"`. The other three tools take the option so their summaries reflect the same classification `check_spec` will use.
+
 The boolean toggles `allow_deadlock` and `check_liveness` are `Option<bool>` — omit them to defer to the cfg file (e.g., `CHECK_DEADLOCK FALSE` or `PROPERTY` directives), pass `true` / `false` to override the cfg. The `symmetry` field appends to any constants declared via cfg `SYMMETRY` rather than replacing them.
 
-`validate_spec` and `list_invariants` include a `warnings` array surfacing parser-tolerance warnings — when the parser fails to parse an operator body it silently skips that operator and emits a warning. The same array also surfaces unsupported temporal constructs (`<<A>>_v` diamond actions, `<>[]P` stable-eventually) that the fairness extractor drops. Without the warnings array, a typo in an invariant's body would let `check_spec` "pass" without ever checking that invariant.
+`validate_spec` and `list_invariants` include a `warnings` array surfacing parser-tolerance warnings — when the parser fails to parse an operator body it silently skips that operator and emits a warning. The same array also surfaces temporal constructs that the legacy extraction from a `*Spec` definition drops (`<<A>>_v` diamond actions, `\E x \in S : P` with `P` other than `<>Q` or `[]<>Q`). Without the warnings array, a typo in an invariant's body would let `check_spec` "pass" without ever checking that invariant.
 
 `check_spec` honors the cfg's `CONSTRAINT` directive (state-space pruning predicate) and accepts an inline `state_constraint: "<TLA+ expression>"` parameter. Constraints are evaluated on every state — states where the expression is false are dropped from the reachable set and not explored further. Use this to bound otherwise-explosive state spaces (e.g., `state_constraint: "Len(queue) <= 3"`) without modifying the spec.
 

@@ -131,7 +131,8 @@
                 Full model checking with required <code>max_states</code> / <code>max_depth</code> /
                 <code>max_seconds</code> budgets. Returns <code>ok</code>,
                 <code>invariant_violation</code> (with trace + actions), <code>deadlock</code>,
-                <code>liveness_violation</code> (prefix + cycle), <code>limit_reached</code>, or structured <code>error</code>.
+                <code>liveness_violation</code> (prefix + cycle), <code>property_violation</code> (a cfg
+                <code>PROPERTY</code> failing on an initial state or a transition), <code>limit_reached</code>, or structured <code>error</code>.
               </td>
             </tr>
             <tr>

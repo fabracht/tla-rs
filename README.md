@@ -41,6 +41,7 @@ A bare identifier is a **model value** — an uninterpreted, pairwise-distinct a
 | `--dot-mode MODE` | DOT mode: `full`, `trace`, `clean` (default), `choices` |
 | `--allow-deadlock` | Allow states with no successors |
 | `--check-liveness` | Check liveness and fairness properties |
+| `--liveness-engine E` | `legacy` (default) or `tableau`: check any temporal property as TLC does (see the [CLI Guide](CLI_GUIDE.md#liveness)) |
 | `--continue` | Continue past invariant violations |
 | `--count-satisfying NAME` | Count states satisfying a definition (repeatable) |
 | `--sweep NAME=V1;V2;...` | Sweep a constant across values, compare results |
