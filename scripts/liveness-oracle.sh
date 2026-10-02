@@ -10,7 +10,7 @@ set -uo pipefail
 #
 # Verdict classification of TLC output:
 #   "No error has been found"                  -> ok
-#   "is violated by the initial state"         -> violated (init)
+#   "Property ... is violated by the initial state" -> violated (init)
 #   "Temporal propert(y|ies) ... violated"     -> violated (liveness)
 #   "Action property ... is violated"          -> violated (action)
 #   "Invariant ... is violated"                -> violated (invariant)
@@ -36,7 +36,7 @@ classify() {
   local out="$1"
   if grep -q "No error has been found" "$out"; then
     echo "ok -"
-  elif grep -q "is violated by the initial state" "$out"; then
+  elif grep -Eq "Property .* is violated by the initial state" "$out"; then
     echo "violated init"
   elif grep -Eq "Temporal propert(y|ies) .*violated" "$out"; then
     echo "violated liveness"

@@ -11,10 +11,10 @@ use std::sync::Arc;
 use tla_checker::Source;
 use tla_checker::ast::{Env, Spec, Value};
 use tla_checker::checker::{
-    CheckResult, CheckStats, CheckerConfig, PrepareSpecError, PropertyViolationKind, check,
-    check_result_to_json, eval_error_to_diagnostic, format_eval_error, format_trace,
-    format_trace_with_actions, format_trace_with_diffs, unchecked_predicate_warning,
-    write_trace_json,
+    CheckResult, CheckStats, CheckerConfig, LivenessEngine, PrepareSpecError,
+    PropertyViolationKind, check, check_result_to_json, eval_error_to_diagnostic,
+    format_eval_error, format_trace, format_trace_with_actions, format_trace_with_diffs,
+    unchecked_predicate_warning, write_trace_json,
 };
 use tla_checker::config::{
     apply_config, legacy_temporal_warning, parse_cfg, parse_constant_value, split_top_level,
@@ -468,6 +468,23 @@ fn main() -> ExitCode {
             "--check-liveness" => {
                 config.check_liveness = true;
             }
+            "--liveness-engine" => {
+                i += 1;
+                if missing_value(&args, i) {
+                    eprintln!("--liveness-engine requires legacy or tableau");
+                    return ExitCode::FAILURE;
+                }
+                match LivenessEngine::parse(&args[i]) {
+                    Some(engine) => config.liveness_engine = engine,
+                    None => {
+                        eprintln!(
+                            "--liveness-engine expects legacy or tableau, got '{}'",
+                            args[i]
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
             "--check-refinement" => {
                 i += 1;
                 if missing_value(&args, i) {
@@ -675,6 +692,9 @@ fn main() -> ExitCode {
                     "  --symbolic-integers        Treat Nat/Int as infinite sets (membership only; enumeration errors)"
                 );
                 println!("  --check-liveness           Check liveness and fairness properties");
+                println!(
+                    "  --liveness-engine <E>      legacy (default) or tableau: check any temporal property as TLC does"
+                );
                 println!(
                     "  --check-refinement ALIAS   Verify Spec => ALIAS!Spec for an INSTANCE alias"
                 );
@@ -1288,8 +1308,8 @@ fn main() -> ExitCode {
             println!();
             if !violation.fairness_info.is_empty() {
                 println!("Fairness information:");
-                for (info, taken) in &violation.fairness_info {
-                    let status = if *taken { "satisfied" } else { "violated" };
+                for (info, satisfied) in &violation.fairness_info {
+                    let status = if *satisfied { "satisfied" } else { "violated" };
                     println!("  {}: {}", info, status);
                 }
                 println!();
@@ -1501,7 +1521,10 @@ fn main() -> ExitCode {
             eprintln!("{}", diag.render_colored(&source, &colors));
             ExitCode::FAILURE
         }
-        CheckResult::PrepareError(PrepareSpecError::RefinementConfigError(message)) => {
+        CheckResult::PrepareError(
+            PrepareSpecError::RefinementConfigError(message)
+            | PrepareSpecError::LivenessProperty(message),
+        ) => {
             eprintln!(
                 "{}",
                 Diagnostic::error(message).render_colored(&source, &colors)

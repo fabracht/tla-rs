@@ -91,6 +91,7 @@ fn check_spec_returns_invariant_violation_with_trace() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -130,6 +131,7 @@ fn check_spec_reports_limit_reached_when_budget_exhausted() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -157,6 +159,7 @@ fn check_spec_reports_missing_constant_as_structured_error() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -186,6 +189,7 @@ fn check_spec_reports_parse_error_with_span() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -215,6 +219,7 @@ fn check_spec_passes_for_safe_spec() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -247,6 +252,7 @@ fn check_spec_warns_about_misnamed_invariant_alongside_a_checked_one() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -285,6 +291,7 @@ fn check_spec_honors_cfg_check_deadlock_false_when_input_unset() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -323,6 +330,7 @@ fn check_spec_reports_deadlock_by_default_when_neither_cfg_nor_input_allows() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -442,6 +450,7 @@ fn check_spec_honors_cfg_constraint_directive() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -485,6 +494,7 @@ fn check_spec_honors_input_state_constraint() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: Some("x < 3".to_string()),
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -520,6 +530,7 @@ fn check_spec_reports_state_constraint_parse_error() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: Some(")))".to_string()),
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -574,6 +585,7 @@ fn check_spec_extracts_wf_from_non_spec_named_specification() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -632,6 +644,7 @@ fn check_spec_handles_wf_in_spec_named_definition() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -697,6 +710,7 @@ fn check_spec_detects_leads_to_violation_in_sub_scc() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -770,6 +784,7 @@ fn check_spec_does_not_report_leads_to_violation_when_subscc_unreachable() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -823,6 +838,7 @@ fn check_spec_enforces_wf_vars_for_unfair_cycle_inside_larger_scc() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -885,6 +901,7 @@ fn check_spec_expands_quantified_fairness_and_leads_to_property() {
             count_satisfying: vec![],
             continue_on_violation: false,
             state_constraint: None,
+            liveness_engine: None,
             config_path: None,
         };
         runner::check_spec(&input).outcome
@@ -963,6 +980,7 @@ fn check_spec_routes_cfg_temporal_property_to_liveness_checker() {
             count_satisfying: vec![],
             continue_on_violation: false,
             state_constraint: None,
+            liveness_engine: None,
             config_path: None,
         };
         runner::check_spec(&input).outcome
@@ -1038,6 +1056,7 @@ fn check_spec_reports_fair_sub_cycle_when_an_unfair_sub_cycle_shares_the_scc() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -1121,6 +1140,7 @@ fn check_spec_reports_max_seconds_when_time_budget_exhausted() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -1185,6 +1205,7 @@ fn check_spec_reports_max_seconds_when_liveness_phase_runs_with_zero_budget() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -1256,6 +1277,7 @@ fn check_spec_leads_to_violation_cycle_contains_state_where_p_holds() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);
@@ -1319,6 +1341,7 @@ fn check_spec_cli_constants_override_cfg_constants() {
         count_satisfying: vec![],
         continue_on_violation: false,
         state_constraint: None,
+        liveness_engine: None,
         config_path: None,
     };
     let out = runner::check_spec(&input);

@@ -276,6 +276,7 @@ impl Parser {
             quantified_fairness: self.quantified_fairness.clone(),
             liveness_properties: self.liveness_properties.clone(),
             safety_properties: Vec::new(),
+            temporal_assumptions: Vec::new(),
         })
     }
 

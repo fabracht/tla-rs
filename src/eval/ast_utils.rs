@@ -132,10 +132,28 @@ pub(crate) fn collect_disjuncts_with_labels<'a>(
     }
 }
 
+/// How [`refers_through_defs`] treats a call to an operator defined by an enclosing
+/// parameterized `LET`: as an unknown operator (`Opaque`, the conservative reading
+/// the state generator relies on), or by examining the operator's body at the call
+/// (`Resolved`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LetScope {
+    Opaque,
+    Resolved,
+}
+
+/// [`contains_prime_ref`] that looks into `LET`-defined operators instead of
+/// treating calls to them as possibly primed.
+pub(crate) fn contains_prime_ref_resolving_lets(expr: &Expr, defs: &Definitions) -> bool {
+    let mut visited = BTreeSet::new();
+    let is_prime = |e: &Expr| matches!(e, Expr::Prime(_) | Expr::Unchanged(_));
+    refers_through_defs(expr, defs, &mut visited, &is_prime, LetScope::Resolved)
+}
+
 pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
     let mut visited = BTreeSet::new();
     let is_prime = |e: &Expr| matches!(e, Expr::Prime(_) | Expr::Unchanged(_));
-    refers_through_defs(expr, defs, &mut visited, &is_prime)
+    refers_through_defs(expr, defs, &mut visited, &is_prime, LetScope::Opaque)
 }
 
 /// Whether `expr` can take different values in different states: it refers to a
@@ -155,7 +173,33 @@ pub(crate) fn references_state(expr: &Expr, vars: &[Arc<str>], defs: &Definition
         Expr::Var(name) => vars.contains(name),
         _ => false,
     };
-    refers_through_defs(expr, defs, &mut visited, &is_state)
+    refers_through_defs(expr, defs, &mut visited, &is_state, LetScope::Resolved)
+}
+
+/// Whether `expr` uses a built-in whose value depends on the run rather than on the
+/// state (`TLCGet`, `RandomElement`, the time), directly or through definitions.
+pub(crate) fn uses_run_dependent_builtin(expr: &Expr, defs: &Definitions) -> bool {
+    let mut visited = BTreeSet::new();
+    let is_run_dependent = |e: &Expr| {
+        matches!(
+            e,
+            Expr::TLCGet(_) | Expr::RandomElement(_) | Expr::JavaTime | Expr::SystemTime
+        )
+    };
+    refers_through_defs(
+        expr,
+        defs,
+        &mut visited,
+        &is_run_dependent,
+        LetScope::Resolved,
+    )
+}
+
+/// Whether `expr` uses `ENABLED`, directly or through the definitions it calls.
+pub(crate) fn uses_enabled(expr: &Expr, defs: &Definitions) -> bool {
+    let mut visited = BTreeSet::new();
+    let is_enabled = |e: &Expr| matches!(e, Expr::EnabledOp(_));
+    refers_through_defs(expr, defs, &mut visited, &is_enabled, LetScope::Resolved)
 }
 
 /// Whether `expr` contains a temporal operator, directly or through the definitions
@@ -174,17 +218,19 @@ pub(crate) fn reaches_temporal(expr: &Expr, defs: &Definitions) -> bool {
                 | Expr::DiamondAction(_, _)
         )
     };
-    refers_through_defs(expr, defs, &mut visited, &is_temporal)
+    refers_through_defs(expr, defs, &mut visited, &is_temporal, LetScope::Resolved)
 }
 
 /// Whether some subexpression satisfies `leaf`, following zero-argument and
-/// parameterized definitions (each at most once per path). A call to an unknown
-/// operator counts as satisfying it.
+/// parameterized definitions (each at most once per path), and with
+/// [`LetScope::Resolved`] the operators of enclosing `LET`s where they are called. A
+/// call to an unknown operator counts as satisfying `leaf`.
 fn refers_through_defs(
     expr: &Expr,
     defs: &Definitions,
     visited: &mut BTreeSet<Arc<str>>,
     leaf: &dyn Fn(&Expr) -> bool,
+    scope: LetScope,
 ) -> bool {
     if leaf(expr) {
         return true;
@@ -196,7 +242,7 @@ fn refers_through_defs(
                 if !visited.insert(name.clone()) {
                     return false;
                 }
-                let result = refers_through_defs(body, defs, visited, leaf);
+                let result = refers_through_defs(body, defs, visited, leaf, scope);
                 visited.remove(name);
                 result
             }
@@ -235,7 +281,7 @@ fn refers_through_defs(
         | Expr::BagCardinality(e)
         | Expr::Always(e)
         | Expr::Eventually(e)
-        | Expr::EnabledOp(e) => refers_through_defs(e, defs, visited, leaf),
+        | Expr::EnabledOp(e) => refers_through_defs(e, defs, visited, leaf, scope),
         Expr::And(l, r)
         | Expr::Or(l, r)
         | Expr::Implies(l, r)
@@ -281,13 +327,13 @@ fn refers_through_defs(
         | Expr::CopiesIn(l, r)
         | Expr::SqSubseteq(l, r)
         | Expr::LeadsTo(l, r) => {
-            refers_through_defs(l, defs, visited, leaf)
-                || refers_through_defs(r, defs, visited, leaf)
+            refers_through_defs(l, defs, visited, leaf, scope)
+                || refers_through_defs(r, defs, visited, leaf, scope)
         }
         Expr::If(c, t, e) | Expr::SubSeq(c, t, e) => {
-            refers_through_defs(c, defs, visited, leaf)
-                || refers_through_defs(t, defs, visited, leaf)
-                || refers_through_defs(e, defs, visited, leaf)
+            refers_through_defs(c, defs, visited, leaf, scope)
+                || refers_through_defs(t, defs, visited, leaf, scope)
+                || refers_through_defs(e, defs, visited, leaf, scope)
         }
         Expr::Forall(_, d, b)
         | Expr::Exists(_, d, b)
@@ -296,31 +342,31 @@ fn refers_through_defs(
         | Expr::SetFilter(_, d, b)
         | Expr::SetMap(_, d, b)
         | Expr::CustomOp(_, d, b) => {
-            refers_through_defs(d, defs, visited, leaf)
-                || refers_through_defs(b, defs, visited, leaf)
+            refers_through_defs(d, defs, visited, leaf, scope)
+                || refers_through_defs(b, defs, visited, leaf, scope)
         }
-        Expr::ChooseUnbounded(_, b) => refers_through_defs(b, defs, visited, leaf),
+        Expr::ChooseUnbounded(_, b) => refers_through_defs(b, defs, visited, leaf, scope),
         Expr::SetEnum(elems) | Expr::TupleLit(elems) => elems
             .iter()
-            .any(|e| refers_through_defs(e, defs, visited, leaf)),
+            .any(|e| refers_through_defs(e, defs, visited, leaf, scope)),
         Expr::RecordLit(fields) | Expr::RecordSet(fields) => fields
             .iter()
-            .any(|(_, e)| refers_through_defs(e, defs, visited, leaf)),
+            .any(|(_, e)| refers_through_defs(e, defs, visited, leaf, scope)),
         Expr::RecordAccess(r, _) | Expr::TupleAccess(r, _) => {
-            refers_through_defs(r, defs, visited, leaf)
+            refers_through_defs(r, defs, visited, leaf, scope)
         }
         Expr::Except(b, u) => {
-            refers_through_defs(b, defs, visited, leaf)
+            refers_through_defs(b, defs, visited, leaf, scope)
                 || u.iter().any(|(path, val)| {
                     path.iter()
-                        .any(|p| refers_through_defs(p, defs, visited, leaf))
-                        || refers_through_defs(val, defs, visited, leaf)
+                        .any(|p| refers_through_defs(p, defs, visited, leaf, scope))
+                        || refers_through_defs(val, defs, visited, leaf, scope)
                 })
         }
         Expr::FnCall(name, args) => {
             if args
                 .iter()
-                .any(|a| refers_through_defs(a, defs, visited, leaf))
+                .any(|a| refers_through_defs(a, defs, visited, leaf, scope))
             {
                 return true;
             }
@@ -329,7 +375,7 @@ fn refers_through_defs(
                     if !visited.insert(name.clone()) {
                         return false;
                     }
-                    let result = refers_through_defs(body, defs, visited, leaf);
+                    let result = refers_through_defs(body, defs, visited, leaf, scope);
                     visited.remove(name);
                     result
                 }
@@ -339,7 +385,7 @@ fn refers_through_defs(
         Expr::QualifiedCall(instance_expr, op, args) => {
             if args
                 .iter()
-                .any(|a| refers_through_defs(a, defs, visited, leaf))
+                .any(|a| refers_through_defs(a, defs, visited, leaf, scope))
             {
                 return true;
             }
@@ -355,7 +401,7 @@ fn refers_through_defs(
                             if !visited.insert(marker.clone()) {
                                 return false;
                             }
-                            let result = refers_through_defs(body, defs, visited, leaf);
+                            let result = refers_through_defs(body, defs, visited, leaf, scope);
                             visited.remove(&marker);
                             return result;
                         }
@@ -365,22 +411,29 @@ fn refers_through_defs(
                 _ => true,
             }
         }
-        Expr::Lambda(_, body) => refers_through_defs(body, defs, visited, leaf),
-        Expr::Let(_, binding, body) => {
-            refers_through_defs(binding, defs, visited, leaf)
-                || refers_through_defs(body, defs, visited, leaf)
-        }
+        Expr::Lambda(_, body) => refers_through_defs(body, defs, visited, leaf, scope),
+        Expr::Let(name, binding, body) => match parameterized_let_op(binding) {
+            Some((params, op_body)) if scope == LetScope::Resolved => {
+                let mut with_local = defs.clone();
+                with_local.insert(name.clone(), (params, Arc::new(op_body.clone())));
+                refers_through_defs(body, &with_local, visited, leaf, scope)
+            }
+            _ => {
+                refers_through_defs(binding, defs, visited, leaf, scope)
+                    || refers_through_defs(body, defs, visited, leaf, scope)
+            }
+        },
         Expr::Case(branches) => branches.iter().any(|(c, r)| {
-            refers_through_defs(c, defs, visited, leaf)
-                || refers_through_defs(r, defs, visited, leaf)
+            refers_through_defs(c, defs, visited, leaf, scope)
+                || refers_through_defs(r, defs, visited, leaf, scope)
         }),
-        Expr::LabeledAction(_, a) => refers_through_defs(a, defs, visited, leaf),
+        Expr::LabeledAction(_, a) => refers_through_defs(a, defs, visited, leaf, scope),
         Expr::WeakFairness(a, b)
         | Expr::StrongFairness(a, b)
         | Expr::BoxAction(a, b)
         | Expr::DiamondAction(a, b) => {
-            refers_through_defs(a, defs, visited, leaf)
-                || refers_through_defs(b, defs, visited, leaf)
+            refers_through_defs(a, defs, visited, leaf, scope)
+                || refers_through_defs(b, defs, visited, leaf, scope)
         }
     }
 }

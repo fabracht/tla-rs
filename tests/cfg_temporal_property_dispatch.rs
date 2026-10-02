@@ -620,3 +620,108 @@ fn disjunction_with_a_non_liveness_disjunct_is_a_config_error() {
         "a disjunction of liveness properties keeps the documented over-approximation"
     );
 }
+
+fn apply_with_engine(
+    spec_src: &str,
+    cfg_src: &str,
+    engine: tla_checker::checker::LivenessEngine,
+) -> (tla_checker::ast::Spec, Vec<String>) {
+    let mut spec = parse(spec_src).expect("spec parses");
+    let mut checker_config = CheckerConfig {
+        liveness_engine: engine,
+        ..CheckerConfig::default()
+    };
+    let warnings = apply_config(
+        &parse_cfg(cfg_src).expect("cfg parses"),
+        &mut spec,
+        &mut Env::new(),
+        &mut checker_config,
+        &[],
+        &[],
+        false,
+    )
+    .expect("apply_config ok");
+    (spec, warnings)
+}
+
+const SYNTACTIC_MODULE: &str = "---- MODULE M ----\n\
+    EXTENDS Naturals\n\
+    VARIABLE x\n\
+    Init == x = 0\n\
+    Step == x < 2 /\\ x' = x + 1\n\
+    Next == Step \\/ UNCHANGED x\n\
+    SpecA == Init /\\ [][Next]_x /\\ WF_x(Step) /\\ <>(x = 2)\n\
+    NotEv == ~<>(x = 5)\n\
+    StateOrLive == x = 1 \\/ <>(x = 1)\n\
+    Mixed == x = 0 /\\ [](x < 5) /\\ [][x' >= x]_x /\\ <>(x = 2)\n\
+    ====\n";
+
+#[test]
+fn tableau_engine_classifies_properties_on_their_syntax() {
+    use tla_checker::checker::LivenessEngine::Tableau;
+    let (spec, _) = apply_with_engine(
+        SYNTACTIC_MODULE,
+        "SPECIFICATION SpecA\nPROPERTY NotEv\n",
+        Tableau,
+    );
+    assert!(
+        spec.invariant_names
+            .iter()
+            .flatten()
+            .all(|n| n.as_ref() != "NotEv")
+    );
+    assert_eq!(
+        spec.liveness_properties.len(),
+        1,
+        "~<>P stays temporal, as in TLC"
+    );
+    assert!(matches!(spec.liveness_properties[0].formula, Expr::Not(_)));
+
+    let (spec, _) = apply_with_engine(
+        SYNTACTIC_MODULE,
+        "SPECIFICATION SpecA\nPROPERTY StateOrLive\n",
+        Tableau,
+    );
+    assert!(
+        matches!(spec.liveness_properties[0].formula, Expr::Or(_, _)),
+        "a disjunction with a temporal disjunct goes to the tableau whole"
+    );
+
+    let (spec, _) = apply_with_engine(
+        SYNTACTIC_MODULE,
+        "SPECIFICATION SpecA\nPROPERTY Mixed\n",
+        Tableau,
+    );
+    assert_eq!(
+        spec.safety_properties.len(),
+        2,
+        "the state predicate and [][A]_x"
+    );
+    assert_eq!(
+        spec.invariant_names.last().cloned().flatten().as_deref(),
+        Some("Mixed")
+    );
+    assert!(matches!(
+        spec.liveness_properties[0].formula,
+        Expr::Eventually(_)
+    ));
+}
+
+#[test]
+fn tableau_engine_keeps_specification_assumptions_without_a_warning() {
+    use tla_checker::checker::LivenessEngine::{Legacy, Tableau};
+    let cfg = "SPECIFICATION SpecA\nPROPERTY NotEv\n";
+    let (spec, warnings) = apply_with_engine(SYNTACTIC_MODULE, cfg, Tableau);
+    assert_eq!(
+        spec.temporal_assumptions.len(),
+        1,
+        "<>(x = 2) is an assumption"
+    );
+    assert_eq!(spec.fairness.len(), 1);
+    assert!(
+        !warnings.iter().any(|w| w.contains("assumptions")),
+        "the tableau engine enforces the assumption: {warnings:?}"
+    );
+    let (_, legacy_warnings) = apply_with_engine(SYNTACTIC_MODULE, cfg, Legacy);
+    assert!(legacy_warnings.iter().any(|w| w.contains("assumptions")));
+}

@@ -428,6 +428,9 @@ pub struct Spec {
     pub quantified_fairness: Vec<(Arc<str>, Expr, Expr)>,
     pub liveness_properties: Vec<LivenessProperty>,
     pub safety_properties: Vec<SafetyProperty>,
+    /// The cfg `SPECIFICATION`'s temporal conjuncts other than `WF`/`SF`, which TLC
+    /// treats as assumptions: only behaviors satisfying them are checked.
+    pub temporal_assumptions: Vec<Expr>,
 }
 
 /// `[](P => <>Q)` with `P` and `Q` free of temporal operators, which is exactly
@@ -623,7 +626,8 @@ pub enum PropertyPart {
     /// `[][A]_v`, possibly under `\A x \in S`: every transition is an `A` step or
     /// leaves `v` unchanged, for every instance.
     Action(Expr),
-    /// Everything else, in the form `liveness::find_violation` checks.
+    /// Everything else: in the form `liveness::find_violation` checks, or as written
+    /// for the tableau checker.
     Liveness(Expr),
 }
 
@@ -635,17 +639,42 @@ pub enum PropertyPart {
 /// disjuncts, which can only report a violation that does not exist, never miss one
 /// that does; any other disjunction with a temporal disjunct is rejected, since
 /// splitting it would turn a state predicate or `[]P` into a hard obligation.
+///
+/// With [`Classification::Syntactic`] the property is classified as TLC does, on its
+/// syntax once operators are expanded: only a state predicate, `[]P` and `[][A]_v`
+/// are safety parts, and every other conjunct, whatever its shape, is passed whole
+/// to the tableau checker.
 pub fn classify_property(
     expr: &Expr,
     vars: &[Arc<str>],
     defs: &DefinitionMap,
+    mode: Classification,
 ) -> Result<Vec<PropertyPart>, String> {
-    let normalizer = Normalizer { vars, defs };
+    let normalizer = Normalizer { vars, defs, mode };
     let normalized = normalizer.normalize(expr, &[], &mut Vec::new(), 0);
     normalizer.require_constant_domains(&normalized)?;
     let mut parts = Vec::new();
-    classify_into(&normalized, &mut parts)?;
+    classify_into(&normalized, mode, &mut parts)?;
     Ok(parts)
+}
+
+/// `expr` with the operators and `LET` definitions whose bodies are temporal expanded
+/// in place, and nothing else rewritten.
+pub fn inline_temporal_definitions(expr: &Expr, vars: &[Arc<str>], defs: &DefinitionMap) -> Expr {
+    let normalizer = Normalizer {
+        vars,
+        defs,
+        mode: Classification::Syntactic,
+    };
+    normalizer.normalize(expr, &[], &mut Vec::new(), 0)
+}
+
+/// How a `PROPERTY` is classified: rewritten into the shapes the property-shape
+/// checker supports, or taken as written for the tableau checker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Classification {
+    Rewriting,
+    Syntactic,
 }
 
 /// How deep operator definitions are inlined while looking for temporal operators;
@@ -659,9 +688,12 @@ type LocalOperator = (Arc<str>, Vec<Arc<str>>, Expr);
 /// `[][]P` and `<><>P` collapse, negation is pushed through `[]`, `<>`, `/\`, `\/`,
 /// `=>` and quantifiers, and an antecedent (or `IF` condition) that refers to no
 /// state variable is pushed inside the temporal operators it guards.
+/// With [`Classification::Syntactic`] only operators and `LET` definitions are
+/// expanded.
 struct Normalizer<'a> {
     vars: &'a [Arc<str>],
     defs: &'a DefinitionMap,
+    mode: Classification,
 }
 
 impl Normalizer<'_> {
@@ -673,6 +705,26 @@ impl Normalizer<'_> {
         depth: usize,
     ) -> Expr {
         let recurse = |e: &Expr, bound: &mut Vec<Arc<str>>| self.normalize(e, locals, bound, depth);
+        if self.mode == Classification::Syntactic {
+            let rebuilt = match expr {
+                Expr::Implies(l, r) => Some(Expr::Implies(
+                    Box::new(recurse(l, bound)),
+                    Box::new(recurse(r, bound)),
+                )),
+                Expr::Not(inner) => Some(Expr::Not(Box::new(recurse(inner, bound)))),
+                Expr::If(cond, then_branch, else_branch) => Some(Expr::If(
+                    Box::new(recurse(cond, bound)),
+                    Box::new(recurse(then_branch, bound)),
+                    Box::new(recurse(else_branch, bound)),
+                )),
+                Expr::Always(inner) => Some(Expr::Always(Box::new(recurse(inner, bound)))),
+                Expr::Eventually(inner) => Some(Expr::Eventually(Box::new(recurse(inner, bound)))),
+                _ => None,
+            };
+            if let Some(rebuilt) = rebuilt {
+                return rebuilt;
+            }
+        }
         match expr {
             Expr::And(l, r) => Expr::And(Box::new(recurse(l, bound)), Box::new(recurse(r, bound))),
             Expr::Or(l, r) => Expr::Or(Box::new(recurse(l, bound)), Box::new(recurse(r, bound))),
@@ -738,7 +790,9 @@ impl Normalizer<'_> {
                             |leaf: Expr| Expr::Let(name.clone(), binding.clone(), Box::new(leaf));
                         wrap_non_temporal(inlined, &rebind)
                     }
-                    None if crate::eval::reaches_temporal(body, self.defs) => {
+                    None if crate::eval::reaches_temporal(body, self.defs)
+                        || crate::eval::reaches_temporal(binding, self.defs) =>
+                    {
                         let subs = [(name.clone(), (**binding).clone())];
                         let body = crate::substitution::substitute_expr(body, &subs);
                         self.normalize(&body, locals, bound, depth)
@@ -964,20 +1018,28 @@ fn push_guard(guard: &Expr, body: &Expr) -> Option<Expr> {
     }
 }
 
-fn classify_into(expr: &Expr, parts: &mut Vec<PropertyPart>) -> Result<(), String> {
+fn classify_into(
+    expr: &Expr,
+    mode: Classification,
+    parts: &mut Vec<PropertyPart>,
+) -> Result<(), String> {
     if is_state_level(expr) {
         parts.push(PropertyPart::Init(expr.clone()));
         return Ok(());
     }
     match expr {
         Expr::And(l, r) => {
-            classify_into(l, parts)?;
-            classify_into(r, parts)
+            classify_into(l, mode, parts)?;
+            classify_into(r, mode, parts)
+        }
+        Expr::Or(_, _) if mode == Classification::Syntactic => {
+            parts.push(PropertyPart::Liveness(expr.clone()));
+            Ok(())
         }
         Expr::Or(l, r) => {
             let mut disjuncts = Vec::new();
-            classify_into(l, &mut disjuncts)?;
-            classify_into(r, &mut disjuncts)?;
+            classify_into(l, mode, &mut disjuncts)?;
+            classify_into(r, mode, &mut disjuncts)?;
             if !disjuncts
                 .iter()
                 .all(|part| matches!(part, PropertyPart::Liveness(_)))
@@ -1003,7 +1065,7 @@ fn classify_into(expr: &Expr, parts: &mut Vec<PropertyPart>) -> Result<(), Strin
             let bind = |inner: Expr| Expr::Forall(var.clone(), domain.clone(), Box::new(inner));
             let mut has_liveness = false;
             let mut body_parts = Vec::new();
-            classify_into(body, &mut body_parts)?;
+            classify_into(body, mode, &mut body_parts)?;
             for part in body_parts {
                 match part {
                     PropertyPart::Init(p) => parts.push(PropertyPart::Init(bind(p))),
@@ -1015,6 +1077,10 @@ fn classify_into(expr: &Expr, parts: &mut Vec<PropertyPart>) -> Result<(), Strin
             if has_liveness {
                 parts.push(PropertyPart::Liveness(expr.clone()));
             }
+            Ok(())
+        }
+        _ if mode == Classification::Syntactic => {
+            parts.push(PropertyPart::Liveness(expr.clone()));
             Ok(())
         }
         _ => {

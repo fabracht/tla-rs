@@ -178,6 +178,18 @@ pub struct CheckSpecInput {
     pub state_constraint: Option<String>,
     #[serde(default)]
     pub config_path: Option<String>,
+    /// `tableau` checks any temporal PROPERTY by TLC's tableau method and classifies
+    /// PROPERTY conjuncts as TLC does; `legacy` (the default) checks the supported
+    /// property shapes.
+    #[serde(default)]
+    pub liveness_engine: Option<LivenessEngineInput>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum LivenessEngineInput {
+    Legacy,
+    Tableau,
 }
 
 #[derive(Serialize, JsonSchema, Debug)]

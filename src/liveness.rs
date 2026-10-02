@@ -176,7 +176,7 @@ impl FairnessTable {
     /// component that enables `A` somewhere but never takes it can still hold a
     /// cycle fair to `SF(A)` that avoids every `A`-enabled state, so those states are
     /// removed and the remainder is decomposed again.
-    fn fair_components<G: LivenessGraph>(
+    pub(crate) fn fair_components<G: LivenessGraph>(
         &self,
         graph: &G,
         subset: &HashSet<usize>,
@@ -221,7 +221,10 @@ impl FairnessTable {
     /// state in `must_visit`, and satisfies every fairness constraint: it visits a
     /// state where a weakly fair action is disabled, or takes an edge of that action,
     /// and takes an edge of every strongly fair action enabled inside the component.
-    fn witness_cycle<G: LivenessGraph>(
+    /// The entry state alone is a cycle only when it has a self-loop, which every
+    /// state-graph state does but a product node need not; otherwise the cycle leaves
+    /// through a successor inside the component and returns.
+    pub(crate) fn witness_cycle<G: LivenessGraph>(
         &self,
         graph: &G,
         component: &[usize],
@@ -265,6 +268,16 @@ impl FairnessTable {
                 }
             }
         }
+        let self_loop = graph.edges(entry).any(|(target, _)| target == entry);
+        if cycle.len() == 1
+            && !self_loop
+            && let Some((step, _)) = graph
+                .edges(entry)
+                .find(|(target, _)| members.contains(target))
+        {
+            cycle.push(step);
+            current = step;
+        }
         extend_path(graph, &members, &mut cycle, &mut current, entry);
         if cycle.len() > 1 && cycle.last() == Some(&entry) {
             cycle.pop();
@@ -273,7 +286,9 @@ impl FairnessTable {
     }
 
     /// For each fairness constraint, whether its action is enabled somewhere on the
-    /// reported cycle and whether the cycle takes it.
+    /// reported cycle and whether the cycle takes it, with whether the cycle satisfies
+    /// the constraint: `WF` unless the action is enabled at every state of the cycle
+    /// and never taken, `SF` unless it is enabled somewhere and never taken.
     pub fn fairness_info<G: LivenessGraph>(
         &self,
         graph: &G,
@@ -284,6 +299,7 @@ impl FairnessTable {
             .enumerate()
             .map(|(constraint, table)| {
                 let enabled = cycle.iter().any(|&n| self.enabled_at(constraint, graph, n));
+                let continuously = cycle.iter().all(|&n| self.enabled_at(constraint, graph, n));
                 let taken = cycle.iter().enumerate().any(|(i, &from)| {
                     let to = cycle[(i + 1) % cycle.len()];
                     graph.edges(from).any(|(target, state_edge)| {
@@ -295,7 +311,7 @@ impl FairnessTable {
                         "{}(action): enabled={}, taken={}",
                         table.label, enabled, taken
                     ),
-                    taken,
+                    taken || !if table.strong { enabled } else { continuously },
                 )
             })
             .collect()
@@ -433,7 +449,7 @@ fn leads_to(
         }))
 }
 
-fn truth(
+pub(crate) fn truth(
     graph: &StateGraph,
     expr: &Expr,
     vars: &[Arc<str>],
@@ -454,7 +470,7 @@ fn truth(
 /// One evaluation environment reused across a whole pass over the graph. Constants
 /// are bound once; each state's variables, and for actions its successor's primed
 /// variables, overwrite the previous state's before evaluating.
-struct Bindings<'a> {
+pub(crate) struct Bindings<'a> {
     env: Env,
     vars: &'a [Arc<str>],
     primed: Vec<Arc<str>>,
@@ -462,7 +478,7 @@ struct Bindings<'a> {
 }
 
 impl<'a> Bindings<'a> {
-    fn new(vars: &'a [Arc<str>], constants: &Env, defs: &'a Definitions) -> Self {
+    pub(crate) fn new(vars: &'a [Arc<str>], constants: &Env, defs: &'a Definitions) -> Self {
         Self {
             env: constants.clone(),
             vars,
@@ -474,23 +490,23 @@ impl<'a> Bindings<'a> {
         }
     }
 
-    fn bind(&mut self, state: &State) {
+    pub(crate) fn bind(&mut self, state: &State) {
         for (var, val) in self.vars.iter().zip(&state.values) {
             self.env.insert(var.clone(), val.clone());
         }
     }
 
-    fn bind_next(&mut self, state: &State) {
+    pub(crate) fn bind_next(&mut self, state: &State) {
         for (var, val) in self.primed.iter().zip(&state.values) {
             self.env.insert(var.clone(), val.clone());
         }
     }
 
-    fn value(&mut self, expr: &Expr) -> Result<Value> {
+    pub(crate) fn value(&mut self, expr: &Expr) -> Result<Value> {
         eval(expr, &mut self.env, self.defs)
     }
 
-    fn holds(&mut self, expr: &Expr, context: &'static str) -> Result<bool> {
+    pub(crate) fn holds(&mut self, expr: &Expr, context: &'static str) -> Result<bool> {
         match self.value(expr)? {
             Value::Bool(b) => Ok(b),
             got => Err(EvalError::TypeMismatch {
@@ -528,7 +544,7 @@ fn components<G: LivenessGraph>(graph: &G, subset: &HashSet<usize>) -> Vec<Vec<u
         .collect()
 }
 
-fn reach_within<G: LivenessGraph>(
+pub(crate) fn reach_within<G: LivenessGraph>(
     graph: &G,
     sources: &[usize],
     allowed: &[bool],
@@ -554,7 +570,7 @@ fn reach_within<G: LivenessGraph>(
     (reached, parent)
 }
 
-fn path_back(parent: &[Option<usize>], target: usize) -> Vec<usize> {
+pub(crate) fn path_back(parent: &[Option<usize>], target: usize) -> Vec<usize> {
     let mut path = vec![target];
     let mut current = target;
     while let Some(previous) = parent[current] {

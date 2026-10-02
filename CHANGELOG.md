@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.0] - 2026-10-01
+
+### Added
+
+- `--liveness-engine tableau` (MCP `check_spec`: `liveness_engine: "tableau"`) checks liveness the way TLC does, by searching the product of the state graph with the tableau of the property's negation (#120). It checks any temporal property over state predicates and `[][A]_v` / `<<A>>_v` steps: disjunctions, nested temporal operators, negations, `IF` and implications over temporal formulas, conditions on the state, and `\A` / `\E` over constant sets. `PROPERTY` conjuncts are classified on their syntax as in TLC, and the `SPECIFICATION`'s temporal conjuncts other than `WF`/`SF` are enforced as assumptions. A property it cannot express (`ENABLED` or `WF`/`SF` inside it, `TLCGet`, `RandomElement`, the time built-ins) is reported before the state search as `liveness_property_error`. The default engine is unchanged.
+- The liveness oracle runs its corpus under both engines; under the tableau engine 128 of its 133 TLC-confirmed cases agree with TLC and the other five are reported as errors. The tableau engine was also checked against TLC on 2600 random specifications and properties, with no false passes or false alarms.
+
+### Fixed
+
+- A `SPECIFICATION` conjunct that is temporal only below its top (`\E x \in S : <>[]P`, `P => <>Q`, `~<>[]P`, a call to an operator whose body is temporal) was folded into the initial predicate, which failed with an `init_error`. It is now treated as an assumption.
+- An initial state that violates both a `[]P` conjunct and a state-predicate conjunct of a `PROPERTY` is reported as an invariant violation, as in TLC; it used to be reported as an initial-state violation.
+- `scripts/liveness-oracle.sh` classified TLC's "Invariant ... is violated by the initial state" as an initial-state property violation.
+- The fairness summary of a liveness counterexample said `violated` for a fairness constraint whose action is never enabled on the cycle. It now says `satisfied` unless the cycle really violates the constraint.
+
 ## [0.11.1] - 2026-09-29
 
 ### Fixed

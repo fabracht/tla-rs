@@ -243,17 +243,17 @@ impl Model<'_> {
                 }
                 Ok(true)
             }
-            Expr::Let(_, _, body) if !temporal(body) => self.leaf(lasso, formula, pos, bound),
             Expr::Let(name, binding, body) => match let_operator(binding) {
-                Some((params, op_body)) => {
+                Some((params, op_body)) if temporal(body) => {
                     let localized = localize(body, name, binding, &params, op_body);
                     self.holds(lasso, &localized, pos, bound)
                 }
-                None => {
+                None if temporal(body) || temporal(binding) => {
                     let subs = [(name.clone(), (**binding).clone())];
                     let inlined = tla_checker::substitution::substitute_expr(body, &subs);
                     self.holds(lasso, &inlined, pos, bound)
                 }
+                _ => self.leaf(lasso, formula, pos, bound),
             },
             Expr::If(cond, then_branch, else_branch) if temporal(formula) => {
                 let chosen =

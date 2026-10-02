@@ -234,6 +234,18 @@ These operators are parsed into the AST but error at evaluation time. They can a
 
 The subscript `v` of `WF_v`, `SF_v`, `[A]_v` and `<<A>>_v` may be a variable, a definition, or any parenthesized expression, tuple or record: `WF_<<x, y>>(A)`, `[A]_(x + y)`, `[A]_[a |-> x]`.
 
+### Tableau Liveness Engine
+
+`--liveness-engine tableau` (MCP: `liveness_engine: "tableau"`) checks liveness the way TLC does: it builds the tableau of the property's negation, conjoined with the specification's temporal assumptions, and searches the product of the state graph and the tableau for a fair behavior that satisfies it. Any temporal formula over state predicates and `[][A]_v` / `<<A>>_v` steps is checked, including disjunctions, nested temporal operators (`[](P => []Q)`, `<>(P /\ <>Q)`), negations, `IF` and implications over temporal formulas, conditions on the state (`x = 0 => [](x < 2)`), and `\A` / `\E` over constant sets. The default engine (`legacy`) is described in the rest of this section.
+
+With the tableau engine:
+
+- `PROPERTY` conjuncts are classified on their syntax, as TLC does: a state predicate, `[]P` and `[][A]_v` are safety checks as in the table below, and every other conjunct is a liveness property checked whole. `~<>P` is therefore a liveness property, not an invariant.
+- The `SPECIFICATION`'s temporal conjuncts other than `WF`/`SF` are enforced as assumptions: only behaviors that satisfy them are checked.
+- The `SPECIFICATION`'s assumptions may have any temporal shape (`\E x \in S : <>[]P`, `P => <>Q`, `~<>[]P`, calls to temporal operators); with either engine they are no longer folded into the initial predicate.
+- A property is translated, and its tableau built, before the state search; one it cannot express is reported as `liveness_property_error`. Not supported yet: `ENABLED` and `WF`/`SF` inside a property, and `TLCGet`, `RandomElement` or the time built-ins (their value depends on the run, not on a state). As in TLC, the top of the negation is split into disjuncts searched one at a time, and conjuncts `[]<>p` and `<>[]p` over a state formula `p` are conditions on the accepting cycle rather than tableau formulas, so a conjunction of many of them stays cheap; a disjunct whose remaining tableau needs more than 4096 nodes is rejected as too large.
+- Known differences from TLC: when one search level holds both a state violating a `[]P` conjunct and a transition violating a `[][A]_v` conjunct, tla-rs may report the action property where TLC reports the invariant (the verdict is the same); and tla-rs accepts action formulas anywhere in a temporal formula, where TLC accepts only `[]<>A` and `<>[]A`. Classification of `\A x \in S : []P(x)` and of operator calls follows current TLC (2026), which treats them as invariants; TLC 2.19 treated them as temporal properties.
+
 ### Property Classification
 
 A cfg `PROPERTY` is split into conjuncts, and each conjunct is checked the way TLC checks it (a bounded `\A x \in S` distributes over the conjuncts of its body):

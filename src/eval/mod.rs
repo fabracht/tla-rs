@@ -50,8 +50,9 @@ pub use self::state::{
 };
 
 pub(crate) use self::ast_utils::{
-    contains_prime_ref, expr_contains, expr_references, parameterized_let_op, reaches_temporal,
-    references_state,
+    contains_prime_ref, contains_prime_ref_resolving_lets, expr_contains, expr_references,
+    parameterized_let_op, reaches_temporal, references_state, uses_enabled,
+    uses_run_dependent_builtin,
 };
 pub use self::walk::{EngineOverride, set_allow_unassigned_stutter, set_use_inference_engine};
 

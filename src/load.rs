@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::Source;
 use crate::ast::{Env, Spec, Value};
-use crate::checker::CheckerConfig;
+use crate::checker::{CheckerConfig, LivenessEngine};
 use crate::config::{apply_config, legacy_temporal_warning, parse_cfg};
 use crate::parser::parse_with_warnings;
 use crate::span::{Span, Spanned};
@@ -41,6 +41,17 @@ pub fn prepare_from_path(
     config_path: Option<&Path>,
     constants: &[(Arc<str>, Value)],
 ) -> Result<Prepared, PrepareError> {
+    prepare_from_path_with_engine(spec_path, config_path, constants, LivenessEngine::default())
+}
+
+/// [`prepare_from_path`] for a chosen liveness engine, which decides how the cfg's
+/// `PROPERTY` definitions are classified.
+pub fn prepare_from_path_with_engine(
+    spec_path: &Path,
+    config_path: Option<&Path>,
+    constants: &[(Arc<str>, Value)],
+    liveness_engine: LivenessEngine,
+) -> Result<Prepared, PrepareError> {
     let contents = fs::read_to_string(spec_path)
         .map_err(|e| PrepareError::Io(format!("failed to read {}: {}", spec_path.display(), e)))?;
     let source = Source::new(spec_path.display().to_string(), contents.clone());
@@ -55,6 +66,7 @@ pub fn prepare_from_path(
     let mut checker_config = CheckerConfig {
         spec_path: Some(spec_path.to_path_buf()),
         quiet: true,
+        liveness_engine,
         ..CheckerConfig::default()
     };
 

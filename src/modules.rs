@@ -258,6 +258,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
 
         let mut registry = ModuleRegistry::new();
@@ -291,6 +292,7 @@ mod tests {
             quantified_fairness: vec![],
             liveness_properties: vec![],
             safety_properties: vec![],
+            temporal_assumptions: vec![],
         };
 
         let (resolved, parameterized, _vars) = resolve_instances(&spec, &registry).unwrap();
