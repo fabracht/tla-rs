@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1] - 2026-10-01
+
+### Changed
+
+- The `tla-mcp` tool descriptions and server instructions now describe the `property_violation` outcome, `properties_checked` and the `liveness_engine` option, so MCP clients learn about them from the server.
+- Documentation covers `--liveness-engine` and `PROPERTY` classification (new Liveness section in the CLI guide), and the MCP guide states schema version 2 and the `liveness_engine` option on `check_spec`, `validate_spec`, `list_invariants` and `replay_scenario`.
+
 ## [0.12.0] - 2026-10-01
 
 ### Added

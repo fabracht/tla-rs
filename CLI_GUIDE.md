@@ -71,6 +71,35 @@ Key bindings: `↑`/`↓` select actions, `Enter` takes the selected action, `�
 tla examples/c3po_asteroid_field.tla -c 'Density=3' --allow-deadlock -i
 ```
 
+## Liveness
+
+A cfg `PROPERTY` (or `--check-liveness`) turns on temporal checking. Fairness comes from the `WF_vars`/`SF_vars` conjuncts of the cfg `SPECIFICATION`, including quantified ones (`\A p \in P : WF_vars(Enter(p))`).
+
+```
+SPECIFICATION Spec
+PROPERTY Progress
+```
+
+Each `PROPERTY` is split into the parts TLC checks separately:
+
+| Conjunct | Checked as | Failure |
+|----------|------------|---------|
+| state predicate `P` | on every initial state | property violation (kind `init`) |
+| `[]P` | an invariant, named after the property | invariant violation |
+| `[][A]_v` | on every transition that changes `v` | property violation (kind `action`) |
+| anything else | liveness, after the state search | liveness violation with a prefix and a cycle |
+
+Two liveness engines are available through `--liveness-engine`:
+
+- `legacy` (default) checks `[]<>P`, `<>P`, `<>[]P` and `P ~> Q` over state predicates, with `\A x \in S` distributed over them.
+- `tableau` checks any temporal formula over state predicates and `[][A]_v` / `<<A>>_v` steps, as TLC does: disjunctions, nested temporal operators, negation, `IF` and implication over temporal formulas, and `\A`/`\E` over constant sets. It classifies `PROPERTY` conjuncts on their syntax as TLC does and enforces the temporal conjuncts of the `SPECIFICATION` other than `WF`/`SF` as assumptions. A property it cannot express (`ENABLED`, `WF`/`SF` inside the property, `TLCGet`, `RandomElement`, the time built-ins) is rejected before the state search.
+
+```bash
+tla spec.tla --liveness-engine tableau
+```
+
+Infinite stuttering is always considered, as in TLC, so an action that may stall forever needs no explicit `UNCHANGED vars` disjunct; fairness rules out the stalls it forbids.
+
 ## Analytics
 
 These flags are for understanding *how* a protocol fails, not just *whether* it fails.

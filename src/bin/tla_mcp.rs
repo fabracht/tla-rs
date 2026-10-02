@@ -42,12 +42,14 @@ impl TlaMcpServer {
 
     #[tool(
         description = "Run the TLA+ model checker. REQUIRED: max_states, max_depth, AND max_seconds — no defaults, you must budget all three upfront. ALWAYS call validate_spec first and inspect the returned `constants` — a single constant much larger than its peers is the most common cause of timeouts. Optional booleans `allow_deadlock` and `check_liveness` default to the cfg's setting; omit to defer, pass true/false to override. Returns one of:\n\
-        - status='ok': full reachable state space exhausted, no invariant violated. This is 'passed.'\n\
+        - status='ok': full reachable state space exhausted, no invariant violated. This is 'passed.' `properties_checked` names the cfg PROPERTY definitions that held.\n\
         - status='invariant_violation': has `invariant`, `trace` (states), `actions` (action that produced each state, null for initial). The bug is almost always in the LAST transition — compare `trace[len-2]` and `trace[len-1]` `vars.display`, and read `actions[len-1]` to see which action fired.\n\
         - status='deadlock': terminal state, allow_deadlock was false. Inspect the last state and ask: what action SHOULD have been enabled here?\n\
-        - status='liveness_violation': only when check_liveness=true. Returns prefix + cycle of states the spec gets stuck in.\n\
+        - status='liveness_violation': only when check_liveness=true or the cfg has a PROPERTY. Returns `property` and the prefix + cycle of states the spec gets stuck in.\n\
+        - status='property_violation': a cfg PROPERTY failed on an initial state (`kind`='init') or on a transition (`kind`='action', a `[][A]_v` conjunct). Has `property`, `trace`, `actions`; read it like an invariant_violation. A `[]P` conjunct fails as an invariant_violation naming the property.\n\
         - status='limit_reached': budget exhausted with `limit` ('max_states', 'max_depth', or 'max_seconds'). NOT a pass; inconclusive. Look at `stats.states_explored` and `stats.elapsed_secs` to gauge whether to grow the budget or shrink the state space (smaller constants, `symmetry` for interchangeable model values, `state_constraint` to prune). `stats.actions` shows the per-action transition counts — the worst offender is the action worth constraining or simplifying first.\n\
         - status='error': structured failure with `phase` (parse/config/constant/init/next/invariant/io/internal), message, optional source span.\n\
+        Optional `liveness_engine`: 'legacy' (default) checks []<>P, <>P, <>[]P and P ~> Q over state predicates; 'tableau' checks any temporal PROPERTY over state predicates and [][A]_v / <<A>>_v steps as TLC does, and rejects one it cannot express (ENABLED, WF/SF inside the property, TLCGet) up front as an error with phase 'config'.\n\
         `max_seconds` is a SOFT bound checked between states. A single `next_states` call with very large fanout can blow past it without returning. Always set `max_seconds` well under your MCP client's tolerance. The top-level `advisories` array surfaces concerns about your budget (e.g., `max_depth` over 100) so you can correct them before re-running.\n\
         Start small: max_states=10000, max_depth=50, max_seconds=30, smallest non-trivial constants (Procs='{p1,p2}'). Most algorithmic bugs surface at 2-3 instances; large constants are for confidence, not discovery. When stepping up constants, project from a small run first: rate = states_explored / elapsed_secs and fanout = transitions / states_explored let you estimate the next run's cost before launching."
     )]
@@ -162,7 +164,7 @@ impl ServerHandler for TlaMcpServer {
             \n\
             • Boundary values catch bugs. Run with the smallest non-trivial constants first (2-3 processes, MaxBuffer=1 or 2). Most algorithmic bugs surface at small sizes; large constants are for building confidence, not for discovering bugs.\n\
             \n\
-            • Safety ≠ liveness. Invariants (state predicates) are safety. Fairness, `<>`, `~>`, `WF_vars` are liveness — require `check_liveness: true` and run a different analysis (SCC). 'Spec passes safety check' does NOT mean 'spec satisfies its liveness property.'\n\
+            • Safety ≠ liveness. Invariants (state predicates) are safety. Fairness, `<>`, `~>`, `WF_vars` are liveness — require `check_liveness: true` (implied by a cfg PROPERTY) and run a different analysis after the state search. Pass `liveness_engine: \"tableau\"` to check any temporal property as TLC does. 'Spec passes safety check' does NOT mean 'spec satisfies its liveness property.'\n\
             \n\
             • Model checking is bounded. Passing at small constants does not prove the algorithm correct for all sizes. Prefer phrasing like 'verified for these constants' over 'proven correct.'\n\
             \n\
