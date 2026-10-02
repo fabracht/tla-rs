@@ -150,7 +150,8 @@ enum LetScope {
 /// must not for checks that reject what they match. Skipping `ENABLED` suits a
 /// check for primes free in a formula: `ENABLED A` binds the primes of `A`. That
 /// walk substitutes operator arguments and `LET` definitions into the expressions
-/// using them, so an action passed to `ENABLED` through either is skipped too.
+/// using them, so an action passed to `ENABLED` through either is skipped too; the
+/// arguments of a recursive call are walked as they are.
 #[derive(Debug, Clone, Copy)]
 struct Walk {
     lets: LetScope,
@@ -420,10 +421,8 @@ fn refers_through_defs(
                 })
         }
         Expr::FnCall(name, args) if scope.skips_enabled => match defs.get(name) {
-            Some((params, body)) if params.len() == args.len() => {
-                if !visited.insert(name.clone()) {
-                    return false;
-                }
+            Some((params, body)) if params.len() == args.len() && !visited.contains(name) => {
+                visited.insert(name.clone());
                 let subs: Vec<(Arc<str>, Expr)> =
                     params.iter().cloned().zip(args.iter().cloned()).collect();
                 let result = refers_through_defs(
@@ -811,7 +810,7 @@ pub(crate) fn expr_contains(haystack: &Expr, needle: &Expr) -> bool {
 
 #[cfg(test)]
 mod prime_ref_tests {
-    use super::contains_prime_ref;
+    use super::{contains_free_prime_ref, contains_prime_ref};
     use crate::ast::{Expr, Value};
     use crate::eval::Definitions;
     use std::sync::Arc;
@@ -881,6 +880,36 @@ mod prime_ref_tests {
             ),
         )]);
         assert!(contains_prime_ref(&call("Sum", vec![prime("x")]), &d));
+    }
+
+    #[test]
+    fn a_prime_reaching_enabled_through_an_argument_is_bound() {
+        let d = defs(vec![("En", vec!["a"], Expr::EnabledOp(Box::new(v("a"))))]);
+        let action = Expr::Eq(Box::new(prime("x")), Box::new(v("x")));
+        assert!(!contains_free_prime_ref(&call("En", vec![action]), &d));
+    }
+
+    #[test]
+    fn a_prime_in_a_nested_recursive_call_is_free() {
+        let d = defs(vec![(
+            "Plus",
+            vec!["a", "b"],
+            Expr::If(
+                Box::new(Expr::Eq(
+                    Box::new(v("b")),
+                    Box::new(Expr::Lit(Value::Int(0))),
+                )),
+                Box::new(v("a")),
+                Box::new(call("Plus", vec![v("a"), v("b")])),
+            ),
+        )]);
+        let zero = Expr::Lit(Value::Int(0));
+        let inner = call("Plus", vec![prime("x"), zero.clone()]);
+        assert!(contains_free_prime_ref(&inner, &d));
+        assert!(contains_free_prime_ref(
+            &call("Plus", vec![inner, zero]),
+            &d
+        ));
     }
 
     #[test]
