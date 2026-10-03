@@ -3803,5 +3803,218 @@
     "tla_rs_now_kind": "liveness",
     "xfail_until_phase": null,
     "note": "ENABLED inside Cardinality of a set comprehension."
+  },
+  {
+    "id": "C197",
+    "spec": "specs/SymMutex.tla",
+    "cfg": "cfgs/C197.cfg",
+    "specification": "SpecWF",
+    "property": "Progress",
+    "property_text": "(\\E p \\in P : pc[p] = \"wait\") ~> (\\E p \\in P : pc[p] = \"cs\")",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "SYMMETRY with fairness quantified over the symmetric set: fairness is judged on the state a step reaches, not on its representative (#129)."
+  },
+  {
+    "id": "C198",
+    "spec": "specs/SymMutex.tla",
+    "cfg": "cfgs/C198.cfg",
+    "specification": "SpecWF",
+    "property": "StarveFree",
+    "property_text": "\\A p \\in P : pc[p] = \"wait\" ~> pc[p] = \"cs\"",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property StarveFree was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "symmetry-trace",
+    "note": "SYMMETRY with a per-process leads-to (#129). Known difference: under SYMMETRY the reported counterexample is a sequence of representative states, not always a behavior of the spec; TLC prints a behavior.",
+    "tableau_xfail_until_phase": "symmetry-trace"
+  },
+  {
+    "id": "C199",
+    "spec": "specs/SymMutex.tla",
+    "cfg": "cfgs/C199.cfg",
+    "specification": "SpecWF",
+    "property": "EnterSF",
+    "property_text": "\\A p \\in P : SF_vars(Enter(p))",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property EnterSF was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "SYMMETRY with an SF obligation quantified over the symmetric set (#129). Known difference: under SYMMETRY the reported counterexample is a sequence of representative states, not always a behavior of the spec; TLC prints a behavior.",
+    "tableau_xfail_until_phase": "symmetry-trace"
+  },
+  {
+    "id": "C200",
+    "spec": "specs/SymMutex.tla",
+    "cfg": "cfgs/C200.cfg",
+    "specification": "SpecSF",
+    "property": "Progress",
+    "property_text": "(\\E p \\in P : pc[p] = \"wait\") ~> (\\E p \\in P : pc[p] = \"cs\")",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "SYMMETRY with fairness quantified over the symmetric set: fairness is judged on the state a step reaches, not on its representative (#129)."
+  },
+  {
+    "id": "C201",
+    "spec": "specs/SymMutex.tla",
+    "cfg": "cfgs/C201.cfg",
+    "specification": "SpecSF",
+    "property": "StarveFree",
+    "property_text": "\\A p \\in P : pc[p] = \"wait\" ~> pc[p] = \"cs\"",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal properties were violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "symmetry-trace",
+    "note": "SYMMETRY with a per-process leads-to (#129). Known difference: under SYMMETRY the reported counterexample is a sequence of representative states, not always a behavior of the spec; TLC prints a behavior.",
+    "tableau_xfail_until_phase": "symmetry-trace"
+  },
+  {
+    "id": "C202",
+    "spec": "specs/SymMutex.tla",
+    "cfg": "cfgs/C202.cfg",
+    "specification": "SpecSF",
+    "property": "EnterSF",
+    "property_text": "\\A p \\in P : SF_vars(Enter(p))",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "SYMMETRY with an SF obligation quantified over the symmetric set (#129)."
+  },
+  {
+    "id": "C203",
+    "spec": "specs/SymMutex.tla",
+    "cfg": "cfgs/C203.cfg",
+    "specification": "SpecAll",
+    "property": "EnterOften",
+    "property_text": "[]<><<\\E p \\in P : Enter(p)>>_vars",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "SYMMETRY with a <<A>>_v step property: steps are judged on the state they reach, not on its representative (#129)."
+  },
+  {
+    "id": "C204",
+    "spec": "specs/SymMutex.tla",
+    "cfg": "cfgs/C204.cfg",
+    "specification": "SpecNext",
+    "property": "EnterOften",
+    "property_text": "[]<><<\\E p \\in P : Enter(p)>>_vars",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "error",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": "3",
+    "note": "SYMMETRY with a <<A>>_v step property: steps are judged on the state they reach, not on its representative (#129)."
+  },
+  {
+    "id": "C205",
+    "spec": "specs/SymMutex.tla",
+    "cfg": "cfgs/C205.cfg",
+    "specification": "SpecNone",
+    "property": "Progress",
+    "property_text": "(\\E p \\in P : pc[p] = \"wait\") ~> (\\E p \\in P : pc[p] = \"cs\")",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property Progress was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "SYMMETRY with fairness quantified over the symmetric set: fairness is judged on the state a step reaches, not on its representative (#129)."
+  },
+  {
+    "id": "C206",
+    "spec": "specs/SymMutex.tla",
+    "cfg": "cfgs/C206.cfg",
+    "specification": "SpecNone",
+    "property": "SomeCS",
+    "property_text": "[]<>(\\E p \\in P : pc[p] = \"cs\")",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property SomeCS was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "SYMMETRY without fairness (#129)."
+  },
+  {
+    "id": "C207",
+    "spec": "specs/SymStarve.tla",
+    "cfg": "cfgs/C207.cfg",
+    "specification": "Spec",
+    "property": "StarveFreeSym",
+    "property_text": "\\A p \\in P : pc[p] = \"wait\" ~> pc[p] = \"cs\"",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "symmetry-identity",
+    "note": "Known difference: under SYMMETRY a per-process property is checked on representative states, so a cycle of the reduced graph can follow a different process on each lap; tla-rs reports a violation no behavior has, TLC does not.",
+    "tableau_xfail_until_phase": "symmetry-identity"
   }
 ]

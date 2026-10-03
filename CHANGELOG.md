@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.15.0] - 2026-10-02
+
+### Fixed
+
+- Under `SYMMETRY`, liveness checking judged fairness and `<<A>>_v` / `[][A]_v` steps on the representative of the state a step reaches, which can rename the elements of the symmetric set, so `WF_vars(Enter(p1))` looked disabled where `Enter(p1)` was enabled and a liveness violation that does not exist was reported (#129). Steps are now judged on the state they actually reach, with either engine. Library API: `graph::Edge` has a `renamed` field holding that state when symmetry renamed it.
+
 ## [0.14.0] - 2026-10-02
 
 ### Fixed

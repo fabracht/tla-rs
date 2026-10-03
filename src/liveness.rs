@@ -82,13 +82,23 @@ impl FairnessTable {
                 let edges = graph.successors(state_idx);
                 let mut row = vec![false; edges.len()];
                 let occurs_at = |edge_idx: usize, bindings: &mut Bindings| -> Result<bool> {
-                    let target = edges[edge_idx].target;
-                    if target == state_idx
-                        || subscript_values[target] == subscript_values[state_idx]
-                    {
+                    let edge = &edges[edge_idx];
+                    let changes = match &edge.renamed {
+                        None => {
+                            edge.target != state_idx
+                                && subscript_values[edge.target] != subscript_values[state_idx]
+                        }
+                        Some(reached) => {
+                            bindings.bind(reached);
+                            let after = bindings.value(subscript)?;
+                            bindings.bind(state);
+                            after != subscript_values[state_idx]
+                        }
+                    };
+                    if !changes {
                         return Ok(false);
                     }
-                    match graph.get_state(target) {
+                    match graph.step_target(state_idx, edge_idx) {
                         Some(next) => {
                             bindings.bind_next(next);
                             bindings.holds(action, "fairness action")
