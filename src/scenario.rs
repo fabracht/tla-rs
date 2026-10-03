@@ -23,6 +23,11 @@ pub struct Scenario {
 pub struct ScenarioResult {
     pub states: Vec<(ScenarioStep, State, Vec<String>)>,
     pub failure: Option<ScenarioFailure>,
+    /// Which initial state the replay started from, and how many `Init`
+    /// admits. A spec with several initial states is replayed from each in
+    /// turn until one admits the whole scenario.
+    pub init_index: usize,
+    pub init_count: usize,
 }
 
 #[derive(Debug)]
@@ -126,70 +131,132 @@ pub fn execute_scenario_with(
         .as_ref()
         .ok_or_else(|| EvalError::domain_error("scenario mode requires Next definition"))?;
     let init_states = crate::eval::init_states(init_expr, &spec.vars, &env, defs)?;
-    let Some(mut current_state) = init_states.into_iter().next() else {
+    let init_count = init_states.len();
+    if init_count == 0 {
         return Err(EvalError::domain_error("no initial states"));
-    };
-    let mut results: Vec<(ScenarioStep, State, Vec<String>)> = Vec::new();
-    let primed_vars = make_primed_names(&spec.vars);
-
-    results.push((
-        ScenarioStep::Condition(Expr::Lit(Value::Bool(true))),
-        current_state.clone(),
-        vec!["Initial state".to_string()],
-    ));
-
-    for (step_idx, step) in scenario.steps.iter().enumerate() {
-        for (i, var) in spec.vars.iter().enumerate() {
-            if let Some(val) = current_state.values.get(i) {
-                env.insert(var.clone(), val.clone());
-            }
-        }
-
-        let successors = next_states(
-            next_expr,
-            &current_state,
-            &spec.vars,
-            &primed_vars,
-            &mut env,
-            defs,
-        )?;
-
-        let matching = find_matching_transition(
-            &successors,
-            step,
-            &current_state,
-            constants,
-            defs,
-            &spec.vars,
-        )?;
-
-        match matching {
-            Some((transition, changes)) => {
-                current_state = transition.state.clone();
-                results.push((step.clone(), transition.state, changes));
-            }
-            None => {
-                let available = describe_available_actions(&successors, &current_state, &spec.vars);
-                return Ok(ScenarioResult {
-                    states: results,
-                    failure: Some(ScenarioFailure {
-                        step_index: step_idx,
-                        step: step.clone(),
-                        message: "no transition matches condition".to_string(),
-                        available_actions: available,
-                    }),
-                });
-            }
-        }
     }
-
-    Ok(ScenarioResult {
-        states: results,
-        failure: None,
-    })
+    let replay = Replay {
+        spec,
+        scenario,
+        next_expr,
+        constants,
+        defs,
+        init_count,
+    };
+    let mut first_outcome: Option<ScenarioResult> = None;
+    for (init_index, initial) in init_states.into_iter().enumerate() {
+        let outcome = replay.from(initial, init_index, &mut env)?;
+        if outcome.failure.is_none() {
+            return Ok(outcome);
+        }
+        first_outcome.get_or_insert(outcome);
+    }
+    first_outcome.ok_or_else(|| EvalError::domain_error("no initial states"))
 }
 
-fn build_definitions(spec: &Spec) -> Definitions {
+/// One scenario replayed against one spec: everything except which initial
+/// state the attempt starts from.
+struct Replay<'a> {
+    spec: &'a Spec,
+    scenario: &'a Scenario,
+    next_expr: &'a Expr,
+    constants: &'a Env,
+    defs: &'a Definitions,
+    init_count: usize,
+}
+
+impl Replay<'_> {
+    fn from(
+        &self,
+        initial: State,
+        init_index: usize,
+        env: &mut Env,
+    ) -> Result<ScenarioResult, EvalError> {
+        let Replay {
+            spec,
+            scenario,
+            next_expr,
+            constants,
+            defs,
+            init_count,
+        } = *self;
+        let mut current_state = initial;
+        let mut results: Vec<(ScenarioStep, State, Vec<String>)> = Vec::new();
+        let primed_vars = make_primed_names(&spec.vars);
+
+        results.push((
+            ScenarioStep::Condition(Expr::Lit(Value::Bool(true))),
+            current_state.clone(),
+            vec!["Initial state".to_string()],
+        ));
+
+        for (step_idx, step) in scenario.steps.iter().enumerate() {
+            for (i, var) in spec.vars.iter().enumerate() {
+                if let Some(val) = current_state.values.get(i) {
+                    env.insert(var.clone(), val.clone());
+                }
+            }
+
+            let successors = next_states(
+                next_expr,
+                &current_state,
+                &spec.vars,
+                &primed_vars,
+                env,
+                defs,
+            )?;
+
+            let matching = find_matching_transition(
+                &successors,
+                step,
+                &current_state,
+                constants,
+                defs,
+                &spec.vars,
+            )?;
+
+            match matching {
+                Some((transition, changes)) => {
+                    current_state = transition.state.clone();
+                    results.push((step.clone(), transition.state, changes));
+                }
+                None => {
+                    let available =
+                        describe_available_actions(&successors, &current_state, &spec.vars);
+                    return Ok(ScenarioResult {
+                        states: results,
+                        failure: Some(ScenarioFailure {
+                            step_index: step_idx,
+                            step: step.clone(),
+                            message: match init_count {
+                                1 => "no transition matches condition".to_string(),
+                                n => format!(
+                                    "no transition matches condition (from initial state {} of {n})",
+                                    init_index + 1
+                                ),
+                            },
+                            available_actions: available,
+                        }),
+                        init_index,
+                        init_count,
+                    });
+                }
+            }
+        }
+
+        Ok(ScenarioResult {
+            states: results,
+            failure: None,
+            init_index,
+            init_count,
+        })
+    }
+}
+
+/// The definition table a scenario is evaluated against: the spec's own
+/// definitions. Public so embedders can reuse it with
+/// [`execute_scenario_with`] instead of rebuilding it.
+pub fn build_definitions(spec: &Spec) -> Definitions {
     let mut defs = Definitions::new();
     for (name, (params, body)) in &spec.definitions {
         defs.insert(name.clone(), (params.clone(), body.clone()));

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.17.0] - 2026-10-03
+
+### Added
+
+- Priming a defined operator (`Inv'`) evaluates its body in the next state, as TLA+ specifies. The operators it calls are primed in turn, while bound variables and constants keep their meaning. Priming an operator where no next state is in scope is an error naming the operator, rather than a silent reading of the current state.
+- `scenario::build_definitions` is public, so an embedder can build the definition table once and reuse it with `execute_scenario_with`.
+
+### Changed
+
+- A scenario is replayed from each initial state in turn until one admits it, instead of always using the first state `Init` produces. `ScenarioResult` reports `init_index` and `init_count`, and a failure that exhausted several initial states says how many were tried.
+
+### Fixed
+
+- `Next == \E p \in Procs : A(p) \/ B(p)` attributed every transition to `Next`, so `transitions_by_action`, counterexample action labels and MCP `check_spec` stats could not tell the branches apart; writing the same relation as a top-level disjunction was the only way to keep the labels. The quantifier is now distributed over the disjunction (`\E x \in S : A \/ B` is `(\E x \in S : A) \/ (\E x \in S : B)`), so each branch keeps its own label under both engines.
+
 ## [0.16.0] - 2026-10-02
 
 ### Changed

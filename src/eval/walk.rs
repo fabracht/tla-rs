@@ -352,8 +352,8 @@ fn walk_inner(
         Expr::Or(_, _) if run.action.is_none() => {
             for (disjunct, label) in collect_disjuncts_with_labels(node, ctx.defs) {
                 match label {
-                    Some(name) => walk_named(name, disjunct, cont, env, ctx, run)?,
-                    None => walk(disjunct, cont, env, ctx, run)?,
+                    Some(name) => walk_named(name, disjunct.as_ref(), cont, env, ctx, run)?,
+                    None => walk(disjunct.as_ref(), cont, env, ctx, run)?,
                 }
             }
             Ok(())

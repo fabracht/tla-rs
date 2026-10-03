@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -107,28 +108,60 @@ pub(crate) fn infer_name_from_let_chain(expr: &Expr, defs: &Definitions) -> Opti
     infer_action_name(inner, defs)
 }
 
+/// `\\E x \\in S : A \\/ B` is `(\\E x \\in S : A) \\/ (\\E x \\in S : B)`. Splitting it
+/// keeps each branch's own action label instead of attributing every
+/// transition to the enclosing definition.
+fn distribute_exists(expr: &Expr, defs: &Definitions) -> Option<Vec<Expr>> {
+    let Expr::Exists(var, domain, body) = expr else {
+        return None;
+    };
+    let branches = collect_disjuncts_with_labels(body, defs);
+    if branches.len() < 2 || branches.iter().all(|(_, label)| label.is_none()) {
+        return None;
+    }
+    Some(
+        branches
+            .into_iter()
+            .map(|(branch, _)| {
+                Expr::Exists(var.clone(), domain.clone(), Box::new(branch.into_owned()))
+            })
+            .collect(),
+    )
+}
+
 pub(crate) fn collect_disjuncts_with_labels<'a>(
     expr: &'a Expr,
     defs: &Definitions,
-) -> Vec<(&'a Expr, Option<Arc<str>>)> {
+) -> Vec<(Cow<'a, Expr>, Option<Arc<str>>)> {
     match expr {
         Expr::Or(l, r) => {
             let mut result = collect_disjuncts_with_labels(l, defs);
             result.extend(collect_disjuncts_with_labels(r, defs));
             result
         }
-        Expr::LabeledAction(label, action) => vec![(action.as_ref(), Some(label.clone()))],
-        Expr::Var(name) => vec![(expr, Some(name.clone()))],
-        Expr::FnCall(name, _) => vec![(expr, Some(name.clone()))],
-        Expr::Exists(_, _, _) => {
-            let label = infer_action_name(expr, defs);
-            vec![(expr, label)]
+        Expr::LabeledAction(label, action) => {
+            vec![(Cow::Borrowed(action.as_ref()), Some(label.clone()))]
         }
+        Expr::Var(name) => vec![(Cow::Borrowed(expr), Some(name.clone()))],
+        Expr::FnCall(name, _) => vec![(Cow::Borrowed(expr), Some(name.clone()))],
+        Expr::Exists(_, _, _) => match distribute_exists(expr, defs) {
+            Some(branches) => branches
+                .into_iter()
+                .map(|branch| {
+                    let label = match &branch {
+                        Expr::Exists(_, _, body) => infer_action_name(body, defs),
+                        other => infer_action_name(other, defs),
+                    };
+                    (Cow::Owned(branch), label)
+                })
+                .collect(),
+            None => vec![(Cow::Borrowed(expr), infer_action_name(expr, defs))],
+        },
         Expr::Let(_, _, _) => {
             let label = infer_name_from_let_chain(expr, defs);
-            vec![(expr, label)]
+            vec![(Cow::Borrowed(expr), label)]
         }
-        _ => vec![(expr, match_def_body(expr, defs))],
+        _ => vec![(Cow::Borrowed(expr), match_def_body(expr, defs))],
     }
 }
 

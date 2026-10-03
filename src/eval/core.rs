@@ -67,6 +67,39 @@ pub(crate) fn expand_unchanged_vars(vars: &[Arc<str>], defs: &Definitions) -> Ve
     result
 }
 
+/// A next state is in scope when the environment carries primed bindings, which
+/// is what makes priming an operator meaningful at all.
+fn next_state_in_scope(env: &Env) -> bool {
+    env.keys().any(|key| key.ends_with('\''))
+}
+
+/// Priming a defined operator means evaluating its body in the next state, so
+/// every state variable it reads becomes primed. Operators it calls are primed
+/// in turn; bound variables and constants are left alone because they have no
+/// primed counterpart in the environment.
+fn primed_substitutions(
+    operator: &Arc<str>,
+    env: &Env,
+    defs: &Definitions,
+) -> Vec<(Arc<str>, Expr)> {
+    let state_vars = env.keys().filter_map(|key| {
+        key.strip_suffix('\'')
+            .map(crate::intern::intern)
+            .filter(|base| env.contains_key(base))
+    });
+    let operators = defs
+        .iter()
+        .filter(|(name, (params, _))| params.is_empty() && *name != operator)
+        .map(|(name, _)| name.clone());
+    state_vars
+        .chain(operators)
+        .map(|name| {
+            let primed = Expr::Prime(name.clone());
+            (name, primed)
+        })
+        .collect()
+}
+
 fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
     #[cfg(feature = "profiling")]
     PROFILING_STATS.with(|s| s.borrow_mut().eval_calls += 1);
@@ -88,9 +121,25 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
 
         Expr::Prime(name) => {
             let primed = crate::intern::primed_name(name);
-            env.get(&primed)
-                .cloned()
-                .ok_or_else(|| EvalError::undefined_var_with_env(primed, env, defs))
+            if let Some(val) = env.get(&primed) {
+                return Ok(val.clone());
+            }
+            if let Some((params, body)) = defs.get(name)
+                && params.is_empty()
+            {
+                if !next_state_in_scope(env) {
+                    return Err(EvalError::domain_error(format!(
+                        "cannot evaluate `{name}'`: no next-state values are in scope"
+                    )));
+                }
+                let subs = primed_substitutions(name, env, defs);
+                return eval(
+                    &crate::substitution::substitute_expr(body, &subs),
+                    env,
+                    defs,
+                );
+            }
+            Err(EvalError::undefined_var_with_env(primed, env, defs))
         }
 
         Expr::And(l, r) => {
