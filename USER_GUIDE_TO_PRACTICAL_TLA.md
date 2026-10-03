@@ -351,7 +351,7 @@ Not every invariant violation is a bug. An offline auth system might have 25% of
 | Machine-readable output | `--json` |
 | Visualize state graph | `--export-dot graph.dot` |
 | Check liveness/fairness | `--check-liveness` |
-| Check any temporal property as TLC does | `--liveness-engine tableau` |
+| Use the liveness engine before 0.16 | `--liveness-engine legacy` |
 
 ## Compositional Specs with INSTANCE
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.16.0] - 2026-10-02
+
+### Changed
+
+- The tableau liveness engine is now the default (#120). It checks any temporal `PROPERTY` the way TLC does, including nested temporal operators, disjunctions, `ENABLED`, and `WF`/`SF` as obligations, and enforces the `SPECIFICATION`'s temporal conjuncts as assumptions. `PROPERTY` conjuncts are classified on their syntax, as in TLC, so a conjunct such as `~<>P` is now checked as a liveness property rather than rewritten into an invariant. Properties the previous engine rejected are now checked; properties both engines accept get the same verdict on the liveness oracle's TLC-confirmed corpus, except where the previous engine disagreed with TLC. `--liveness-engine legacy` (MCP `liveness_engine: "legacy"`) selects the previous engine.
+
 ## [0.15.1] - 2026-10-02
 
 ### Fixed

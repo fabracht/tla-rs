@@ -1,13 +1,22 @@
 use tla_checker::ast::{Env, Expr, SafetyProperty};
-use tla_checker::checker::{CheckResult, CheckerConfig};
+use tla_checker::checker::{CheckResult, CheckerConfig, LivenessEngine};
 use tla_checker::config::{apply_config, legacy_temporal_warning, parse_cfg};
 use tla_checker::parser::parse;
+
+/// The configuration of the checks written for the legacy liveness engine, which
+/// classifies a `PROPERTY` by rewriting it and rejects what it cannot check.
+fn legacy_config() -> CheckerConfig {
+    CheckerConfig {
+        liveness_engine: LivenessEngine::Legacy,
+        ..CheckerConfig::default()
+    }
+}
 
 fn apply(spec_src: &str, cfg_src: &str) -> (tla_checker::ast::Spec, Vec<String>) {
     let mut spec = parse(spec_src).expect("spec parses");
     let cfg = parse_cfg(cfg_src).expect("cfg parses");
     let mut domains = Env::new();
-    let mut checker_config = CheckerConfig::default();
+    let mut checker_config = legacy_config();
     let warnings = apply_config(
         &cfg,
         &mut spec,
@@ -92,7 +101,7 @@ fn cfg_unsupported_existential_temporal_property_is_a_config_error() {
         &cfg,
         &mut spec,
         &mut Env::new(),
-        &mut CheckerConfig::default(),
+        &mut legacy_config(),
         &[],
         &[],
         false,
@@ -479,7 +488,7 @@ fn legacy_spec_named_property_rejects_what_it_cannot_check() {
         &parse_cfg("PROPERTY LSpec\n").unwrap(),
         &mut spec,
         &mut Env::new(),
-        &mut CheckerConfig::default(),
+        &mut legacy_config(),
         &[],
         &[],
         false,
@@ -603,7 +612,7 @@ fn disjunction_with_a_non_liveness_disjunct_is_a_config_error() {
         &parse_cfg("SPECIFICATION Spec\nPROPERTY StateOrLive\n").unwrap(),
         &mut spec,
         &mut Env::new(),
-        &mut CheckerConfig::default(),
+        &mut legacy_config(),
         &[],
         &[],
         false,
@@ -624,7 +633,7 @@ fn disjunction_with_a_non_liveness_disjunct_is_a_config_error() {
 fn apply_with_engine(
     spec_src: &str,
     cfg_src: &str,
-    engine: tla_checker::checker::LivenessEngine,
+    engine: LivenessEngine,
 ) -> (tla_checker::ast::Spec, Vec<String>) {
     let mut spec = parse(spec_src).expect("spec parses");
     let mut checker_config = CheckerConfig {
@@ -658,7 +667,7 @@ const SYNTACTIC_MODULE: &str = "---- MODULE M ----\n\
 
 #[test]
 fn tableau_engine_classifies_properties_on_their_syntax() {
-    use tla_checker::checker::LivenessEngine::Tableau;
+    use LivenessEngine::Tableau;
     let (spec, _) = apply_with_engine(
         SYNTACTIC_MODULE,
         "SPECIFICATION SpecA\nPROPERTY NotEv\n",
@@ -709,7 +718,7 @@ fn tableau_engine_classifies_properties_on_their_syntax() {
 
 #[test]
 fn tableau_engine_keeps_specification_assumptions_without_a_warning() {
-    use tla_checker::checker::LivenessEngine::{Legacy, Tableau};
+    use LivenessEngine::{Legacy, Tableau};
     let cfg = "SPECIFICATION SpecA\nPROPERTY NotEv\n";
     let (spec, warnings) = apply_with_engine(SYNTACTIC_MODULE, cfg, Tableau);
     assert_eq!(
@@ -738,7 +747,7 @@ fn check_with_engine(name: &str, module: &str, cfg: Option<&str>) -> CheckResult
         &spec_path,
         None,
         &[],
-        tla_checker::checker::LivenessEngine::Tableau,
+        LivenessEngine::Tableau,
     )
     .unwrap();
     let mut cc = prepared.checker_config;

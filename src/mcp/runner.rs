@@ -125,8 +125,8 @@ pub fn prepare(
 
 fn liveness_engine(input: Option<LivenessEngineInput>) -> LivenessEngine {
     match input {
-        Some(LivenessEngineInput::Tableau) => LivenessEngine::Tableau,
-        Some(LivenessEngineInput::Legacy) | None => LivenessEngine::Legacy,
+        Some(LivenessEngineInput::Tableau) | None => LivenessEngine::Tableau,
+        Some(LivenessEngineInput::Legacy) => LivenessEngine::Legacy,
     }
 }
 
