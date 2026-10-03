@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.15.1] - 2026-10-02
+
+### Fixed
+
+- A cfg `SPECIFICATION` with more than one `[][Next]_v` conjunct was checked with the first as its next-state relation, and the others were silently ignored (#130). It is now rejected, as in TLC, and conjuncts reached through definitions (`Spec == Init /\ BoxNext`) are counted too.
+
 ## [0.15.0] - 2026-10-02
 
 ### Fixed
