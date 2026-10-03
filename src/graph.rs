@@ -8,6 +8,10 @@ use crate::ast::State;
 pub struct Edge {
     pub target: usize,
     pub action: Option<Arc<str>>,
+    /// The state the step reaches when symmetry reduction stored it as `target`,
+    /// its representative, under a renaming; `None` when it reaches `target`'s state
+    /// itself. Actions are evaluated on the state the step reaches.
+    pub renamed: Option<State>,
 }
 
 pub struct StateGraph {
@@ -36,8 +40,38 @@ impl StateGraph {
 
     pub fn add_edge(&mut self, from: usize, to: usize, action: Option<Arc<str>>) {
         if from < self.edges.len() {
-            self.edges[from].push(Edge { target: to, action });
+            self.edges[from].push(Edge {
+                target: to,
+                action,
+                renamed: None,
+            });
         }
+    }
+
+    /// A step from `from` to `reached`, a state symmetry reduction represents by
+    /// the state `to`.
+    pub fn add_renamed_edge(
+        &mut self,
+        from: usize,
+        to: usize,
+        action: Option<Arc<str>>,
+        reached: State,
+    ) {
+        if from < self.edges.len() {
+            self.edges[from].push(Edge {
+                target: to,
+                action,
+                renamed: Some(reached),
+            });
+        }
+    }
+
+    /// The state the `edge`-th step out of `from` reaches.
+    pub fn step_target(&self, from: usize, edge: usize) -> Option<&State> {
+        let edge = self.edges.get(from)?.get(edge)?;
+        edge.renamed
+            .as_ref()
+            .or_else(|| self.get_state(edge.target))
     }
 
     pub fn state_count(&self) -> usize {

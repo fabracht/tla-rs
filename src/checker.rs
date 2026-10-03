@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
 #[cfg(not(target_arch = "wasm32"))]
@@ -616,6 +616,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
     #[cfg(target_arch = "wasm32")]
     let collect_edges = config.export_dot_string || needs_liveness_check;
     let mut all_edges: Vec<EdgeList> = Vec::new();
+    let mut renamed_successors: HashMap<(usize, usize), State> = HashMap::new();
     let mut stats = CheckStats {
         states_explored: 0,
         transitions: 0,
@@ -1271,6 +1272,12 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 }
             }
             let canonical = symmetry.canonicalize(&transition.state).into_owned();
+            if collect_edges && !symmetry.is_empty() && canonical != transition.state {
+                renamed_successors.insert(
+                    (current_idx, all_edges[current_idx].len()),
+                    transition.state.clone(),
+                );
+            }
             let (succ_idx, is_new) = states.insert_full(canonical);
             if is_new {
                 parent.push(Some(current_idx));
@@ -1316,6 +1323,7 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
             defs: &defs,
             config,
             excluded_successors: &excluded_successors,
+            renamed_successors: &renamed_successors,
             tableau_properties: &tableau_properties,
         };
         match check_liveness_properties(ctx, &states, &parent, &all_edges, &elapsed_secs) {
@@ -1501,6 +1509,7 @@ struct LivenessContext<'a> {
     defs: &'a Definitions,
     config: &'a CheckerConfig,
     excluded_successors: &'a [Vec<State>],
+    renamed_successors: &'a HashMap<(usize, usize), State>,
     tableau_properties: &'a [TableauProperty],
 }
 
@@ -1517,6 +1526,7 @@ fn check_liveness_properties(
         defs,
         config,
         excluded_successors,
+        renamed_successors,
         tableau_properties,
     } = ctx;
     let time_exceeded = || match config.max_seconds {
@@ -1542,8 +1552,13 @@ fn check_liveness_properties(
             return Ok(LivenessCheckOutcome::TimeExceeded);
         }
 
-        for (succ_idx, action) in edges {
-            graph.add_edge(state_idx, *succ_idx, action.clone());
+        for (position, (succ_idx, action)) in edges.iter().enumerate() {
+            match renamed_successors.get(&(state_idx, position)) {
+                Some(reached) => {
+                    graph.add_renamed_edge(state_idx, *succ_idx, action.clone(), reached.clone())
+                }
+                None => graph.add_edge(state_idx, *succ_idx, action.clone()),
+            }
         }
     }
 
@@ -1552,7 +1567,12 @@ fn check_liveness_properties(
     }
 
     let stutter_targets: Vec<usize> = (0..graph.state_count())
-        .filter(|&idx| !graph.successors(idx).iter().any(|e| e.target == idx))
+        .filter(|&idx| {
+            !graph
+                .successors(idx)
+                .iter()
+                .any(|e| e.target == idx && e.renamed.is_none())
+        })
         .collect();
     for idx in stutter_targets {
         graph.add_edge(idx, idx, None);

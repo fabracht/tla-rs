@@ -124,12 +124,17 @@ fn step_truth(
     let mut truth = Vec::with_capacity(graph.state_count());
     for (from, state) in graph.states.iter().enumerate() {
         let mut row = Vec::with_capacity(graph.successors(from).len());
-        for edge in graph.successors(from) {
-            let holds = if subscripts[edge.target] == subscripts[from] {
-                true
-            } else {
+        for (index, edge) in graph.successors(from).iter().enumerate() {
+            let unchanged = match &edge.renamed {
+                None => subscripts[edge.target] == subscripts[from],
+                Some(reached) => {
+                    bindings.bind(reached);
+                    bindings.value(subscript)? == subscripts[from]
+                }
+            };
+            let holds = unchanged || {
                 bindings.bind(state);
-                match graph.get_state(edge.target) {
+                match graph.step_target(from, index) {
                     Some(next) => {
                         bindings.bind_next(next);
                         bindings.holds(action, "temporal property step")?
