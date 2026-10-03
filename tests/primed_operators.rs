@@ -13,6 +13,9 @@ Inc == x < 4 /\ x' = x + 1
 Next == Inc
 Small == x < Limit
 EveryoneSmall == \A i \in {1, 2} : x < Limit
+RECURSIVE Below(_)
+Below(n) == IF n = 0 THEN x >= 0 ELSE Below(n - 1) /\ x < Limit
+SmallByRecursion == Below(1)
 ===="#;
 
 fn replay(scenario: &str) -> Result<bool, String> {
@@ -43,6 +46,14 @@ fn priming_leaves_bound_variables_and_constant_operators_alone() {
         replay("action: Inc; x' = 1\naction: Inc; x' = 2 /\\ ~EveryoneSmall'\n"),
         Ok(true)
     );
+}
+
+#[test]
+fn operators_called_by_a_primed_operator_read_the_next_state_too() {
+    let holds = "action: Inc; x' = 1\naction: Inc; x' = 2 /\\ ~SmallByRecursion'\n";
+    assert_eq!(replay(holds), Ok(true));
+    let fails = "action: Inc; x' = 1\naction: Inc; x' = 2 /\\ SmallByRecursion'\n";
+    assert_eq!(replay(fails), Ok(false));
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use super::core::eval;
 use super::error::{EvalError, Result};
-use super::global_state::{EvalContext, with_enabled_vars};
+use super::global_state::{EvalContext, with_state_vars};
 use super::{Definitions, ResolvedInstances};
 use crate::ast::{Env, Expr, Value};
 
@@ -71,5 +71,5 @@ pub fn eval_with_context(
     defs: &Definitions,
     ctx: &EvalContext,
 ) -> Result<Value> {
-    with_enabled_vars(&ctx.state_vars, || eval(expr, env, defs))
+    with_state_vars(&ctx.state_vars, || eval(expr, env, defs))
 }

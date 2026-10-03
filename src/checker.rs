@@ -477,6 +477,10 @@ pub fn liveness_property_error(
 }
 
 pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult {
+    crate::eval::with_state_vars(&spec.vars, || check_with_state_vars(spec, domains, config))
+}
+
+fn check_with_state_vars(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult {
     let _engine = crate::eval::EngineOverride::new(
         config.use_inference_engine,
         config.allow_unassigned_stutter,

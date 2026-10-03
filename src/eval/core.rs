@@ -67,37 +67,69 @@ pub(crate) fn expand_unchanged_vars(vars: &[Arc<str>], defs: &Definitions) -> Ve
     result
 }
 
-/// A next state is in scope when the environment carries primed bindings, which
-/// is what makes priming an operator meaningful at all.
-fn next_state_in_scope(env: &Env) -> bool {
-    env.keys().any(|key| key.ends_with('\''))
-}
-
-/// Priming a defined operator means evaluating its body in the next state, so
-/// every state variable it reads becomes primed. Operators it calls are primed
-/// in turn; bound variables and constants are left alone because they have no
-/// primed counterpart in the environment.
-fn primed_substitutions(
-    operator: &Arc<str>,
-    env: &Env,
+/// `Op'` for an operator `Op` without parameters: `Op` evaluated in the next state,
+/// its body read with every state variable bound to its next-state value, so the
+/// operators it calls, with or without parameters, see the next state too. When
+/// the state variables are known ([`super::global_state::with_state_vars`]), one
+/// that has no next-state value yet is unbound while the body is evaluated, so
+/// reading it fails, as in TLC; otherwise the state variables are taken to be the
+/// names the environment holds a next-state value for.
+fn eval_in_next_state(
+    name: &Arc<str>,
+    body: &Expr,
+    env: &mut Env,
     defs: &Definitions,
-) -> Vec<(Arc<str>, Expr)> {
-    let state_vars = env.keys().filter_map(|key| {
-        key.strip_suffix('\'')
-            .map(crate::intern::intern)
+) -> Result<Value> {
+    let vars = super::global_state::state_vars_in_scope().unwrap_or_else(|| {
+        env.keys()
+            .filter_map(|key| key.strip_suffix('\'').map(crate::intern::intern))
             .filter(|base| env.contains_key(base))
+            .collect()
     });
-    let operators = defs
+    let primed: Vec<Arc<str>> = vars.iter().map(|v| crate::intern::primed_name(v)).collect();
+    if !primed.iter().any(|p| env.contains_key(p)) {
+        return Err(EvalError::domain_error(format!(
+            "cannot evaluate `{name}'`: no next-state values are in scope"
+        )));
+    }
+    let saved: Vec<(Arc<str>, Option<Value>)> = vars
         .iter()
-        .filter(|(name, (params, _))| params.is_empty() && *name != operator)
-        .map(|(name, _)| name.clone());
-    state_vars
-        .chain(operators)
-        .map(|name| {
-            let primed = Expr::Prime(name.clone());
-            (name, primed)
-        })
-        .collect()
+        .chain(&primed)
+        .map(|key| (key.clone(), env.get(key).cloned()))
+        .collect();
+    let mut unassigned = Vec::new();
+    for (var, primed_var) in vars.iter().zip(&primed) {
+        match env.remove(primed_var) {
+            Some(next) => {
+                env.insert(var.clone(), next);
+            }
+            None => {
+                env.remove(var);
+                unassigned.push(var.as_ref());
+            }
+        }
+    }
+    let result = eval(body, env, defs);
+    for (key, value) in saved {
+        match value {
+            Some(value) => {
+                env.insert(key, value);
+            }
+            None => {
+                env.remove(&key);
+            }
+        }
+    }
+    result.map_err(|error| {
+        if unassigned.is_empty() {
+            error
+        } else {
+            EvalError::domain_error(format!(
+                "cannot evaluate `{name}'`: {} has no next-state value here ({error})",
+                unassigned.join(", ")
+            ))
+        }
+    })
 }
 
 fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
@@ -127,17 +159,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Some((params, body)) = defs.get(name)
                 && params.is_empty()
             {
-                if !next_state_in_scope(env) {
-                    return Err(EvalError::domain_error(format!(
-                        "cannot evaluate `{name}'`: no next-state values are in scope"
-                    )));
-                }
-                let subs = primed_substitutions(name, env, defs);
-                return eval(
-                    &crate::substitution::substitute_expr(body, &subs),
-                    env,
-                    defs,
-                );
+                return eval_in_next_state(name, body, env, defs);
             }
             Err(EvalError::undefined_var_with_env(primed, env, defs))
         }
@@ -1590,7 +1612,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         )),
 
         Expr::EnabledOp(action) => {
-            let Some(vars) = super::global_state::enabled_vars() else {
+            let Some(vars) = super::global_state::state_vars_in_scope() else {
                 return Err(EvalError::domain_error(
                     "ENABLED can be evaluated only in an invariant, a PROPERTY, or a liveness \
                      check, not while generating states",

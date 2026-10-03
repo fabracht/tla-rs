@@ -53,7 +53,7 @@ pub(crate) use self::ast_utils::{
     contains_free_prime_ref, contains_prime_ref, expr_contains, expr_references,
     parameterized_let_op, reaches_temporal, references_state, uses_run_dependent_builtin,
 };
-pub(crate) use self::global_state::with_enabled_vars;
+pub(crate) use self::global_state::with_state_vars;
 pub use self::walk::{EngineOverride, set_allow_unassigned_stutter, set_use_inference_engine};
 
 pub(crate) fn resolve_parameterized_defs(
@@ -766,6 +766,37 @@ mod tests {
         let env = state_to_env(&state, &vars);
         assert_eq!(env.get(&var("x")), Some(&Value::Int(1)));
         assert_eq!(env.get(&var("y")), Some(&Value::Int(2)));
+    }
+
+    #[test]
+    fn a_primed_operator_reads_every_state_variable_in_the_next_state() {
+        let both = eq(
+            Expr::Add(Box::new(var_expr("x")), Box::new(var_expr("y"))),
+            lit_int(3),
+        );
+        let mut defs = Definitions::new();
+        defs.insert(var("Both"), (vec![], Arc::new(both)));
+        let mut env = Env::new();
+        env.insert(var("x"), Value::Int(0));
+        env.insert(var("y"), Value::Int(0));
+        env.insert(var("x'"), Value::Int(1));
+        let vars = [var("x"), var("y")];
+        let error =
+            with_state_vars(&vars, || eval(&prime_expr("Both"), &mut env, &defs)).unwrap_err();
+        assert!(
+            error.to_string().contains("y has no next-state value"),
+            "y' is not bound, so Both' cannot be evaluated: {error}"
+        );
+        env.insert(var("y'"), Value::Int(2));
+        assert_eq!(
+            with_state_vars(&vars, || eval(&prime_expr("Both"), &mut env, &defs)).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            env.get(&var("x")),
+            Some(&Value::Int(0)),
+            "the current state is restored"
+        );
     }
 
     #[test]

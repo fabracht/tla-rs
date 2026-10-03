@@ -145,6 +145,18 @@ fn replay(
     defs: &Definitions,
     max_stutter: usize,
 ) -> Result<ScenarioResult, EvalError> {
+    crate::eval::with_state_vars(&spec.vars, || {
+        replay_with_state_vars(spec, scenario, constants, defs, max_stutter)
+    })
+}
+
+fn replay_with_state_vars(
+    spec: &Spec,
+    scenario: &Scenario,
+    constants: &Env,
+    defs: &Definitions,
+    max_stutter: usize,
+) -> Result<ScenarioResult, EvalError> {
     let mut bound_constants = constants.clone();
     crate::config::bind_model_value_names(&mut bound_constants, spec, defs);
     let constants = &bound_constants;

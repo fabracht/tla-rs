@@ -82,34 +82,34 @@ thread_local! {
 }
 
 thread_local! {
-    static ENABLED_VARS: RefCell<Option<Vec<Arc<str>>>> = const { RefCell::new(None) };
+    static STATE_VARS: RefCell<Option<Vec<Arc<str>>>> = const { RefCell::new(None) };
 }
 
-struct RestoreEnabledVars(Option<Vec<Arc<str>>>);
+struct RestoreStateVars(Option<Vec<Arc<str>>>);
 
-impl Drop for RestoreEnabledVars {
+impl Drop for RestoreStateVars {
     fn drop(&mut self) {
         let previous = self.0.take();
-        ENABLED_VARS.with(|cell| *cell.borrow_mut() = previous);
+        STATE_VARS.with(|cell| *cell.borrow_mut() = previous);
     }
 }
 
-/// Runs `body` with `ENABLED` evaluable: an `ENABLED A` reached while it runs reads
-/// the current values of `vars` from the environment it is evaluated in, and asks
-/// whether `A` has a successor from that state.
-pub(crate) fn with_enabled_vars<T>(vars: &[Arc<str>], body: impl FnOnce() -> T) -> T {
-    if ENABLED_VARS.with(|cell| cell.borrow().as_deref() == Some(vars)) {
+/// Runs `body` with the spec's state variables `vars` known to the evaluator.
+/// `ENABLED A` needs them to read the current state from the environment it is
+/// evaluated in, and `Op'` to evaluate `Op` in the next state.
+pub(crate) fn with_state_vars<T>(vars: &[Arc<str>], body: impl FnOnce() -> T) -> T {
+    if STATE_VARS.with(|cell| cell.borrow().as_deref() == Some(vars)) {
         return body();
     }
-    let restore = RestoreEnabledVars(ENABLED_VARS.with(|cell| cell.replace(Some(vars.to_vec()))));
+    let restore = RestoreStateVars(STATE_VARS.with(|cell| cell.replace(Some(vars.to_vec()))));
     let result = body();
     drop(restore);
     result
 }
 
-/// The state variables `ENABLED` reads, inside [`with_enabled_vars`].
-pub(crate) fn enabled_vars() -> Option<Vec<Arc<str>>> {
-    ENABLED_VARS.with(|cell| cell.borrow().clone())
+/// The state variables `ENABLED` reads, inside [`with_state_vars`].
+pub(crate) fn state_vars_in_scope() -> Option<Vec<Arc<str>>> {
+    STATE_VARS.with(|cell| cell.borrow().clone())
 }
 
 thread_local! {
