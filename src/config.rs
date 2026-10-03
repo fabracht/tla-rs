@@ -882,11 +882,16 @@ pub fn apply_config(
     Ok(warnings)
 }
 
-fn find_box_action(expr: &Expr) -> Option<Expr> {
+/// The next-state relations of the `[][Next]_v` conjuncts of a `SPECIFICATION`
+/// body, its temporal definitions inlined.
+fn box_action_conjuncts(expr: &Expr, out: &mut Vec<Expr>) {
     match expr {
-        Expr::BoxAction(next, _) => Some(*next.clone()),
-        Expr::And(l, r) => find_box_action(l).or_else(|| find_box_action(r)),
-        _ => None,
+        Expr::BoxAction(next, _) => out.push((**next).clone()),
+        Expr::And(l, r) => {
+            box_action_conjuncts(l, out);
+            box_action_conjuncts(r, out);
+        }
+        _ => {}
     }
 }
 
@@ -1007,9 +1012,18 @@ fn resolve_specification(
             ));
         }
     };
-    if let Some(next_expr) = find_box_action(&expr_clone) {
-        let inlined =
-            crate::ast::inline_temporal_definitions(&expr_clone, &spec.vars, &spec.definitions);
+    let inlined =
+        crate::ast::inline_temporal_definitions(&expr_clone, &spec.vars, &spec.definitions);
+    let mut next_relations = Vec::new();
+    box_action_conjuncts(&inlined, &mut next_relations);
+    if next_relations.len() > 1 {
+        return Err(format!(
+            "SPECIFICATION '{spec_name}' has {} conjuncts of the form [][Next]_v; as in \
+             TLC, a specification must have exactly one next-state relation",
+            next_relations.len()
+        ));
+    }
+    if let Some(next_expr) = next_relations.pop() {
         spec.init = Some(collect_init(&inlined).unwrap_or(Expr::Lit(Value::Bool(true))));
         spec.next = Some(next_expr);
         let mut assumptions = Vec::new();
@@ -1691,6 +1705,47 @@ mod tests {
         let expected_init = Expr::And(Box::new(init_part_1), Box::new(init_part_2));
         assert_eq!(spec.init.unwrap(), expected_init);
         assert_eq!(spec.next.unwrap(), next_expr);
+    }
+
+    #[test]
+    fn specification_must_have_exactly_one_next_state_relation() {
+        let apply = |spec_name: &str| {
+            let mut spec = crate::parser::parse(
+                "---- MODULE M ----\n\
+                 EXTENDS Naturals\n\
+                 VARIABLE x\n\
+                 Init == x = 0\n\
+                 Next == x' = (x + 1) % 3\n\
+                 BoxNext == [][Next]_x\n\
+                 Two == Init /\\ [][Next]_x /\\ [][x' > x]_x\n\
+                 TwoViaDefinition == Init /\\ BoxNext /\\ [][x' > x]_x\n\
+                 ViaDefinition == Init /\\ BoxNext\n\
+                 ====",
+            )
+            .unwrap();
+            let cfg = parse_cfg(&format!("SPECIFICATION {spec_name}")).unwrap();
+            apply_config(
+                &cfg,
+                &mut spec,
+                &mut Env::new(),
+                &mut CheckerConfig::default(),
+                &[],
+                &[],
+                false,
+            )
+            .map(|_| spec.next)
+        };
+        for two in ["Two", "TwoViaDefinition"] {
+            let error = apply(two).unwrap_err();
+            assert!(
+                error.contains("2 conjuncts of the form [][Next]_v"),
+                "{two}: {error}"
+            );
+        }
+        assert!(
+            apply("ViaDefinition").unwrap().is_some(),
+            "a [][Next]_v conjunct reached through a definition is the next-state relation"
+        );
     }
 
     #[test]
