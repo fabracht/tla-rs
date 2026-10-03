@@ -67,6 +67,71 @@ pub(crate) fn expand_unchanged_vars(vars: &[Arc<str>], defs: &Definitions) -> Ve
     result
 }
 
+/// `Op'` for an operator `Op` without parameters: `Op` evaluated in the next state,
+/// its body read with every state variable bound to its next-state value, so the
+/// operators it calls, with or without parameters, see the next state too. When
+/// the state variables are known ([`super::global_state::with_state_vars`]), one
+/// that has no next-state value yet is unbound while the body is evaluated, so
+/// reading it fails, as in TLC; otherwise the state variables are taken to be the
+/// names the environment holds a next-state value for.
+fn eval_in_next_state(
+    name: &Arc<str>,
+    body: &Expr,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<Value> {
+    let vars = super::global_state::state_vars_in_scope().unwrap_or_else(|| {
+        env.keys()
+            .filter_map(|key| key.strip_suffix('\'').map(crate::intern::intern))
+            .filter(|base| env.contains_key(base))
+            .collect()
+    });
+    let primed: Vec<Arc<str>> = vars.iter().map(|v| crate::intern::primed_name(v)).collect();
+    if !primed.iter().any(|p| env.contains_key(p)) {
+        return Err(EvalError::domain_error(format!(
+            "cannot evaluate `{name}'`: no next-state values are in scope"
+        )));
+    }
+    let saved: Vec<(Arc<str>, Option<Value>)> = vars
+        .iter()
+        .chain(&primed)
+        .map(|key| (key.clone(), env.get(key).cloned()))
+        .collect();
+    let mut unassigned = Vec::new();
+    for (var, primed_var) in vars.iter().zip(&primed) {
+        match env.remove(primed_var) {
+            Some(next) => {
+                env.insert(var.clone(), next);
+            }
+            None => {
+                env.remove(var);
+                unassigned.push(var.as_ref());
+            }
+        }
+    }
+    let result = eval(body, env, defs);
+    for (key, value) in saved {
+        match value {
+            Some(value) => {
+                env.insert(key, value);
+            }
+            None => {
+                env.remove(&key);
+            }
+        }
+    }
+    result.map_err(|error| {
+        if unassigned.is_empty() {
+            error
+        } else {
+            EvalError::domain_error(format!(
+                "cannot evaluate `{name}'`: {} has no next-state value here ({error})",
+                unassigned.join(", ")
+            ))
+        }
+    })
+}
+
 fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
     #[cfg(feature = "profiling")]
     PROFILING_STATS.with(|s| s.borrow_mut().eval_calls += 1);
@@ -88,9 +153,15 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
 
         Expr::Prime(name) => {
             let primed = crate::intern::primed_name(name);
-            env.get(&primed)
-                .cloned()
-                .ok_or_else(|| EvalError::undefined_var_with_env(primed, env, defs))
+            if let Some(val) = env.get(&primed) {
+                return Ok(val.clone());
+            }
+            if let Some((params, body)) = defs.get(name)
+                && params.is_empty()
+            {
+                return eval_in_next_state(name, body, env, defs);
+            }
+            Err(EvalError::undefined_var_with_env(primed, env, defs))
         }
 
         Expr::And(l, r) => {
@@ -1541,7 +1612,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         )),
 
         Expr::EnabledOp(action) => {
-            let Some(vars) = super::global_state::enabled_vars() else {
+            let Some(vars) = super::global_state::state_vars_in_scope() else {
                 return Err(EvalError::domain_error(
                     "ENABLED can be evaluated only in an invariant, a PROPERTY, or a liveness \
                      check, not while generating states",

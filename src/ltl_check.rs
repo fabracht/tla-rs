@@ -84,7 +84,7 @@ impl AtomTruth {
                 }
                 Atom::Step { action, subscript } => {
                     state.push(None);
-                    step.push(Some(crate::eval::with_enabled_vars(vars, || {
+                    step.push(Some(crate::eval::with_state_vars(vars, || {
                         step_truth(graph, action, subscript, vars, constants, defs)
                     })?));
                 }

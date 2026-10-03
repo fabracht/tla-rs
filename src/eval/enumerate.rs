@@ -138,6 +138,7 @@ fn next_states_dispatch(
         let disjuncts = collect_disjuncts_with_labels(effective, defs);
         let mut all_results = indexmap::IndexSet::new();
         for (disjunct, action) in &disjuncts {
+            let disjunct = disjunct.as_ref();
             if let Expr::Exists(_, _, _) = disjunct {
                 let mut results = Vec::new();
                 expand_and_enumerate(disjunct, base_env, &ctx, action.clone(), &mut results)?;
@@ -177,7 +178,7 @@ fn walk_next_states(effective: &Expr, env: &mut Env, ctx: &EnumCtx<'_>) -> Resul
     let mut all = indexmap::IndexSet::new();
     for (disjunct, action) in collect_disjuncts_with_labels(effective, ctx.defs) {
         let mut results = Vec::new();
-        walk_next(disjunct, env, &wctx, action, &mut results)?;
+        walk_next(disjunct.as_ref(), env, &wctx, action, &mut results)?;
         for transition in results {
             all.insert(transition);
         }
@@ -229,6 +230,7 @@ fn expand_and_enumerate_inner(
         Expr::Or(_, _) => {
             let disjuncts = collect_disjuncts_with_labels(expr, ctx.defs);
             for (disjunct, sub_action) in &disjuncts {
+                let disjunct = disjunct.as_ref();
                 let effective_action = sub_action.clone().or(action.clone());
                 if let Expr::Exists(_, _, _) = disjunct {
                     expand_and_enumerate(disjunct, env, ctx, effective_action, results)?;

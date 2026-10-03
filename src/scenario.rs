@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::ast::{Env, Expr, Spec, State, Transition, Value};
@@ -23,6 +24,14 @@ pub struct Scenario {
 pub struct ScenarioResult {
     pub states: Vec<(ScenarioStep, State, Vec<String>)>,
     pub failure: Option<ScenarioFailure>,
+    /// How many unobserved transitions the replay had to take to line the
+    /// scenario up with the spec, within the allowed stutter budget.
+    pub stutters: usize,
+    /// Which initial state the replay started from, and how many `Init`
+    /// admits. A spec with several initial states is replayed from each in
+    /// turn until one admits the whole scenario.
+    pub init_index: usize,
+    pub init_count: usize,
 }
 
 #[derive(Debug)]
@@ -106,11 +115,47 @@ pub fn execute_scenario(
     execute_scenario_with(spec, scenario, constants, &defs)
 }
 
+/// Replay a scenario that records only some of the system's steps: between two
+/// recorded steps the spec may take up to `max_stutter` transitions of its own.
+/// A trace collected from a running program needs this, because instrumentation
+/// never sees every step the spec models.
+pub fn execute_scenario_stuttering(
+    spec: &Spec,
+    scenario: &Scenario,
+    constants: &Env,
+    defs: &Definitions,
+    max_stutter: usize,
+) -> Result<ScenarioResult, EvalError> {
+    replay(spec, scenario, constants, defs, max_stutter)
+}
+
 pub fn execute_scenario_with(
     spec: &Spec,
     scenario: &Scenario,
     constants: &Env,
     defs: &Definitions,
+) -> Result<ScenarioResult, EvalError> {
+    replay(spec, scenario, constants, defs, 0)
+}
+
+fn replay(
+    spec: &Spec,
+    scenario: &Scenario,
+    constants: &Env,
+    defs: &Definitions,
+    max_stutter: usize,
+) -> Result<ScenarioResult, EvalError> {
+    crate::eval::with_state_vars(&spec.vars, || {
+        replay_with_state_vars(spec, scenario, constants, defs, max_stutter)
+    })
+}
+
+fn replay_with_state_vars(
+    spec: &Spec,
+    scenario: &Scenario,
+    constants: &Env,
+    defs: &Definitions,
+    max_stutter: usize,
 ) -> Result<ScenarioResult, EvalError> {
     let mut bound_constants = constants.clone();
     crate::config::bind_model_value_names(&mut bound_constants, spec, defs);
@@ -126,70 +171,218 @@ pub fn execute_scenario_with(
         .as_ref()
         .ok_or_else(|| EvalError::domain_error("scenario mode requires Next definition"))?;
     let init_states = crate::eval::init_states(init_expr, &spec.vars, &env, defs)?;
-    let Some(mut current_state) = init_states.into_iter().next() else {
+    let init_count = init_states.len();
+    if init_count == 0 {
         return Err(EvalError::domain_error("no initial states"));
-    };
-    let mut results: Vec<(ScenarioStep, State, Vec<String>)> = Vec::new();
-    let primed_vars = make_primed_names(&spec.vars);
-
-    results.push((
-        ScenarioStep::Condition(Expr::Lit(Value::Bool(true))),
-        current_state.clone(),
-        vec!["Initial state".to_string()],
-    ));
-
-    for (step_idx, step) in scenario.steps.iter().enumerate() {
-        for (i, var) in spec.vars.iter().enumerate() {
-            if let Some(val) = current_state.values.get(i) {
-                env.insert(var.clone(), val.clone());
-            }
-        }
-
-        let successors = next_states(
-            next_expr,
-            &current_state,
-            &spec.vars,
-            &primed_vars,
-            &mut env,
-            defs,
-        )?;
-
-        let matching = find_matching_transition(
-            &successors,
-            step,
-            &current_state,
-            constants,
-            defs,
-            &spec.vars,
-        )?;
-
-        match matching {
-            Some((transition, changes)) => {
-                current_state = transition.state.clone();
-                results.push((step.clone(), transition.state, changes));
-            }
-            None => {
-                let available = describe_available_actions(&successors, &current_state, &spec.vars);
-                return Ok(ScenarioResult {
-                    states: results,
-                    failure: Some(ScenarioFailure {
-                        step_index: step_idx,
-                        step: step.clone(),
-                        message: "no transition matches condition".to_string(),
-                        available_actions: available,
-                    }),
-                });
-            }
-        }
     }
-
-    Ok(ScenarioResult {
-        states: results,
-        failure: None,
-    })
+    let replay = Replay {
+        spec,
+        scenario,
+        next_expr,
+        constants,
+        defs,
+        init_count,
+        max_stutter,
+    };
+    let mut first_outcome: Option<ScenarioResult> = None;
+    for (init_index, initial) in init_states.into_iter().enumerate() {
+        let outcome = replay.from(initial, init_index, &mut env)?;
+        if outcome.failure.is_none() {
+            return Ok(outcome);
+        }
+        first_outcome.get_or_insert(outcome);
+    }
+    first_outcome.ok_or_else(|| EvalError::domain_error("no initial states"))
 }
 
-fn build_definitions(spec: &Spec) -> Definitions {
+/// One scenario replayed against one spec: everything except which initial
+/// state the attempt starts from.
+struct Replay<'a> {
+    spec: &'a Spec,
+    scenario: &'a Scenario,
+    next_expr: &'a Expr,
+    constants: &'a Env,
+    defs: &'a Definitions,
+    init_count: usize,
+    max_stutter: usize,
+}
+
+impl Replay<'_> {
+    fn from(
+        &self,
+        initial: State,
+        init_index: usize,
+        env: &mut Env,
+    ) -> Result<ScenarioResult, EvalError> {
+        let Replay {
+            spec,
+            scenario,
+            next_expr,
+            constants,
+            defs,
+            init_count,
+            max_stutter,
+        } = *self;
+        let mut current_state = initial;
+        let mut stutters = 0;
+        let mut results: Vec<(ScenarioStep, State, Vec<String>)> = Vec::new();
+        let primed_vars = make_primed_names(&spec.vars);
+        let search = Search {
+            next_expr,
+            vars: &spec.vars,
+            primed_vars: &primed_vars,
+            constants,
+            defs,
+            max_stutter,
+        };
+
+        results.push((
+            ScenarioStep::Condition(Expr::Lit(Value::Bool(true))),
+            current_state.clone(),
+            vec!["Initial state".to_string()],
+        ));
+
+        for (step_idx, step) in scenario.steps.iter().enumerate() {
+            match search.reach(&current_state, step, env)? {
+                Some(path) => {
+                    stutters += path.unobserved.len();
+                    for (state, changes) in path.unobserved {
+                        results.push((unobserved_step(), state, changes));
+                    }
+                    current_state = path.state.clone();
+                    results.push((step.clone(), path.state, path.changes));
+                }
+                None => {
+                    let successors = next_states(
+                        next_expr,
+                        &current_state,
+                        &spec.vars,
+                        &primed_vars,
+                        env,
+                        defs,
+                    )?;
+                    let available =
+                        describe_available_actions(&successors, &current_state, &spec.vars);
+                    return Ok(ScenarioResult {
+                        states: results,
+                        failure: Some(ScenarioFailure {
+                            step_index: step_idx,
+                            step: step.clone(),
+                            message: match (init_count, max_stutter) {
+                                (1, 0) => "no transition matches condition".to_string(),
+                                (1, n) => format!(
+                                    "no transition matches condition within {n} unobserved steps"
+                                ),
+                                (n, 0) => format!(
+                                    "no transition matches condition (from initial state {} of {n})",
+                                    init_index + 1
+                                ),
+                                (n, stutter) => format!(
+                                    "no transition matches condition within {stutter} unobserved steps (from initial state {} of {n})",
+                                    init_index + 1
+                                ),
+                            },
+                            available_actions: available,
+                        }),
+                        init_index,
+                        init_count,
+                        stutters,
+                    });
+                }
+            }
+        }
+
+        Ok(ScenarioResult {
+            states: results,
+            failure: None,
+            init_index,
+            init_count,
+            stutters,
+        })
+    }
+}
+
+fn unobserved_step() -> ScenarioStep {
+    ScenarioStep::Condition(Expr::Lit(Value::Bool(true)))
+}
+
+/// A spec transition the scenario did not record, plus the recorded step it
+/// made reachable.
+struct StutterPath {
+    unobserved: Vec<(State, Vec<String>)>,
+    state: State,
+    changes: Vec<String>,
+}
+
+/// Breadth-first search for the recorded step, allowing the spec to take up to
+/// `max_stutter` unobserved transitions before it.
+struct Search<'a> {
+    next_expr: &'a Expr,
+    vars: &'a [Arc<str>],
+    primed_vars: &'a [Arc<str>],
+    constants: &'a Env,
+    defs: &'a Definitions,
+    max_stutter: usize,
+}
+
+impl Search<'_> {
+    fn reach(
+        &self,
+        start: &State,
+        step: &ScenarioStep,
+        env: &mut Env,
+    ) -> Result<Option<StutterPath>, EvalError> {
+        let mut frontier = vec![(start.clone(), Vec::new())];
+        let mut seen = HashSet::from([start.clone()]);
+
+        for depth in 0..=self.max_stutter {
+            let mut next_frontier = Vec::new();
+            for (state, unobserved) in frontier {
+                let successors = next_states(
+                    self.next_expr,
+                    &state,
+                    self.vars,
+                    self.primed_vars,
+                    env,
+                    self.defs,
+                )?;
+                if let Some((transition, changes)) = find_matching_transition(
+                    &successors,
+                    step,
+                    &state,
+                    self.constants,
+                    self.defs,
+                    self.vars,
+                )? {
+                    return Ok(Some(StutterPath {
+                        unobserved,
+                        state: transition.state,
+                        changes,
+                    }));
+                }
+                if depth == self.max_stutter {
+                    continue;
+                }
+                for transition in successors {
+                    if !seen.insert(transition.state.clone()) {
+                        continue;
+                    }
+                    let changes = compute_changes(&state, &transition.state, self.vars);
+                    let mut path = unobserved.clone();
+                    path.push((transition.state.clone(), changes));
+                    next_frontier.push((transition.state, path));
+                }
+            }
+            frontier = next_frontier;
+        }
+        Ok(None)
+    }
+}
+
+/// The definition table a scenario is evaluated against: the spec's own
+/// definitions. Public so embedders can reuse it with
+/// [`execute_scenario_with`] instead of rebuilding it.
+pub fn build_definitions(spec: &Spec) -> Definitions {
     let mut defs = Definitions::new();
     for (name, (params, body)) in &spec.definitions {
         defs.insert(name.clone(), (params.clone(), body.clone()));

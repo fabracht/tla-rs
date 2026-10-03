@@ -31,7 +31,9 @@ pub fn next_states(
         }
     }
 
-    let result = next_states_impl(next, env, vars, primed_vars, defs);
+    let result = super::global_state::with_state_vars(vars, || {
+        next_states_impl(next, env, vars, primed_vars, defs)
+    });
 
     for var in vars {
         env.remove(var);
@@ -61,7 +63,9 @@ pub fn next_states_with_guards(
         }
     }
 
-    let result = next_states_with_guards_impl(next, env, vars, primed_vars, defs);
+    let result = super::global_state::with_state_vars(vars, || {
+        next_states_with_guards_impl(next, env, vars, primed_vars, defs)
+    });
 
     for var in vars {
         env.remove(var);

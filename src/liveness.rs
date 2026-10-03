@@ -467,7 +467,7 @@ pub(crate) fn truth(
     defs: &Definitions,
 ) -> Result<Vec<bool>> {
     let mut bindings = Bindings::new(vars, constants, defs);
-    crate::eval::with_enabled_vars(vars, || {
+    crate::eval::with_state_vars(vars, || {
         graph
             .states
             .iter()
