@@ -304,6 +304,7 @@ pub enum ErrorPhase {
     Init,
     Next,
     Invariant,
+    Liveness,
     Io,
     Internal,
 }

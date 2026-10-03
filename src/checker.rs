@@ -208,11 +208,36 @@ pub enum CheckResult {
     InitError(EvalError),
     NextError(EvalError, Vec<State>, Option<String>),
     InvariantError(EvalError, Vec<State>, Option<String>),
+    LivenessError(LivenessError, CheckStats),
     MaxStatesExceeded(CheckStats),
     MaxDepthExceeded(CheckStats),
     MaxTimeExceeded(CheckStats),
     NoInitialStates,
     PrepareError(PrepareSpecError),
+}
+
+/// An error evaluating the spec while checking liveness, after the state search:
+/// in the property `property`, or in the fairness constraints when it is `None`.
+#[derive(Debug)]
+pub struct LivenessError {
+    pub property: Option<Arc<str>>,
+    pub error: EvalError,
+}
+
+impl LivenessError {
+    fn fairness(error: EvalError) -> Self {
+        Self {
+            property: None,
+            error,
+        }
+    }
+
+    fn property(name: &Arc<str>) -> impl FnOnce(EvalError) -> Self + '_ {
+        move |error| Self {
+            property: Some(name.clone()),
+            error,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1303,8 +1328,9 @@ pub fn check(spec: &Spec, domains: &Env, config: &CheckerConfig) -> CheckResult 
                 stats.dot_graph = do_export(&states, &parent, None, &all_edges);
                 return CheckResult::MaxTimeExceeded(stats);
             }
-            Err(e) => {
-                return CheckResult::InvariantError(e, vec![], stats.dot_graph.take());
+            Err(error) => {
+                stats.elapsed_secs = elapsed_secs();
+                return CheckResult::LivenessError(error, stats);
             }
         }
     }
@@ -1484,7 +1510,7 @@ fn check_liveness_properties(
     parent: &[Option<usize>],
     all_edges: &[EdgeList],
     elapsed_secs: &dyn Fn() -> f64,
-) -> Result<LivenessCheckOutcome, EvalError> {
+) -> Result<LivenessCheckOutcome, LivenessError> {
     let LivenessContext {
         spec,
         domains,
@@ -1532,7 +1558,7 @@ fn check_liveness_properties(
         graph.add_edge(idx, idx, None);
     }
 
-    let fairness = expand_fairness(spec, domains, defs)?;
+    let fairness = expand_fairness(spec, domains, defs).map_err(LivenessError::fairness)?;
     if config.liveness_engine == LivenessEngine::Tableau {
         let table = liveness::FairnessTable::build(
             &graph,
@@ -1541,7 +1567,8 @@ fn check_liveness_properties(
             &spec.vars,
             domains,
             defs,
-        )?;
+        )
+        .map_err(LivenessError::fairness)?;
         return tableau_liveness(
             spec,
             domains,
@@ -1560,7 +1587,8 @@ fn check_liveness_properties(
             domains,
             defs,
             &mut liveness_properties,
-        )?;
+        )
+        .map_err(LivenessError::property(&property.name))?;
     }
     let table = liveness::FairnessTable::build(
         &graph,
@@ -1569,14 +1597,16 @@ fn check_liveness_properties(
         &spec.vars,
         domains,
         defs,
-    )?;
+    )
+    .map_err(LivenessError::fairness)?;
 
     for (name, property) in &liveness_properties {
         if time_exceeded() {
             return Ok(LivenessCheckOutcome::TimeExceeded);
         }
         if let Some(lasso) =
-            liveness::find_violation(&graph, &table, property, &spec.vars, domains, defs)?
+            liveness::find_violation(&graph, &table, property, &spec.vars, domains, defs)
+                .map_err(LivenessError::property(name))?
         {
             let states_at = |indices: &[usize]| -> Vec<State> {
                 indices
@@ -1665,7 +1695,7 @@ fn tableau_liveness(
     graph: &StateGraph,
     table: &liveness::FairnessTable,
     time_exceeded: &dyn Fn() -> bool,
-) -> Result<LivenessCheckOutcome, EvalError> {
+) -> Result<LivenessCheckOutcome, LivenessError> {
     let model = crate::ltl_check::Model {
         vars: &spec.vars,
         constants: domains,
@@ -1682,7 +1712,8 @@ fn tableau_liveness(
             &property.atoms,
             &model,
             time_exceeded,
-        )?;
+        )
+        .map_err(LivenessError::property(&property.name))?;
         match search {
             crate::ltl_check::Search::Clean => {}
             crate::ltl_check::Search::OutOfTime => {
@@ -2354,6 +2385,21 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                 r#"{{"status": "invariant_error", "error": {}, "trace": {}}}"#,
                 json_string(&format_eval_error(e)),
                 trace_to_json(trace, &spec.vars)
+            )
+        }
+        CheckResult::LivenessError(error, stats) => {
+            let property = error
+                .property
+                .as_deref()
+                .map_or("null".to_string(), json_string);
+            format!(
+                r#"{{"status": "liveness_error", "property": {}, "error": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
+                property,
+                json_string(&format_eval_error(&error.error)),
+                stats.states_explored,
+                stats.transitions,
+                stats.max_depth_reached,
+                stats.elapsed_secs
             )
         }
         CheckResult::MaxStatesExceeded(stats) => {

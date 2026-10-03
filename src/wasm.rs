@@ -409,6 +409,18 @@ fn result_to_wasm(
             dot,
             warnings,
         ),
+        CheckResult::LivenessError(error, stats) => WasmCheckResult::err_with_stats(
+            "LivenessError",
+            match &error.property {
+                Some(property) => {
+                    format!("PROPERTY '{property}': {}", format_eval_error(&error.error))
+                }
+                None => format_eval_error(&error.error),
+            },
+            stats,
+            None,
+            warnings,
+        ),
         CheckResult::MaxStatesExceeded(stats) => WasmCheckResult::err_with_stats(
             "MaxStatesExceeded",
             format!("Max states exceeded: {}", stats.states_explored),

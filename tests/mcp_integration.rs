@@ -293,6 +293,46 @@ fn check_spec_warns_about_misnamed_invariant_alongside_a_checked_one() {
 }
 
 #[test]
+fn check_spec_reports_an_evaluation_error_in_the_liveness_phase_as_such() {
+    let input = CheckSpecInput {
+        spec_path: "test_cases/should_error/liveness_error.tla".into(),
+        max_states: 100,
+        max_depth: 10,
+        max_seconds: 30,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: None,
+        symbolic_integers: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        liveness_engine: Some(LivenessEngineInput::Tableau),
+        config_path: None,
+    };
+    let CheckOutcome::Error {
+        phase,
+        error,
+        partial_stats,
+    } = runner::check_spec(&input).outcome
+    else {
+        panic!("WF_vars(OnlyX) cannot be evaluated: OnlyX leaves y, part of vars, unassigned");
+    };
+    assert!(matches!(phase, ErrorPhase::Liveness), "{phase:?}");
+    assert!(
+        error.message.starts_with("PROPERTY 'FairOnlyX': ") && error.message.contains("y"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        partial_stats
+            .expect("the state search completed")
+            .states_explored,
+        3
+    );
+}
+
+#[test]
 fn check_spec_honors_cfg_check_deadlock_false_when_input_unset() {
     let dir = std::env::temp_dir().join("tla_mcp_cfg_deadlock");
     std::fs::create_dir_all(&dir).unwrap();

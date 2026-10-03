@@ -162,7 +162,8 @@ fn extract_stats(result: &CheckResult) -> Option<&CheckStats> {
         CheckResult::Ok(stats)
         | CheckResult::MaxStatesExceeded(stats)
         | CheckResult::MaxDepthExceeded(stats)
-        | CheckResult::MaxTimeExceeded(stats) => Some(stats),
+        | CheckResult::MaxTimeExceeded(stats)
+        | CheckResult::LivenessError(_, stats) => Some(stats),
         CheckResult::InvariantViolation(_, stats) | CheckResult::LivenessViolation(_, stats) => {
             Some(stats)
         }
@@ -1389,6 +1390,22 @@ fn main() -> ExitCode {
             eprintln!("{}", diag.render_colored(&source, &colors));
             eprintln!("State when error occurred:");
             print!("{}", format_trace(&trace, &spec.vars));
+            ExitCode::FAILURE
+        }
+        CheckResult::LivenessError(error, stats) => {
+            let note = match &error.property {
+                Some(property) => {
+                    format!("error occurred while checking liveness property {property}")
+                }
+                None => "error occurred while checking the fairness constraints for liveness"
+                    .to_string(),
+            };
+            let diag = eval_error_to_diagnostic(&error.error).with_note(note);
+            eprintln!("{}", diag.render_colored(&source, &colors));
+            eprintln!(
+                "The state search completed ({} states) before the error.",
+                stats.states_explored
+            );
             ExitCode::FAILURE
         }
         CheckResult::MaxStatesExceeded(stats) => {
