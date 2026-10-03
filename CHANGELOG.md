@@ -6,6 +6,7 @@
 
 - Priming a defined operator (`Inv'`) evaluates its body in the next state, as TLA+ specifies. The operators it calls are primed in turn, while bound variables and constants keep their meaning. Priming an operator where no next state is in scope is an error naming the operator, rather than a silent reading of the current state.
 - `scenario::build_definitions` is public, so an embedder can build the definition table once and reuse it with `execute_scenario_with`.
+- `scenario::execute_scenario_stuttering` replays a scenario that records only some of the system's steps: between two recorded steps the spec may take up to `max_stutter` transitions of its own, found by breadth-first search. A trace collected from a running program needs this, because instrumentation never sees every step the spec models. `ScenarioResult::stutters` reports how many unobserved transitions the replay took, and a failure says the budget it searched within. `execute_scenario` and `execute_scenario_with` are unchanged: they allow no stuttering.
 
 ### Changed
 
