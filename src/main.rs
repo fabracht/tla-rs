@@ -694,7 +694,7 @@ fn main() -> ExitCode {
                 );
                 println!("  --check-liveness           Check liveness and fairness properties");
                 println!(
-                    "  --liveness-engine <E>      legacy (default) or tableau: check any temporal property as TLC does"
+                    "  --liveness-engine <E>      tableau (default: any temporal property, as TLC) or legacy"
                 );
                 println!(
                     "  --check-refinement ALIAS   Verify Spec => ALIAS!Spec for an INSTANCE alias"

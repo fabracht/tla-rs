@@ -1788,11 +1788,16 @@ fn validate_spec_classifies_properties_for_the_requested_liveness_engine() {
         liveness_engine: engine,
     };
     let tableau = runner::validate_spec(&input(Some(LivenessEngineInput::Tableau)));
-    let legacy = runner::validate_spec(&input(None));
+    let default = runner::validate_spec(&input(None));
+    let legacy = runner::validate_spec(&input(Some(LivenessEngineInput::Legacy)));
     let _ = std::fs::remove_dir_all(&dir);
     assert!(
         matches!(tableau.status, ValidationStatus::Ok),
         "the tableau engine checks a disjunction of [] formulas"
+    );
+    assert!(
+        matches!(default.status, ValidationStatus::Ok),
+        "the tableau engine is the default"
     );
     assert!(
         matches!(legacy.status, ValidationStatus::Error),

@@ -74,8 +74,8 @@ pub struct CheckerConfig {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum LivenessEngine {
-    #[default]
     Legacy,
+    #[default]
     Tableau,
 }
 
