@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.19.1] - 2026-10-04
+
+### Fixed
+
+- A `\/` that begins a line right of the bullet of the junction list it sits in, continuing the item's expression, was rejected as a misaligned bullet ("unexpected `\/`") and the definition holding it was dropped (#155): in `\/ \E o \in Ops : A(o) \/ B(o)` followed by a line `\/ C(o)` indented past the bullet, the third disjunct is part of the quantifier's body. As in SANY, a quantifier body, an `IF` branch or a list item now ends only at a junction at or left of the innermost enclosing bullet, and a `\/` right of its own list's bullet continues the current item. Under a `/\` bullet, such a continued `\/` was also attached outside the quantifier, so its bound variable was undefined; it is now inside.
+
 ## [0.19.0] - 2026-10-04
 
 ### Fixed

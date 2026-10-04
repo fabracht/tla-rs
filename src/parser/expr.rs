@@ -48,34 +48,64 @@ impl Parser {
     }
 
     fn parse_or(&mut self) -> Result<Expr> {
-        let mut list_anchor = None;
-        if *self.peek() == Token::Or {
-            list_anchor = Some(self.current_column());
+        let bullet = if *self.peek() == Token::Or {
+            let column = self.current_column();
             self.advance();
             self.consume_label();
-        }
+            Some(column)
+        } else {
+            None
+        };
+        let mut infix_column = None;
         let mut item_line = self.current_line();
-        let mut left = self.parse_and()?;
+        let mut left = self.parse_or_item(bullet)?;
         while *self.peek() == Token::Or {
-            if let Some(lc) = list_anchor {
-                if self.paren_depth == 0 {
-                    let col = self.current_column();
-                    let line = self.current_line();
-                    if col != lc && line != item_line {
-                        break;
-                    }
+            if self.paren_depth == 0 && self.current_line() != item_line {
+                let column = self.current_column();
+                let ends_list = match (bullet, infix_column, self.list_col_stack.last()) {
+                    (Some(bullet), _, _) => column < bullet,
+                    (None, _, Some(&enclosing)) => column <= enclosing,
+                    (None, Some(infix), None) => column != infix,
+                    (None, None, None) => false,
+                };
+                if ends_list {
+                    break;
                 }
-            } else {
-                list_anchor = Some(self.current_column());
+            }
+            if bullet.is_none() && infix_column.is_none() {
+                infix_column = Some(self.current_column());
             }
             self.advance();
             let label = self.consume_label();
             item_line = self.current_line();
-            let right = self.parse_and()?;
+            let right = self.parse_or_item(bullet)?;
             let right = wrap_with_label(right, label);
             left = Expr::Or(Box::new(left), Box::new(right));
         }
         Ok(left)
+    }
+
+    fn parse_or_item(&mut self, bullet: Option<u32>) -> Result<Expr> {
+        match bullet {
+            Some(column) => {
+                self.list_col_stack.push(column);
+                let item = self.parse_and();
+                self.list_col_stack.pop();
+                item
+            }
+            None => self.parse_and(),
+        }
+    }
+
+    /// Whether the junction at the current token ends a nested body (a quantifier
+    /// body, an `IF` branch) that began at `start_line`/`start_col`: inside a
+    /// junction list, at or left of the innermost bullet column, as in SANY;
+    /// elsewhere, on a later line left of the body's first token.
+    fn ends_nested_body(&self, start_line: u32, start_col: u32) -> bool {
+        match self.list_col_stack.last() {
+            Some(&enclosing) => self.current_column() <= enclosing,
+            None => self.current_line() != start_line && self.current_column() < start_col,
+        }
     }
 
     pub(super) fn parse_and_conjunct(&mut self, list_col: Option<u32>) -> Result<Expr> {
@@ -217,10 +247,7 @@ impl Parser {
         let start_line = self.current_line();
         let mut left = self.parse_single_and()?;
         while *self.peek() == Token::Or {
-            if self.paren_depth == 0
-                && self.current_line() != start_line
-                && self.current_column() < start_col
-            {
+            if self.paren_depth == 0 && self.ends_nested_body(start_line, start_col) {
                 break;
             }
             self.advance();
@@ -256,10 +283,7 @@ impl Parser {
         loop {
             match self.peek() {
                 Token::And => {
-                    if self.paren_depth == 0
-                        && self.current_line() != start_line
-                        && self.current_column() < start_col
-                    {
+                    if self.paren_depth == 0 && self.ends_nested_body(start_line, start_col) {
                         break;
                     }
                     self.advance();
@@ -307,10 +331,7 @@ impl Parser {
         let start_line = self.current_line();
         let mut left = self.parse_quantifier_and()?;
         while *self.peek() == Token::Or {
-            if self.paren_depth == 0
-                && self.current_line() != start_line
-                && self.current_column() < start_col
-            {
+            if self.paren_depth == 0 && self.ends_nested_body(start_line, start_col) {
                 break;
             }
             self.advance();
@@ -327,10 +348,7 @@ impl Parser {
         loop {
             match self.peek() {
                 Token::And => {
-                    if self.paren_depth == 0
-                        && self.current_line() != start_line
-                        && self.current_column() < start_col
-                    {
+                    if self.paren_depth == 0 && self.ends_nested_body(start_line, start_col) {
                         break;
                     }
                     self.advance();
