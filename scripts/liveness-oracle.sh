@@ -3,6 +3,9 @@ set -uo pipefail
 
 # Re-derives the expected verdict of every case in tests/liveness_corpus/manifest.json
 # by running real TLC, and fails if TLC disagrees with the recorded `expected`/`kind`.
+# A case marked `tlc_without_symmetry` is run without its cfg's SYMMETRY line: TLC's
+# symmetry reduction is unsound for liveness, so its verdict without SYMMETRY is the
+# expectation, which tla-rs gives with SYMMETRY.
 # Local-only: CI runs tests/liveness_oracle.rs against the manifest without Java.
 #
 # Usage:
@@ -72,7 +75,11 @@ for id in "${IDS[@]}"; do
   run_dir="$WORK/$id"
   mkdir -p "$run_dir/states"
   cp "$CORPUS"/specs/*.tla "$run_dir"/
-  cp "$cfg" "$run_dir/case.cfg"
+  if [ "$(jq -r '.tlc_without_symmetry // false' <<<"$entry")" = "true" ]; then
+    grep -v '^SYMMETRY' "$cfg" >"$run_dir/case.cfg"
+  else
+    cp "$cfg" "$run_dir/case.cfg"
+  fi
   out="$WORK/$id.out"
   (cd "$run_dir" && java -XX:+UseParallelGC -cp "$TLA2TOOLS" tlc2.TLC -workers 1 -nowarning \
     -cleanup -metadir "$run_dir/states" -config case.cfg "$(basename "$spec")" >"$out" 2>&1)

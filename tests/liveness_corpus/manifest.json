@@ -3839,9 +3839,8 @@
     },
     "tla_rs_now": "violated",
     "tla_rs_now_kind": "liveness",
-    "xfail_until_phase": "symmetry-trace",
-    "note": "SYMMETRY with a per-process leads-to (#129). Known difference: under SYMMETRY the reported counterexample is a sequence of representative states, not always a behavior of the spec; TLC prints a behavior.",
-    "tableau_xfail_until_phase": "symmetry-trace"
+    "xfail_until_phase": null,
+    "note": "SYMMETRY with a per-process leads-to (#129)."
   },
   {
     "id": "C199",
@@ -3860,8 +3859,7 @@
     "tla_rs_now": "error",
     "tla_rs_now_kind": null,
     "xfail_until_phase": "3",
-    "note": "SYMMETRY with an SF obligation quantified over the symmetric set (#129). Known difference: under SYMMETRY the reported counterexample is a sequence of representative states, not always a behavior of the spec; TLC prints a behavior.",
-    "tableau_xfail_until_phase": "symmetry-trace"
+    "note": "SYMMETRY with an SF obligation quantified over the symmetric set (#129)."
   },
   {
     "id": "C200",
@@ -3889,18 +3887,23 @@
     "specification": "SpecSF",
     "property": "StarveFree",
     "property_text": "\\A p \\in P : pc[p] = \"wait\" ~> pc[p] = \"cs\"",
-    "expected": "violated",
-    "kind": "liveness",
+    "expected": "ok",
+    "kind": null,
     "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "SYMMETRY with SF obligations per process. TLC with SYMMETRY reports a violation (its symmetry reduction is unsound for liveness, as it warns); the expectation and `tlc` are TLC's run without SYMMETRY (`tlc_without_symmetry`; scripts/liveness-oracle.sh drops the SYMMETRY line for it), and `tlc_with_symmetry` records TLC's run as written, which tla-rs gives with SYMMETRY by checking liveness on the graph expanded by the symmetry group (#140).",
+    "tlc_without_symmetry": true,
+    "tlc_with_symmetry": {
       "verdict_raw": "Error: Temporal properties were violated.",
       "exit_code": 13,
       "version": "2026.10.01.171037 (rev: cc6d703)"
-    },
-    "tla_rs_now": "violated",
-    "tla_rs_now_kind": "liveness",
-    "xfail_until_phase": "symmetry-trace",
-    "note": "SYMMETRY with a per-process leads-to (#129). Known difference: under SYMMETRY the reported counterexample is a sequence of representative states, not always a behavior of the spec; TLC prints a behavior.",
-    "tableau_xfail_until_phase": "symmetry-trace"
+    }
   },
   {
     "id": "C202",
@@ -4011,10 +4014,34 @@
       "exit_code": 0,
       "version": "2026.10.01.171037 (rev: cc6d703)"
     },
-    "tla_rs_now": "violated",
-    "tla_rs_now_kind": "liveness",
-    "xfail_until_phase": "symmetry-identity",
-    "note": "Known difference: under SYMMETRY a per-process property is checked on representative states, so a cycle of the reduced graph can follow a different process on each lap; tla-rs reports a violation no behavior has, TLC does not.",
-    "tableau_xfail_until_phase": "symmetry-identity"
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "SYMMETRY with a per-process leads-to: checked on the graph expanded by the symmetry group, so a cycle cannot follow a different process on each lap (#140)."
+  },
+  {
+    "id": "C208",
+    "spec": "specs/SymFairIdle.tla",
+    "cfg": "cfgs/C208.cfg",
+    "specification": "Spec",
+    "property": "IdleOften",
+    "property_text": "\\A p \\in P : []<>(pc[p] = \"idle\")",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "SYMMETRY with WF/SF per process and a per-process []<>. TLC with SYMMETRY reports a violation (its symmetry reduction is unsound for liveness); the expectation and `tlc` are TLC's run without SYMMETRY (`tlc_without_symmetry`; scripts/liveness-oracle.sh drops the SYMMETRY line for it), and `tlc_with_symmetry` records TLC's run as written, which tla-rs gives with SYMMETRY on the graph expanded by the symmetry group (#140).",
+    "tlc_without_symmetry": true,
+    "tlc_with_symmetry": {
+      "verdict_raw": "Error: Temporal properties were violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    }
   }
 ]

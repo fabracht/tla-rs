@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.18.0] - 2026-10-03
+
+### Fixed
+
+- Liveness under `SYMMETRY` was checked on the representative states the search keeps, so a property stated per element of a symmetric set (`\A p \in P : pc[p] = "wait" ~> pc[p] = "cs"`) could be reported violated by a cycle that follows a different element on each lap, and a counterexample was a sequence of representatives that need not be a behavior (#140). Liveness is now checked on the graph expanded by the symmetry group: every renaming of every reachable representative, with each step renamed alongside its source, so a reported cycle is a behavior of the specification and the verdict is the one TLC gives without `SYMMETRY`. The state search itself stays reduced. When the expanded graph would exceed `--max-states`, liveness falls back to the representative states with a warning. On 195 specifications with `SYMMETRY`, the tableau engine now gives TLC's verdict without `SYMMETRY` on all of them; TLC with `SYMMETRY` disagreed on four.
+
+### Added
+
+- `symmetry::SymmetryConfig::group` (every renaming of the symmetric sets, up to a limit), `SymmetryConfig::permute` and `symmetry::Permutation`.
+
 ## [0.17.2] - 2026-10-03
 
 ### Fixed
