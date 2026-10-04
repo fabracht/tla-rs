@@ -54,6 +54,8 @@ pub(crate) use self::ast_utils::{
     parameterized_let_op, reaches_temporal, references_state, uses_run_dependent_builtin,
 };
 pub(crate) use self::global_state::with_state_vars;
+pub(crate) use self::helpers::eval_set;
+pub(crate) use self::state::angle_action_enabled_in;
 pub use self::walk::{EngineOverride, set_allow_unassigned_stutter, set_use_inference_engine};
 
 pub(crate) fn resolve_parameterized_defs(

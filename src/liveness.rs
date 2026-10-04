@@ -31,13 +31,106 @@ struct ConstraintTable {
     taken: Vec<Vec<bool>>,
 }
 
+/// What [`FairnessTable::build`] evaluates the fairness constraints against: the
+/// successors outside the `CONSTRAINT` of each state, the spec's variables,
+/// constants and definitions, and its next-state relation when there is one.
+#[derive(Clone, Copy)]
+pub struct FairnessContext<'a> {
+    pub excluded: &'a [Vec<State>],
+    pub vars: &'a [Arc<str>],
+    pub constants: &'a Env,
+    pub defs: &'a Definitions,
+    pub next: Option<&'a Expr>,
+}
+
+/// Past this many definition unfoldings, [`is_sub_action`] gives up.
+const MAX_SUB_ACTION_UNFOLDINGS: usize = 64;
+
+/// Whether every `action` step is a `next` step, judged on syntax: `action` is a
+/// disjunct of `next` (through labels and definitions without parameters), an
+/// instance `B[x := v]` of a disjunct `\E x \in S : B` with `v` an element of the
+/// constant set `S`, a definition without parameters whose body is one, or a
+/// disjunction of such actions. `false` when it cannot tell.
+fn is_sub_action(action: &Expr, next: &Expr, constants: &Env, defs: &Definitions) -> bool {
+    sub_action_within(action, next, constants, defs, 0)
+}
+
+fn sub_action_within(
+    action: &Expr,
+    next: &Expr,
+    constants: &Env,
+    defs: &Definitions,
+    unfoldings: usize,
+) -> bool {
+    if unfoldings > MAX_SUB_ACTION_UNFOLDINGS {
+        return false;
+    }
+    match action {
+        Expr::Or(l, r) => {
+            sub_action_within(l, next, constants, defs, unfoldings)
+                && sub_action_within(r, next, constants, defs, unfoldings)
+        }
+        _ if disjunct_matches(action, next, constants, defs, 0) => true,
+        Expr::Var(name) => match defs.get(name) {
+            Some((params, body)) if params.is_empty() => {
+                sub_action_within(body, next, constants, defs, unfoldings + 1)
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn disjunct_matches(
+    action: &Expr,
+    disjunct: &Expr,
+    constants: &Env,
+    defs: &Definitions,
+    unfoldings: usize,
+) -> bool {
+    if unfoldings > MAX_SUB_ACTION_UNFOLDINGS {
+        return false;
+    }
+    if disjunct == action {
+        return true;
+    }
+    let inner = |inner: &Expr| disjunct_matches(action, inner, constants, defs, unfoldings);
+    match disjunct {
+        Expr::Or(l, r) => inner(l) || inner(r),
+        Expr::LabeledAction(_, labeled) => inner(labeled),
+        Expr::Var(name) => match defs.get(name) {
+            Some((params, body)) if params.is_empty() => {
+                disjunct_matches(action, body, constants, defs, unfoldings + 1)
+            }
+            _ => false,
+        },
+        Expr::Exists(var, domain, body) => {
+            let mut env = constants.clone();
+            match crate::eval::eval_set(domain, &mut env, defs) {
+                Ok(elements) => elements.into_iter().any(|element| {
+                    inner(&crate::substitution::substitute_expr(
+                        body,
+                        &[(var.clone(), Expr::Lit(element))],
+                    ))
+                }),
+                Err(_) => false,
+            }
+        }
+        _ => false,
+    }
+}
+
 /// Enabledness and occurrence of every fairness constraint's `<<A>>_v` step,
 /// evaluated once over the whole graph. `taken[s][e]` holds when the `e`-th edge out
 /// of `s` is an `A` step that changes the subscript `v`, so `WF_x(A)` ignores
 /// `A` steps that leave `x` unchanged and stuttering never counts as taking `A`.
-/// A state enables `<<A>>_v` when one of its explored edges takes it, or when one of
-/// its successors outside the `CONSTRAINT` (`excluded[s]`, never part of a behavior)
-/// would: as in TLC, the constraint prunes behaviors, not enabledness. `taken` is
+/// A state enables `<<A>>_v` when one of its explored edges takes it, when one of its
+/// successors outside the `CONSTRAINT` (`excluded[s]`, never part of a behavior)
+/// would (as in TLC, the constraint prunes behaviors, not enabledness), or, failing
+/// both, when `A` itself has a successor that changes `v`: an action `Next` never
+/// takes is enabled wherever it could be taken, as `ENABLED` says. That last check
+/// is skipped for an `A` provably a sub-action of `Next` ([`is_sub_action`]), whose
+/// every step is an explored edge or a successor outside the `CONSTRAINT`. `taken` is
 /// exact for every edge inside a full-graph SCC, the only edges a fair cycle can
 /// use; edges that leave the SCC are evaluated only until one proves enabledness.
 pub struct FairnessTable {
@@ -53,11 +146,15 @@ impl FairnessTable {
     pub fn build(
         graph: &StateGraph,
         fairness: &[FairnessConstraint],
-        excluded: &[Vec<State>],
-        vars: &[Arc<str>],
-        constants: &Env,
-        defs: &Definitions,
+        context: &FairnessContext<'_>,
     ) -> Result<Self> {
+        let FairnessContext {
+            excluded,
+            vars,
+            constants,
+            defs,
+            next,
+        } = *context;
         let mut constraints = Vec::with_capacity(fairness.len());
         let component_of = if fairness.is_empty() {
             Vec::new()
@@ -69,6 +166,7 @@ impl FairnessTable {
                 FairnessConstraint::Weak(subscript, action) => ("WF", false, subscript, action),
                 FairnessConstraint::Strong(subscript, action) => ("SF", true, subscript, action),
             };
+            let sub_action = next.is_some_and(|next| is_sub_action(action, next, constants, defs));
             let mut bindings = Bindings::new(vars, constants, defs);
             let mut subscript_values = Vec::with_capacity(graph.state_count());
             for state in graph.states.iter() {
@@ -135,6 +233,9 @@ impl FairnessTable {
                             break;
                         }
                     }
+                }
+                if !any && !sub_action {
+                    any = bindings.angle_action_enabled(action, subscript, state)?;
                 }
                 enabled.push(any);
                 taken.push(row);
@@ -514,6 +615,34 @@ impl<'a> Bindings<'a> {
         }
     }
 
+    /// `ENABLED <<action>>_subscript` in `state`, evaluated in this environment; it
+    /// leaves `state` bound and no successor.
+    pub(crate) fn angle_action_enabled(
+        &mut self,
+        action: &Expr,
+        subscript: &Expr,
+        state: &State,
+    ) -> Result<bool> {
+        for primed in &self.primed {
+            self.env.remove(primed);
+        }
+        self.bind(state);
+        let enabled = crate::eval::angle_action_enabled_in(
+            action,
+            subscript,
+            state,
+            self.vars,
+            &self.primed,
+            &mut self.env,
+            self.defs,
+        );
+        for primed in &self.primed {
+            self.env.remove(primed);
+        }
+        self.bind(state);
+        enabled
+    }
+
     pub(crate) fn value(&mut self, expr: &Expr) -> Result<Value> {
         eval(expr, &mut self.env, self.defs)
     }
@@ -654,6 +783,62 @@ mod tests {
         Expr::Eventually(Box::new(e))
     }
 
+    #[test]
+    fn sub_action_is_a_disjunct_of_next_or_an_instance_of_one() {
+        let increment = eq(
+            prime("x"),
+            Expr::Add(Box::new(var("x")), Box::new(var("q"))),
+        );
+        let instance =
+            |p: Expr| Expr::Let(Arc::from("q"), Box::new(p), Box::new(increment.clone()));
+        let definition = |body: Expr| (vec![], Arc::new(body));
+        let defs: Definitions = [
+            (Arc::from("Stutter"), definition(eq(prime("x"), var("x")))),
+            (Arc::from("Jump"), definition(eq(prime("x"), lit(2)))),
+            (
+                Arc::from("Next"),
+                definition(Expr::Or(
+                    Box::new(Expr::Exists(
+                        Arc::from("p"),
+                        Box::new(var("P")),
+                        Box::new(instance(var("p"))),
+                    )),
+                    Box::new(var("Stutter")),
+                )),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let constants: Env = [(
+            Arc::from("P"),
+            Value::set([Value::Int(1), Value::Int(3)].into_iter().collect()),
+        )]
+        .into_iter()
+        .collect();
+        let sub_action = |action: &Expr| is_sub_action(action, &var("Next"), &constants, &defs);
+        let or = |l: Expr, r: Expr| Expr::Or(Box::new(l), Box::new(r));
+        assert!(sub_action(&instance(lit(3))));
+        assert!(sub_action(&var("Stutter")));
+        assert!(sub_action(&or(var("Stutter"), instance(lit(1)))));
+        assert!(!sub_action(&instance(lit(2))), "2 is not in P");
+        assert!(!sub_action(&var("Jump")));
+        assert!(!sub_action(&or(var("Stutter"), var("Jump"))));
+    }
+
+    #[test]
+    fn sub_action_search_is_bounded_by_unfoldings_not_disjuncts() {
+        let step = |n: i64| eq(prime("x"), lit(n));
+        let next = (1..200).fold(step(0), |left, n| {
+            Expr::Or(Box::new(left), Box::new(step(n)))
+        });
+        let defs: Definitions = [(Arc::from("Loop"), (vec![], Arc::new(var("Loop"))))]
+            .into_iter()
+            .collect();
+        let constants = Env::new();
+        assert!(is_sub_action(&step(0), &next, &constants, &defs));
+        assert!(!is_sub_action(&var("Loop"), &step(0), &constants, &defs));
+    }
+
     fn state(values: &[i64]) -> State {
         State {
             values: values.iter().map(|&v| Value::Int(v)).collect(),
@@ -685,12 +870,26 @@ mod tests {
         let vars: Vec<Arc<str>> = vars.iter().map(|&v| Arc::from(v)).collect();
         let constants = Env::new();
         let defs = Definitions::new();
-        let table = FairnessTable::build(graph, fairness, &[], &vars, &constants, &defs).unwrap();
+        let table = FairnessTable::build(
+            graph,
+            fairness,
+            &FairnessContext {
+                excluded: &[],
+                vars: &vars,
+                constants: &constants,
+                defs: &defs,
+                next: None,
+            },
+        )
+        .unwrap();
         find_violation(graph, &table, property, &vars, &constants, &defs).unwrap()
     }
 
-    fn increment() -> Expr {
-        eq(prime("x"), Expr::Add(Box::new(var("x")), Box::new(lit(1))))
+    fn increment_below(bound: i64) -> Expr {
+        and(
+            Expr::Lt(Box::new(var("x")), Box::new(lit(bound))),
+            eq(prime("x"), Expr::Add(Box::new(var("x")), Box::new(lit(1)))),
+        )
     }
 
     #[test]
@@ -713,7 +912,7 @@ mod tests {
     #[test]
     fn leads_to_finds_a_p_state_before_the_fair_cycle() {
         let g = graph(&[(&[0], None), (&[1], Some(0))], &[(0, 1)]);
-        let fairness = [FairnessConstraint::Weak(var("x"), increment())];
+        let fairness = [FairnessConstraint::Weak(var("x"), increment_below(1))];
         let property = Expr::LeadsTo(
             Box::new(eq(var("x"), lit(0))),
             Box::new(eq(var("x"), lit(2))),
@@ -734,7 +933,7 @@ mod tests {
             &[(&[0], None), (&[1], Some(0)), (&[2], Some(1))],
             &[(0, 1), (1, 2)],
         );
-        let fairness = [FairnessConstraint::Weak(var("x"), increment())];
+        let fairness = [FairnessConstraint::Weak(var("x"), increment_below(2))];
         assert_eq!(
             violation(&g, &fairness, &eventually(eq(var("x"), lit(1))), &["x"]),
             None,
@@ -833,7 +1032,18 @@ mod tests {
         let fairness = [FairnessConstraint::Strong(var("x"), a)];
         let vars = [Arc::from("x")];
         let (constants, defs) = (Env::new(), Definitions::new());
-        let table = FairnessTable::build(&g, &fairness, &[], &vars, &constants, &defs).unwrap();
+        let table = FairnessTable::build(
+            &g,
+            &fairness,
+            &FairnessContext {
+                excluded: &[],
+                vars: &vars,
+                constants: &constants,
+                defs: &defs,
+                next: None,
+            },
+        )
+        .unwrap();
         let product = Copies(&g);
 
         let on_states = table.fair_components(&g, &(0..g.state_count()).collect());

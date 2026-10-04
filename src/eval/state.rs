@@ -134,15 +134,38 @@ pub fn is_angle_action_enabled(
     defs: &Definitions,
 ) -> Result<bool> {
     let (mut env, primed_vars) = enabled_env(current, vars, scope);
+    angle_action_enabled_in(
+        action,
+        subscript,
+        current,
+        vars,
+        &primed_vars,
+        &mut env,
+        defs,
+    )
+}
+
+/// [`is_angle_action_enabled`] in an environment the caller prepared: it binds the
+/// variables of `current` and the identifiers in scope, and no primed variable. On
+/// return the variables may be bound to a successor's values instead.
+pub(crate) fn angle_action_enabled_in(
+    action: &Expr,
+    subscript: &Expr,
+    current: &State,
+    vars: &[Arc<str>],
+    primed_vars: &[Arc<str>],
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<bool> {
     let successors: Vec<(State, Vec<usize>)> = if super::walk::walk_enabled() {
-        super::walk::walk_action_successors(action, &mut env, vars, &primed_vars, defs)?
+        super::walk::walk_action_successors(action, env, vars, primed_vars, defs)?
     } else {
-        next_states(action, current, vars, &primed_vars, &mut env, defs)?
+        next_states(action, current, vars, primed_vars, env, defs)?
             .into_iter()
             .map(|transition| (transition.state, Vec::new()))
             .collect()
     };
-    let before = super::eval(subscript, &mut env, defs)?;
+    let before = super::eval(subscript, env, defs)?;
     for (successor, unassigned) in &successors {
         for (index, (var, val)) in vars.iter().zip(&successor.values).enumerate() {
             if unassigned.contains(&index) {
@@ -151,7 +174,7 @@ pub fn is_angle_action_enabled(
                 env.insert(var.clone(), val.clone());
             }
         }
-        let after = super::eval(subscript, &mut env, defs).map_err(|error| {
+        let after = super::eval(subscript, env, defs).map_err(|error| {
             if unassigned.is_empty() {
                 return error;
             }

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.19.0] - 2026-10-04
+
+### Fixed
+
+- The enabledness of a `SPECIFICATION`'s `WF_v(A)`/`SF_v(A)` was read only from the steps of the state graph, so fairness over an action the next-state relation never takes (`Spec == Init /\ [][Next]_x /\ WF_x(Jump)` with `Jump` not part of `Next`) was never enabled, and a stuttering cycle where TLC finds `A` enabled was accepted as fair, reporting a violation TLC does not (#133, corpus C186, both engines). When no step of the graph shows `<<A>>_v` enabled in a state, it is now decided from the action itself, as `ENABLED <<A>>_v`. The fallback is skipped when `A` is syntactically a disjunct of `Next` (or an instance `B[x := c]` of a disjunct `\E x \in S : B` over a constant set `S`), where the graph's steps already decide it, so specifications whose fairness is over parts of `Next` check as fast as before.
+
+### Changed
+
+- `liveness::FairnessTable::build` takes a `liveness::FairnessContext` (excluded successors, variables, constants, definitions and the next-state relation) in place of its separate arguments.
+
 ## [0.18.1] - 2026-10-04
 
 ### Fixed

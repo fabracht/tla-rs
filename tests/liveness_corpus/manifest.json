@@ -3607,11 +3607,10 @@
       "exit_code": 0,
       "version": "2026.10.01.171037 (rev: cc6d703)"
     },
-    "tla_rs_now": "violated",
-    "tla_rs_now_kind": "liveness",
-    "xfail_until_phase": "fairness-enabledness",
-    "note": "Known divergence: WF in the SPECIFICATION over an action Next never takes (always enabled, never taken) makes every behavior unfair in TLC; tla-rs decides the enabledness of SPECIFICATION fairness from the state graph's steps only, so it reports a false alarm.",
-    "tableau_xfail_until_phase": "fairness-enabledness"
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "WF in the SPECIFICATION over an action Next never takes (always enabled, never taken) makes every behavior unfair, as in TLC: the fairness table asks the action itself whether it is enabled where no recorded step takes it (#133)."
   },
   {
     "id": "C187",
