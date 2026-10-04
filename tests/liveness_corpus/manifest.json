@@ -4043,5 +4043,43 @@
       "exit_code": 13,
       "version": "2026.10.01.171037 (rev: cc6d703)"
     }
+  },
+  {
+    "id": "C209",
+    "spec": "specs/EnabledBoxAction.tla",
+    "cfg": "cfgs/C209.cfg",
+    "specification": "Spec",
+    "property": "EnabledBox",
+    "property_text": "[]<>ENABLED [Inc]_vars",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "ENABLED [A]_v, a box action outside [][..]_v, is always TRUE: a stuttering step leaves v unchanged."
+  },
+  {
+    "id": "C210",
+    "spec": "specs/EnabledBoxAction.tla",
+    "cfg": "cfgs/C210.cfg",
+    "specification": "Spec",
+    "property": "NotEnabledBox",
+    "property_text": "<>~ENABLED [Inc]_vars",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property NotEnabledBox was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "<>~ENABLED [A]_v never holds."
   }
 ]

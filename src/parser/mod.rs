@@ -66,6 +66,24 @@ mod tests {
     }
 
     #[test]
+    fn a_box_action_outside_always_is_a_step_or_a_stutter() {
+        let named = parse_expr("[x' > x]_<<x, y>>").unwrap();
+        assert!(
+            matches!(&named, Expr::Or(_, unchanged) if matches!(unchanged.as_ref(), Expr::Unchanged(names) if names.len() == 2)),
+            "{named:?}"
+        );
+        let expression = parse_expr("[x' > x]_(x + y)").unwrap();
+        assert!(
+            matches!(&expression, Expr::Or(_, unchanged) if matches!(unchanged.as_ref(), Expr::Eq(_, _))),
+            "{expression:?}"
+        );
+        assert!(matches!(
+            parse_expr("ENABLED [x' > x]_x").unwrap(),
+            Expr::EnabledOp(_)
+        ));
+    }
+
+    #[test]
     fn parse_primed_var() {
         let expr = parse_expr("x' = x + 1").unwrap();
         assert!(matches!(expr, Expr::Eq(_, _)));
