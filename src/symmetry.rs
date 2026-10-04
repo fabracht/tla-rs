@@ -3,6 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::{State, Value};
 
+/// A renaming of the elements of the symmetric sets, each element to an element of
+/// its own set.
+pub type Permutation = BTreeMap<Value, Value>;
+
 pub struct SymmetryConfig {
     symmetric_sets: Vec<BTreeSet<Value>>,
 }
@@ -22,6 +26,40 @@ impl SymmetryConfig {
 
     pub fn is_empty(&self) -> bool {
         self.symmetric_sets.is_empty()
+    }
+
+    /// Every renaming that permutes each symmetric set within itself: the group
+    /// whose orbits symmetry reduction represents by one state each. `None` when
+    /// it has more than `limit` elements.
+    pub fn group(&self, limit: usize) -> Option<Vec<Permutation>> {
+        let order = self.symmetric_sets.iter().try_fold(1usize, |order, set| {
+            (1..=set.len()).try_fold(order, |acc, n| acc.checked_mul(n))
+        })?;
+        if order > limit {
+            return None;
+        }
+        let mut group = vec![Permutation::new()];
+        for set in &self.symmetric_sets {
+            let elements: Vec<Value> = set.iter().cloned().collect();
+            let arrangements = arrangements(&elements);
+            let elements = &elements;
+            group = group
+                .iter()
+                .flat_map(|partial| {
+                    arrangements.iter().map(move |images| {
+                        let mut renaming = partial.clone();
+                        renaming.extend(elements.iter().cloned().zip(images.iter().cloned()));
+                        renaming
+                    })
+                })
+                .collect();
+        }
+        Some(group)
+    }
+
+    /// `state` with every element of the symmetric sets renamed by `permutation`.
+    pub fn permute(&self, state: &State, permutation: &Permutation) -> State {
+        self.apply_mapping(state, permutation)
     }
 
     pub fn canonicalize<'a>(&self, state: &'a State) -> Cow<'a, State> {
@@ -170,6 +208,23 @@ impl SymmetryConfig {
     }
 }
 
+/// Every ordering of `elements`.
+fn arrangements(elements: &[Value]) -> Vec<Vec<Value>> {
+    if elements.is_empty() {
+        return vec![Vec::new()];
+    }
+    (0..elements.len())
+        .flat_map(|first| {
+            let mut rest = elements.to_vec();
+            let head = rest.remove(first);
+            arrangements(&rest).into_iter().map(move |mut tail| {
+                tail.insert(0, head.clone());
+                tail
+            })
+        })
+        .collect()
+}
+
 impl Default for SymmetryConfig {
     fn default() -> Self {
         Self::new()
@@ -305,5 +360,42 @@ mod tests {
         } else {
             panic!("expected Set value");
         }
+    }
+
+    #[test]
+    fn group_holds_every_renaming_of_each_set() {
+        let mut config = SymmetryConfig::new();
+        config.add_symmetric_set([mv("a"), mv("b"), mv("c")].into_iter().collect());
+        config.add_symmetric_set([mv("x"), mv("y")].into_iter().collect());
+        let group = config.group(100).expect("12 renamings");
+        assert_eq!(group.len(), 12);
+        let distinct: BTreeSet<_> = group.iter().collect();
+        assert_eq!(distinct.len(), 12, "no renaming repeats");
+        assert!(
+            group.iter().all(|p| p.len() == 5),
+            "each renames all five elements"
+        );
+        assert!(
+            group
+                .iter()
+                .all(|p| p[&mv("x")] != mv("a") && p[&mv("a")] != mv("x")),
+            "elements stay within their own set"
+        );
+        assert!(config.group(11).is_none(), "more than the limit");
+    }
+
+    #[test]
+    fn permute_renames_elements_wherever_they_occur() {
+        let mut config = SymmetryConfig::new();
+        config.add_symmetric_set([mv("a"), mv("b")].into_iter().collect());
+        let swap: Permutation = [(mv("a"), mv("b")), (mv("b"), mv("a"))]
+            .into_iter()
+            .collect();
+        let state = State {
+            values: vec![mv("a"), Value::tuple(vec![mv("b"), str_val("a")])],
+        };
+        let renamed = config.permute(&state, &swap);
+        assert_eq!(renamed.values[0], mv("b"));
+        assert_eq!(renamed.values[1], Value::tuple(vec![mv("a"), str_val("a")]));
     }
 }
