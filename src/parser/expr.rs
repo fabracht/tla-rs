@@ -912,7 +912,7 @@ impl Parser {
     /// call left uninlined (to a `RECURSIVE` operator or an `INSTANCE`'s operator,
     /// say) is evaluated whole in the next state: priming its arguments alone would
     /// leave its body reading the current one.
-    fn prime_distribute(&self, expr: &Expr, bound: &mut Vec<Arc<str>>) -> Expr {
+    pub(super) fn prime_distribute(&self, expr: &Expr, bound: &mut Vec<Arc<str>>) -> Expr {
         use Expr::*;
         let un = |e: &Expr, b: &mut Vec<Arc<str>>| Box::new(self.prime_distribute(e, b));
         let binder = |s: &Self, n: &Arc<str>, dom: &Expr, body: &Expr, b: &mut Vec<Arc<str>>| {

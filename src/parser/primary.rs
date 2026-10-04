@@ -379,6 +379,11 @@ impl Parser {
             self.pos = start_pos;
         } else if *self.peek() == Token::RBracket {
             self.advance();
+            if *self.peek() == Token::Underscore {
+                self.advance();
+                let subscript = self.parse_subscript()?;
+                return Ok(self.box_action_step(first, subscript));
+            }
             return Ok(first);
         } else {
             self.expect(Token::RBracket)?;
@@ -443,6 +448,29 @@ impl Parser {
 
     /// The subscript after `_` in `[A]_v`, `<<A>>_v`, `WF_v` and `SF_v`: a variable
     /// or definition name, or a parenthesized expression, tuple or record.
+    /// `[A]_v` as an action: an `A` step, or one that leaves `v` unchanged.
+    fn box_action_step(&self, action: Expr, subscript: Expr) -> Expr {
+        let names: Option<Vec<Arc<str>>> = match &subscript {
+            Expr::Var(name) => Some(vec![name.clone()]),
+            Expr::TupleLit(items) => items
+                .iter()
+                .map(|item| match item {
+                    Expr::Var(name) => Some(name.clone()),
+                    _ => None,
+                })
+                .collect(),
+            _ => None,
+        };
+        let unchanged = match names {
+            Some(names) => Expr::Unchanged(names),
+            None => Expr::Eq(
+                Box::new(self.prime_distribute(&subscript, &mut Vec::new())),
+                Box::new(subscript),
+            ),
+        };
+        Expr::Or(Box::new(action), Box::new(unchanged))
+    }
+
     pub(super) fn parse_subscript(&mut self) -> Result<Expr> {
         match self.peek() {
             Token::Ident(_) => Ok(Expr::Var(self.expect_ident()?)),

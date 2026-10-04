@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.1] - 2026-10-04
+
+### Fixed
+
+- `[A]_v` outside `[][A]_v`, such as `ENABLED [A]_v` or a property `[][[A]_v]_w`, failed to parse ("unexpected `_`") and the definition holding it was dropped (#136). It now parses as the action `A \/ UNCHANGED v` (`A \/ v' = v` for a subscript that is not a variable or a tuple of them), so `ENABLED [A]_v` is TRUE, as in TLC.
+
 ## [0.18.0] - 2026-10-03
 
 ### Fixed
