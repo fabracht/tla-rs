@@ -40,6 +40,32 @@ mod tests {
     }
 
     #[test]
+    fn postfix_operators_follow_a_builtin_application() {
+        let (spec, warnings) = parse_with_warnings(
+            "---- MODULE M ----\nEXTENDS Sequences\nVARIABLES s, r\n\
+             Primed == Len(s)'\nIndexed == Head(s)[2]\nField == Head(r).a\n====\n",
+        )
+        .unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let body = |name: &str| spec.definitions.get(name).map(|(_, b)| (**b).clone());
+        assert!(
+            matches!(body("Primed"), Some(Expr::Len(inner)) if matches!(*inner, Expr::Prime(_))),
+            "Len(s)' is Len(s'): {:?}",
+            body("Primed")
+        );
+        assert!(
+            matches!(body("Indexed"), Some(Expr::TupleAccess(inner, 1)) if matches!(*inner, Expr::Head(_))),
+            "{:?}",
+            body("Indexed")
+        );
+        assert!(
+            matches!(body("Field"), Some(Expr::RecordAccess(inner, ref field)) if matches!(*inner, Expr::Head(_)) && field.as_ref() == "a"),
+            "{:?}",
+            body("Field")
+        );
+    }
+
+    #[test]
     fn parse_primed_var() {
         let expr = parse_expr("x' = x + 1").unwrap();
         assert!(matches!(expr, Expr::Eq(_, _)));
@@ -47,7 +73,6 @@ mod tests {
 
     #[test]
     fn prime_distributes_over_defined_operator() {
-        // `NN'` (a zero-arg op inlined to `x >= 0`) primes to `x' >= 0`.
         let (spec, _) =
             parse_with_warnings("---- MODULE M ----\nVARIABLES x\nNN == x >= 0\nP == NN'\n====\n")
                 .unwrap();
@@ -89,7 +114,6 @@ mod tests {
 
     #[test]
     fn line_and_column_from_byte_offset() {
-        // "ab\ncde\nf": line starts at bytes 0, 3, 7.
         let parser = Parser::new("ab\ncde\nf").unwrap();
         let at = |o| (parser.line_of(o), parser.column_of(o));
         assert_eq!(at(0), (0, 0));

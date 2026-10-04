@@ -617,35 +617,35 @@ impl Parser {
                 self.expect(Token::LParen)?;
                 let expr = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::Cardinality(Box::new(expr)))
+                self.parse_postfix_ops(Expr::Cardinality(Box::new(expr)))
             }
             Token::IsFiniteSet => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let expr = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::IsFiniteSet(Box::new(expr)))
+                self.parse_postfix_ops(Expr::IsFiniteSet(Box::new(expr)))
             }
             Token::Len => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let expr = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::Len(Box::new(expr)))
+                self.parse_postfix_ops(Expr::Len(Box::new(expr)))
             }
             Token::Head => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let expr = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::Head(Box::new(expr)))
+                self.parse_postfix_ops(Expr::Head(Box::new(expr)))
             }
             Token::Tail => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let expr = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::Tail(Box::new(expr)))
+                self.parse_postfix_ops(Expr::Tail(Box::new(expr)))
             }
             Token::Append => {
                 self.advance();
@@ -654,7 +654,7 @@ impl Parser {
                 self.expect(Token::Comma)?;
                 let elem = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::Append(Box::new(seq), Box::new(elem)))
+                self.parse_postfix_ops(Expr::Append(Box::new(seq), Box::new(elem)))
             }
             Token::SubSeq => {
                 self.advance();
@@ -665,7 +665,7 @@ impl Parser {
                 self.expect(Token::Comma)?;
                 let end = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::SubSeq(Box::new(seq), Box::new(start), Box::new(end)))
+                self.parse_postfix_ops(Expr::SubSeq(Box::new(seq), Box::new(start), Box::new(end)))
             }
             Token::SelectSeq => {
                 self.advance();
@@ -674,14 +674,14 @@ impl Parser {
                 self.expect(Token::Comma)?;
                 let test = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::SelectSeq(Box::new(seq), Box::new(test)))
+                self.parse_postfix_ops(Expr::SelectSeq(Box::new(seq), Box::new(test)))
             }
             Token::Seq => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let domain = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::SeqSet(Box::new(domain)))
+                self.parse_postfix_ops(Expr::SeqSet(Box::new(domain)))
             }
             Token::Print => {
                 self.advance();
@@ -690,7 +690,7 @@ impl Parser {
                 self.expect(Token::Comma)?;
                 let expr = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::Print(Box::new(val), Box::new(expr)))
+                self.parse_postfix_ops(Expr::Print(Box::new(val), Box::new(expr)))
             }
             Token::Assert => {
                 self.advance();
@@ -699,22 +699,22 @@ impl Parser {
                 self.expect(Token::Comma)?;
                 let msg = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::Assert(Box::new(cond), Box::new(msg)))
+                self.parse_postfix_ops(Expr::Assert(Box::new(cond), Box::new(msg)))
             }
             Token::JavaTime => {
                 self.advance();
-                Ok(Expr::JavaTime)
+                self.parse_postfix_ops(Expr::JavaTime)
             }
             Token::SystemTime => {
                 self.advance();
-                Ok(Expr::SystemTime)
+                self.parse_postfix_ops(Expr::SystemTime)
             }
             Token::Permutations => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let set = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::Permutations(Box::new(set)))
+                self.parse_postfix_ops(Expr::Permutations(Box::new(set)))
             }
             Token::SortSeq => {
                 self.advance();
@@ -723,35 +723,35 @@ impl Parser {
                 self.expect(Token::Comma)?;
                 let cmp = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::SortSeq(Box::new(seq), Box::new(cmp)))
+                self.parse_postfix_ops(Expr::SortSeq(Box::new(seq), Box::new(cmp)))
             }
             Token::PrintT => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let val = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::PrintT(Box::new(val)))
+                self.parse_postfix_ops(Expr::PrintT(Box::new(val)))
             }
             Token::TLCToString => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let val = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::TLCToString(Box::new(val)))
+                self.parse_postfix_ops(Expr::TLCToString(Box::new(val)))
             }
             Token::RandomElement => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let set = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::RandomElement(Box::new(set)))
+                self.parse_postfix_ops(Expr::RandomElement(Box::new(set)))
             }
             Token::TLCGet => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let idx = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::TLCGet(Box::new(idx)))
+                self.parse_postfix_ops(Expr::TLCGet(Box::new(idx)))
             }
             Token::TLCSet => {
                 self.advance();
@@ -760,39 +760,39 @@ impl Parser {
                 self.expect(Token::Comma)?;
                 let val = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::TLCSet(Box::new(idx), Box::new(val)))
+                self.parse_postfix_ops(Expr::TLCSet(Box::new(idx), Box::new(val)))
             }
             Token::Any => {
                 self.advance();
-                Ok(Expr::Any)
+                self.parse_postfix_ops(Expr::Any)
             }
             Token::TLCEval => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let val = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::TLCEval(Box::new(val)))
+                self.parse_postfix_ops(Expr::TLCEval(Box::new(val)))
             }
             Token::IsABag => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let bag = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::IsABag(Box::new(bag)))
+                self.parse_postfix_ops(Expr::IsABag(Box::new(bag)))
             }
             Token::BagToSet => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let bag = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::BagToSet(Box::new(bag)))
+                self.parse_postfix_ops(Expr::BagToSet(Box::new(bag)))
             }
             Token::SetToBag => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let set = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::SetToBag(Box::new(set)))
+                self.parse_postfix_ops(Expr::SetToBag(Box::new(set)))
             }
             Token::BagIn => {
                 self.advance();
@@ -801,25 +801,25 @@ impl Parser {
                 self.expect(Token::Comma)?;
                 let bag = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::BagIn(Box::new(elem), Box::new(bag)))
+                self.parse_postfix_ops(Expr::BagIn(Box::new(elem), Box::new(bag)))
             }
             Token::EmptyBag => {
                 self.advance();
-                Ok(Expr::EmptyBag)
+                self.parse_postfix_ops(Expr::EmptyBag)
             }
             Token::BagUnion => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let bags = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::BagUnion(Box::new(bags)))
+                self.parse_postfix_ops(Expr::BagUnion(Box::new(bags)))
             }
             Token::SubBag => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let bag = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::SubBag(Box::new(bag)))
+                self.parse_postfix_ops(Expr::SubBag(Box::new(bag)))
             }
             Token::BagOfAll => {
                 self.advance();
@@ -828,14 +828,14 @@ impl Parser {
                 self.expect(Token::Comma)?;
                 let bag = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::BagOfAll(Box::new(expr), Box::new(bag)))
+                self.parse_postfix_ops(Expr::BagOfAll(Box::new(expr), Box::new(bag)))
             }
             Token::BagCardinality => {
                 self.advance();
                 self.expect(Token::LParen)?;
                 let bag = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::BagCardinality(Box::new(bag)))
+                self.parse_postfix_ops(Expr::BagCardinality(Box::new(bag)))
             }
             Token::CopiesIn => {
                 self.advance();
@@ -844,7 +844,7 @@ impl Parser {
                 self.expect(Token::Comma)?;
                 let bag = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(Expr::CopiesIn(Box::new(elem), Box::new(bag)))
+                self.parse_postfix_ops(Expr::CopiesIn(Box::new(elem), Box::new(bag)))
             }
             Token::Unchanged => {
                 self.advance();
@@ -1131,7 +1131,13 @@ impl Parser {
     }
 
     fn parse_postfix(&mut self) -> Result<Expr> {
-        let mut expr = self.parse_primary()?;
+        let expr = self.parse_primary()?;
+        self.parse_postfix_ops(expr)
+    }
+
+    /// The primes, function applications `[e]` and record accesses `.f` that
+    /// follow `expr`, applied left to right.
+    fn parse_postfix_ops(&mut self, mut expr: Expr) -> Result<Expr> {
         loop {
             match self.peek() {
                 Token::Prime => {
