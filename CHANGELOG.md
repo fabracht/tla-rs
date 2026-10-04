@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.17.1] - 2026-10-03
+
+### Fixed
+
+- Priming a call the parser does not inline, such as one to a `RECURSIVE` operator, primed only its arguments, so the operator's body read the current state: `[][x' = 2 => ~Below(1)']_v` reported a violation TLC does not (#144). The whole call is now evaluated in the next state, as a guard or a value in the next-state relation too. Priming an `INSTANCE`'s operator (`I!Op(args)'`) primed the instance's name and failed to evaluate; it is now evaluated in the next state as well.
+
 ## [0.17.0] - 2026-10-03
 
 ### Added

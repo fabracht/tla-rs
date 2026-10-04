@@ -908,7 +908,10 @@ impl Parser {
     /// Distribute a prime over an expression: `(x >= 0)'` becomes `x' >= 0`.
     /// Every state-variable leaf is primed; constants and quantifier/`LET`-bound
     /// names are left rigid. Zero-arg operators are already inlined at their use
-    /// sites, so `NonNegative'` reaches here as its body and primes correctly.
+    /// sites, so `NonNegative'` reaches here as its body and primes correctly. A
+    /// call left uninlined (to a `RECURSIVE` operator or an `INSTANCE`'s operator,
+    /// say) is evaluated whole in the next state: priming its arguments alone would
+    /// leave its body reading the current one.
     fn prime_distribute(&self, expr: &Expr, bound: &mut Vec<Arc<str>>) -> Expr {
         use Expr::*;
         let un = |e: &Expr, b: &mut Vec<Arc<str>>| Box::new(self.prime_distribute(e, b));
@@ -1106,19 +1109,8 @@ impl Parser {
                     })
                     .collect(),
             ),
-            FnCall(name, args) => FnCall(
-                name.clone(),
-                args.iter()
-                    .map(|a| self.prime_distribute(a, bound))
-                    .collect(),
-            ),
-            QualifiedCall(inst, op, args) => QualifiedCall(
-                un(inst, bound),
-                op.clone(),
-                args.iter()
-                    .map(|a| self.prime_distribute(a, bound))
-                    .collect(),
-            ),
+            FnCall(_, _) => primed_application(expr),
+            QualifiedCall(_, _, _) => primed_application(expr),
             Case(branches) => Case(
                 branches
                     .iter()
@@ -1209,4 +1201,22 @@ pub(super) fn wrap_with_label(expr: Expr, label: Option<Arc<str>>) -> Expr {
         Some(name) => Expr::LabeledAction(name, Box::new(expr)),
         None => expr,
     }
+}
+
+/// `Op(args)'` (or `I!Op(args)'`) as `LET $primed == Op(args) IN $primed'`: priming an operator with
+/// no parameters evaluates its body in the next state, the arguments and every
+/// state variable the operator reads included. `$` cannot appear in an identifier,
+/// so the name shadows nothing a spec defines.
+fn primed_application(call: &Expr) -> Expr {
+    let name: Arc<str> = Arc::from("$primed");
+    let operator = Expr::Let(
+        Arc::from("_params"),
+        Box::new(Expr::TupleLit(Vec::new())),
+        Box::new(call.clone()),
+    );
+    Expr::Let(
+        name.clone(),
+        Box::new(operator),
+        Box::new(Expr::Prime(name)),
+    )
 }
