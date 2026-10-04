@@ -1814,16 +1814,16 @@ fn check_liveness_properties(
     }
 
     let fairness = expand_fairness(spec, domains, defs).map_err(LivenessError::fairness)?;
+    let fairness_context = liveness::FairnessContext {
+        excluded: excluded_successors,
+        vars: &spec.vars,
+        constants: domains,
+        defs,
+        next: spec.next.as_ref(),
+    };
     if config.liveness_engine == LivenessEngine::Tableau {
-        let table = liveness::FairnessTable::build(
-            &graph,
-            &fairness,
-            excluded_successors,
-            &spec.vars,
-            domains,
-            defs,
-        )
-        .map_err(LivenessError::fairness)?;
+        let table = liveness::FairnessTable::build(&graph, &fairness, &fairness_context)
+            .map_err(LivenessError::fairness)?;
         return tableau_liveness(
             spec,
             domains,
@@ -1845,15 +1845,8 @@ fn check_liveness_properties(
         )
         .map_err(LivenessError::property(&property.name))?;
     }
-    let table = liveness::FairnessTable::build(
-        &graph,
-        &fairness,
-        excluded_successors,
-        &spec.vars,
-        domains,
-        defs,
-    )
-    .map_err(LivenessError::fairness)?;
+    let table = liveness::FairnessTable::build(&graph, &fairness, &fairness_context)
+        .map_err(LivenessError::fairness)?;
 
     for (name, property) in &liveness_properties {
         if time_exceeded() {

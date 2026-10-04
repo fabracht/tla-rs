@@ -434,6 +434,7 @@ mod tests {
     use super::*;
     use crate::ast::{State, Value};
     use crate::eval::eval;
+    use crate::liveness::FairnessContext;
 
     fn x() -> Expr {
         Expr::Var(Arc::from("x"))
@@ -543,9 +544,18 @@ mod tests {
         }
 
         fn search(&self, graph: &StateGraph, formula: &Ltl) -> Option<LassoIndices> {
-            let table =
-                FairnessTable::build(graph, &[], &[], &self.vars, &self.constants, &self.defs)
-                    .unwrap();
+            let table = FairnessTable::build(
+                graph,
+                &[],
+                &FairnessContext {
+                    excluded: &[],
+                    vars: &self.vars,
+                    constants: &self.constants,
+                    defs: &self.defs,
+                    next: None,
+                },
+            )
+            .unwrap();
             let compiled = compile(formula, &self.atoms).unwrap();
             match find_behavior(
                 graph,
@@ -707,10 +717,13 @@ mod tests {
             let table = FairnessTable::build(
                 &graph,
                 &fairness,
-                &[],
-                &fixture.vars,
-                &fixture.constants,
-                &fixture.defs,
+                &FairnessContext {
+                    excluded: &[],
+                    vars: &fixture.vars,
+                    constants: &fixture.constants,
+                    defs: &fixture.defs,
+                    next: None,
+                },
             )
             .unwrap();
             let lit = |atom: usize, positive: bool| Ltl::Literal(Literal { atom, positive });
