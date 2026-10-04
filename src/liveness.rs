@@ -43,8 +43,8 @@ pub struct FairnessContext<'a> {
     pub next: Option<&'a Expr>,
 }
 
-/// Past this depth of disjunctions, labels and definitions, [`is_sub_action`] gives up.
-const MAX_SUB_ACTION_DEPTH: usize = 64;
+/// Past this many definition unfoldings, [`is_sub_action`] gives up.
+const MAX_SUB_ACTION_UNFOLDINGS: usize = 64;
 
 /// Whether every `action` step is a `next` step, judged on syntax: `action` is a
 /// disjunct of `next` (through labels and definitions without parameters), an
@@ -52,13 +52,29 @@ const MAX_SUB_ACTION_DEPTH: usize = 64;
 /// constant set `S`, a definition without parameters whose body is one, or a
 /// disjunction of such actions. `false` when it cannot tell.
 fn is_sub_action(action: &Expr, next: &Expr, constants: &Env, defs: &Definitions) -> bool {
+    sub_action_within(action, next, constants, defs, 0)
+}
+
+fn sub_action_within(
+    action: &Expr,
+    next: &Expr,
+    constants: &Env,
+    defs: &Definitions,
+    unfoldings: usize,
+) -> bool {
+    if unfoldings > MAX_SUB_ACTION_UNFOLDINGS {
+        return false;
+    }
     match action {
         Expr::Or(l, r) => {
-            is_sub_action(l, next, constants, defs) && is_sub_action(r, next, constants, defs)
+            sub_action_within(l, next, constants, defs, unfoldings)
+                && sub_action_within(r, next, constants, defs, unfoldings)
         }
         _ if disjunct_matches(action, next, constants, defs, 0) => true,
         Expr::Var(name) => match defs.get(name) {
-            Some((params, body)) if params.is_empty() => is_sub_action(body, next, constants, defs),
+            Some((params, body)) if params.is_empty() => {
+                sub_action_within(body, next, constants, defs, unfoldings + 1)
+            }
             _ => false,
         },
         _ => false,
@@ -70,27 +86,29 @@ fn disjunct_matches(
     disjunct: &Expr,
     constants: &Env,
     defs: &Definitions,
-    depth: usize,
+    unfoldings: usize,
 ) -> bool {
-    if depth > MAX_SUB_ACTION_DEPTH {
+    if unfoldings > MAX_SUB_ACTION_UNFOLDINGS {
         return false;
     }
     if disjunct == action {
         return true;
     }
-    let deeper = |inner: &Expr| disjunct_matches(action, inner, constants, defs, depth + 1);
+    let inner = |inner: &Expr| disjunct_matches(action, inner, constants, defs, unfoldings);
     match disjunct {
-        Expr::Or(l, r) => deeper(l) || deeper(r),
-        Expr::LabeledAction(_, inner) => deeper(inner),
+        Expr::Or(l, r) => inner(l) || inner(r),
+        Expr::LabeledAction(_, labeled) => inner(labeled),
         Expr::Var(name) => match defs.get(name) {
-            Some((params, body)) if params.is_empty() => deeper(body),
+            Some((params, body)) if params.is_empty() => {
+                disjunct_matches(action, body, constants, defs, unfoldings + 1)
+            }
             _ => false,
         },
         Expr::Exists(var, domain, body) => {
             let mut env = constants.clone();
             match crate::eval::eval_set(domain, &mut env, defs) {
                 Ok(elements) => elements.into_iter().any(|element| {
-                    deeper(&crate::substitution::substitute_expr(
+                    inner(&crate::substitution::substitute_expr(
                         body,
                         &[(var.clone(), Expr::Lit(element))],
                     ))
@@ -805,6 +823,20 @@ mod tests {
         assert!(!sub_action(&instance(lit(2))), "2 is not in P");
         assert!(!sub_action(&var("Jump")));
         assert!(!sub_action(&or(var("Stutter"), var("Jump"))));
+    }
+
+    #[test]
+    fn sub_action_search_is_bounded_by_unfoldings_not_disjuncts() {
+        let step = |n: i64| eq(prime("x"), lit(n));
+        let next = (1..200).fold(step(0), |left, n| {
+            Expr::Or(Box::new(left), Box::new(step(n)))
+        });
+        let defs: Definitions = [(Arc::from("Loop"), (vec![], Arc::new(var("Loop"))))]
+            .into_iter()
+            .collect();
+        let constants = Env::new();
+        assert!(is_sub_action(&step(0), &next, &constants, &defs));
+        assert!(!is_sub_action(&var("Loop"), &step(0), &constants, &defs));
     }
 
     fn state(values: &[i64]) -> State {
