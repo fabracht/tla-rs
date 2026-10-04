@@ -1519,6 +1519,29 @@ struct LivenessContext<'a> {
     symmetry: &'a SymmetryConfig,
 }
 
+/// The graph a symmetry-reduced search explored: representative states, their
+/// parents, the steps recorded from each, the states those steps actually reached
+/// where symmetry renamed them, and the successors outside the `CONSTRAINT`.
+#[derive(Clone, Copy)]
+struct ReducedGraph<'a> {
+    states: &'a IndexSet<State>,
+    parent: &'a [Option<usize>],
+    all_edges: &'a [EdgeList],
+    renamed_successors: &'a HashMap<(usize, usize), State>,
+    excluded_successors: &'a [Vec<State>],
+}
+
+/// Why liveness under `SYMMETRY` cannot run on the expanded graph.
+enum ExpansionFailure {
+    /// The expanded graph would exceed `--max-states`.
+    TooLarge,
+    /// A recorded successor is not a renaming of the representative it was stored
+    /// as, so the expansion cannot rename the step.
+    NotARenaming,
+    /// The time budget ran out while the graph was expanded.
+    OutOfTime,
+}
+
 /// The state graph a symmetry-reduced search stands for: every renaming of every
 /// reachable representative state, reached from the renamed initial states, with
 /// each recorded step renamed alongside its source.
@@ -1535,28 +1558,46 @@ struct SymmetryExpansion {
 /// representatives need not be a behavior. A representative `c` stands for every
 /// `ρ(c)`, whose successors are `ρ(t)` for the states `t` its recorded steps reach;
 /// a step whose successor was renamed to its representative `r` reached `σ(r)`, so
-/// `ρ(c)` steps to `(ρ∘σ)(r)`. `None` when the expanded graph would exceed `limit`
-/// states, or a renamed successor is not a renaming of its representative.
+/// `ρ(c)` steps to `(ρ∘σ)(r)`.
 fn expand_by_symmetry(
     symmetry: &SymmetryConfig,
-    states: &IndexSet<State>,
-    parent: &[Option<usize>],
-    all_edges: &[EdgeList],
-    renamed_successors: &HashMap<(usize, usize), State>,
-    excluded_successors: &[Vec<State>],
+    reduced: &ReducedGraph<'_>,
     limit: usize,
-) -> Option<SymmetryExpansion> {
-    let group = symmetry.group(limit / states.len().max(1))?;
+    time_exceeded: &dyn Fn() -> bool,
+) -> Result<SymmetryExpansion, ExpansionFailure> {
+    use ExpansionFailure::{NotARenaming, OutOfTime, TooLarge};
+    let ReducedGraph {
+        states,
+        parent,
+        all_edges,
+        renamed_successors,
+        excluded_successors,
+    } = *reduced;
+    let group = symmetry
+        .group(limit / states.len().max(1))
+        .ok_or(TooLarge)?;
     let position: HashMap<&crate::symmetry::Permutation, usize> =
         group.iter().enumerate().map(|(i, p)| (p, i)).collect();
-    let identity = group.iter().position(|p| p.iter().all(|(k, v)| k == v))?;
+    let identity = group
+        .iter()
+        .position(|p| p.iter().all(|(k, v)| k == v))
+        .ok_or(NotARenaming)?;
     let mut renaming: HashMap<(usize, usize), usize> = HashMap::new();
     for (&(from, edge), reached) in renamed_successors {
-        let representative = states.get_index(all_edges.get(from)?.get(edge)?.0)?;
+        if time_exceeded() {
+            return Err(OutOfTime);
+        }
+        let target = all_edges
+            .get(from)
+            .and_then(|edges| edges.get(edge))
+            .ok_or(NotARenaming)?
+            .0;
+        let representative = states.get_index(target).ok_or(NotARenaming)?;
         let reached = symmetry.permute(reached, &group[identity]);
         let sigma = group
             .iter()
-            .position(|p| symmetry.permute(representative, p) == reached)?;
+            .position(|p| symmetry.permute(representative, p) == reached)
+            .ok_or(NotARenaming)?;
         renaming.insert((from, edge), sigma);
     }
     let compose = |outer: usize, inner: usize| -> Option<usize> {
@@ -1591,17 +1632,26 @@ fn expand_by_symmetry(
     }
     while let Some(node) = queue.pop_front() {
         if expansion.states.len() > limit {
-            return None;
+            return Err(TooLarge);
+        }
+        if time_exceeded() {
+            return Err(OutOfTime);
         }
         let (representative, rho) = origin[node];
         let mut edges = Vec::new();
-        for (edge, (target, action)) in all_edges.get(representative)?.iter().enumerate() {
+        for (edge, (target, action)) in all_edges
+            .get(representative)
+            .ok_or(NotARenaming)?
+            .iter()
+            .enumerate()
+        {
             let sigma = renaming
                 .get(&(representative, edge))
                 .copied()
                 .unwrap_or(identity);
-            let permutation = compose(rho, sigma)?;
-            let successor = symmetry.permute(states.get_index(*target)?, &group[permutation]);
+            let permutation = compose(rho, sigma).ok_or(NotARenaming)?;
+            let representative_target = states.get_index(*target).ok_or(NotARenaming)?;
+            let successor = symmetry.permute(representative_target, &group[permutation]);
             let index = add_expanded(
                 &mut expansion,
                 &mut origin,
@@ -1620,7 +1670,7 @@ fn expand_by_symmetry(
             .map(|state| symmetry.permute(state, &group[rho]))
             .collect();
     }
-    Some(expansion)
+    Ok(expansion)
 }
 
 /// Adds `state` to the expansion, reached from `from`, as the renaming `source.1` of
@@ -1669,24 +1719,37 @@ fn check_liveness_properties(
     let expansion = if symmetry.is_empty() {
         None
     } else {
-        let expansion = expand_by_symmetry(
-            symmetry,
+        let reduced = ReducedGraph {
             states,
             parent,
             all_edges,
             renamed_successors,
             excluded_successors,
-            config.max_states,
-        );
-        if expansion.is_none() && !config.quiet {
-            eprintln!(
-                "  Warning: liveness under SYMMETRY is checked on representative states: \
-                 the graph without symmetry reduction would exceed --max-states, so a \
-                 property stated per element of a symmetric set may be reported violated \
-                 when it is not, and a counterexample may not be a behavior"
-            );
+        };
+        match expand_by_symmetry(symmetry, &reduced, config.max_states, &time_exceeded) {
+            Ok(expansion) => Some(expansion),
+            Err(ExpansionFailure::OutOfTime) => return Ok(LivenessCheckOutcome::TimeExceeded),
+            Err(failure) => {
+                if !config.quiet {
+                    let reason = match failure {
+                        ExpansionFailure::TooLarge => {
+                            "the graph without symmetry reduction would exceed --max-states"
+                        }
+                        _ => {
+                            "a successor reached under SYMMETRY is not a renaming of the \
+                             representative it was stored as"
+                        }
+                    };
+                    eprintln!(
+                        "  Warning: liveness under SYMMETRY is checked on representative \
+                         states: {reason}, so a property stated per element of a symmetric \
+                         set may be reported violated when it is not, and a counterexample \
+                         may not be a behavior"
+                    );
+                }
+                None
+            }
         }
-        expansion
     };
     let no_renaming = HashMap::new();
     let (states, parent, all_edges, renamed_successors, excluded_successors) = match &expansion {

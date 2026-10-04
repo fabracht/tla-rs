@@ -3894,10 +3894,16 @@
       "exit_code": 0,
       "version": "2026.10.01.171037 (rev: cc6d703)"
     },
-    "tla_rs_now": "violated",
-    "tla_rs_now_kind": "liveness",
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
     "xfail_until_phase": null,
-    "note": "SYMMETRY with SF obligations per process. TLC with SYMMETRY reports a violation (its symmetry reduction is unsound for liveness, as it warns); the expectation is TLC's verdict without SYMMETRY, which tla-rs gives with SYMMETRY by checking liveness on the graph expanded by the symmetry group (#140)."
+    "note": "SYMMETRY with SF obligations per process. TLC with SYMMETRY reports a violation (its symmetry reduction is unsound for liveness, as it warns); the expectation and `tlc` are TLC's run without SYMMETRY (`tlc_without_symmetry`; scripts/liveness-oracle.sh drops the SYMMETRY line for it), and `tlc_with_symmetry` records TLC's run as written, which tla-rs gives with SYMMETRY by checking liveness on the graph expanded by the symmetry group (#140).",
+    "tlc_without_symmetry": true,
+    "tlc_with_symmetry": {
+      "verdict_raw": "Error: Temporal properties were violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    }
   },
   {
     "id": "C202",
@@ -4030,6 +4036,12 @@
     "tla_rs_now": "ok",
     "tla_rs_now_kind": null,
     "xfail_until_phase": null,
-    "note": "SYMMETRY with WF/SF per process and a per-process []<>. TLC with SYMMETRY reports a violation (its symmetry reduction is unsound for liveness); the expectation is TLC's verdict without SYMMETRY, which tla-rs gives with SYMMETRY on the graph expanded by the symmetry group (#140)."
+    "note": "SYMMETRY with WF/SF per process and a per-process []<>. TLC with SYMMETRY reports a violation (its symmetry reduction is unsound for liveness); the expectation and `tlc` are TLC's run without SYMMETRY (`tlc_without_symmetry`; scripts/liveness-oracle.sh drops the SYMMETRY line for it), and `tlc_with_symmetry` records TLC's run as written, which tla-rs gives with SYMMETRY on the graph expanded by the symmetry group (#140).",
+    "tlc_without_symmetry": true,
+    "tlc_with_symmetry": {
+      "verdict_raw": "Error: Temporal properties were violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.171037 (rev: cc6d703)"
+    }
   }
 ]
