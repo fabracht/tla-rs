@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.17.2] - 2026-10-03
+
+### Fixed
+
+- A built-in operator application with parenthesized arguments (`Len`, `Head`, `Tail`, `Append`, `Cardinality`, `SubSeq`, the `TLC` and `Bags` operators and the like) ended the expression, so a prime, function application or record access after it failed to parse: `Len(s)'`, `Head(s)[1]` and `Head(r).a` were rejected with "unexpected `'`" (or `[`, `.`), and the definition holding them was dropped (#146). They now parse, and evaluate as in TLC.
+
 ## [0.17.1] - 2026-10-03
 
 ### Fixed
