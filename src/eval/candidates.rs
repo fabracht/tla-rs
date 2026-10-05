@@ -404,6 +404,15 @@ fn collect_candidates_impl<T: CandidateTarget>(
             }
         }
 
+        Expr::Let(bound, binding, body)
+            if contains_prime_ref(binding, defs)
+                && super::ast_utils::parameterized_let_op(binding).is_none() =>
+        {
+            let applied =
+                crate::substitution::substitute_expr(body, &[(bound.clone(), (**binding).clone())]);
+            collect_candidates_impl(&applied, env, defs, target)?;
+        }
+
         Expr::Let(bound, binding, body) => {
             if let Ok(val) = eval(binding, env, defs) {
                 let bound = bound.clone();
@@ -427,15 +436,30 @@ fn collect_candidates_impl<T: CandidateTarget>(
             }
         }
 
+        Expr::Var(name) => {
+            if let Some((params, body)) = defs.get(name)
+                && params.is_empty()
+                && contains_prime_ref(body, defs)
+            {
+                collect_candidates_impl(body, env, defs, target)?;
+            }
+        }
+
         Expr::FnCall(name, args) => {
             if let Some((params, body)) = defs.get(name)
                 && params.len() == args.len()
-                && contains_prime_ref(body, defs)
             {
-                let params: Vec<Arc<str>> = params.clone();
-                let saved = bind_params(&params, args, env, defs);
-                collect_candidates_impl(body, env, defs, target)?;
-                restore_env(env, saved);
+                if args.iter().any(|arg| contains_prime_ref(arg, defs)) {
+                    let bindings: Vec<(Arc<str>, Expr)> =
+                        params.iter().cloned().zip(args.iter().cloned()).collect();
+                    let applied = crate::substitution::substitute_expr(body, &bindings);
+                    collect_candidates_impl(&applied, env, defs, target)?;
+                } else if contains_prime_ref(body, defs) {
+                    let params: Vec<Arc<str>> = params.clone();
+                    let saved = bind_params(&params, args, env, defs);
+                    collect_candidates_impl(body, env, defs, target)?;
+                    restore_env(env, saved);
+                }
             }
         }
 

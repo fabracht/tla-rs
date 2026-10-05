@@ -295,36 +295,84 @@ fn enumerate_next_with_refinement(
     let mut all_candidates = infer_all_candidates(next, env, ctx.vars, ctx.defs)?;
 
     if action_needs_refinement(next, ctx.defs) {
-        for (i, primed) in ctx.primed_vars.iter().enumerate() {
-            if let Some(first) = all_candidates[i].first() {
-                env.insert(primed.clone(), first.clone());
-            }
-        }
-
-        let mut changed = true;
         let mut iterations = 0;
+        let mut changed = true;
         while changed && iterations < 3 {
-            changed = false;
             iterations += 1;
-
-            let new_all = infer_all_candidates(next, env, ctx.vars, ctx.defs)?;
-            for (i, new_candidates) in new_all.into_iter().enumerate() {
-                if new_candidates != all_candidates[i] {
-                    all_candidates[i] = new_candidates;
-                    changed = true;
-                    if let Some(first) = all_candidates[i].first() {
-                        env.insert(ctx.primed_vars[i].clone(), first.clone());
-                    }
-                }
-            }
-        }
-
-        for primed in ctx.primed_vars {
-            env.remove(primed);
+            let refined = refined_candidates(next, env, ctx, &all_candidates)?;
+            changed = refined != all_candidates;
+            all_candidates = refined;
         }
     }
 
     enumerate_combinations(next, env, ctx, 0, &all_candidates, &action, results)
+}
+
+/// Past this many combinations of the current candidates, a refinement pass binds
+/// each primed variable to its first candidate only.
+const MAX_REFINEMENT_BINDINGS: usize = 256;
+
+/// One refinement pass: the candidates inferred with the primed variables bound to
+/// each combination of their current candidates, joined with the current ones, so a
+/// candidate that depends on another primed variable (`y' = 2 * x'` with
+/// `x' \in {1, 2}`) is found for every value that variable may take. Candidates
+/// only over-approximate; [`enumerate_combinations`] keeps the combinations that
+/// satisfy the action.
+fn refined_candidates(
+    next: &Expr,
+    env: &mut Env,
+    ctx: &EnumCtx<'_>,
+    current: &[Vec<Value>],
+) -> Result<Vec<Vec<Value>>> {
+    let combinations = current
+        .iter()
+        .map(|candidates| candidates.len().max(1))
+        .try_fold(1usize, |product, count| product.checked_mul(count))
+        .filter(|&product| product <= MAX_REFINEMENT_BINDINGS);
+    let choices: Vec<&[Value]> = match combinations {
+        Some(_) => current.iter().map(Vec::as_slice).collect(),
+        None => current
+            .iter()
+            .map(|candidates| candidates.get(..1).unwrap_or_default())
+            .collect(),
+    };
+    let mut refined: Vec<Vec<Value>> = current.to_vec();
+    infer_under_bindings(next, env, ctx, &choices, 0, &mut refined)?;
+    for primed in ctx.primed_vars {
+        env.remove(primed);
+    }
+    Ok(refined)
+}
+
+fn infer_under_bindings(
+    next: &Expr,
+    env: &mut Env,
+    ctx: &EnumCtx<'_>,
+    choices: &[&[Value]],
+    idx: usize,
+    refined: &mut [Vec<Value>],
+) -> Result<()> {
+    let Some(candidates) = choices.get(idx) else {
+        let inferred = infer_all_candidates(next, env, ctx.vars, ctx.defs)?;
+        for (known, found) in refined.iter_mut().zip(inferred) {
+            for value in found {
+                if !known.contains(&value) {
+                    known.push(value);
+                }
+            }
+        }
+        return Ok(());
+    };
+    let primed = &ctx.primed_vars[idx];
+    if candidates.is_empty() {
+        env.remove(primed);
+        return infer_under_bindings(next, env, ctx, choices, idx + 1, refined);
+    }
+    for candidate in *candidates {
+        env.insert(primed.clone(), candidate.clone());
+        infer_under_bindings(next, env, ctx, choices, idx + 1, refined)?;
+    }
+    Ok(())
 }
 
 fn enumerate_combinations(
