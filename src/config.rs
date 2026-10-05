@@ -12,6 +12,7 @@ pub struct TlcConfig {
     pub next: Option<Arc<str>>,
     pub specification: Option<Arc<str>>,
     pub constants: Vec<(Arc<str>, Value)>,
+    pub substitutions: Vec<(Arc<str>, Arc<str>)>,
     pub invariants: Vec<Arc<str>>,
     pub properties: Vec<Arc<str>>,
     pub symmetry: Option<Arc<str>>,
@@ -28,6 +29,7 @@ impl TlcConfig {
             next: None,
             specification: None,
             constants: Vec::new(),
+            substitutions: Vec::new(),
             invariants: Vec::new(),
             properties: Vec::new(),
             symmetry: None,
@@ -53,6 +55,7 @@ enum Token {
     LTuple,
     RTuple,
     MapsTo,
+    Substitute,
     ColonGt,
     AtAt,
     Arrow,
@@ -131,6 +134,12 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
 
         if chars[i] == '<' && i + 1 < chars.len() && chars[i + 1] == '<' {
             tokens.push(Token::LTuple);
+            i += 2;
+            continue;
+        }
+
+        if chars[i] == '<' && i + 1 < chars.len() && chars[i + 1] == '-' {
+            tokens.push(Token::Substitute);
             i += 2;
             continue;
         }
@@ -542,6 +551,16 @@ pub fn parse_cfg(input: &str) -> Result<TlcConfig, String> {
                             pos += 1;
                             let val = parse_constant_value_from_tokens(&tokens, &mut pos)?;
                             cfg.constants.push((Arc::from(name.as_str()), val));
+                        } else if pos < tokens.len() && tokens[pos] == Token::Substitute {
+                            pos += 1;
+                            if tokens.get(pos) == Some(&Token::LBracket) {
+                                return Err(format!(
+                                    "substitution '{name} <- [Module] ...' into another module is not supported"
+                                ));
+                            }
+                            let target = expect_ident(&tokens, &mut pos)?;
+                            cfg.substitutions
+                                .push((Arc::from(name.as_str()), Arc::from(target.as_str())));
                         } else {
                             cfg.constants.push((
                                 Arc::from(name.as_str()),
@@ -663,6 +682,21 @@ pub fn apply_config(
             continue;
         }
         domains.insert(name.clone(), val.clone());
+    }
+
+    for (name, target) in &cfg.substitutions {
+        if cli_constants.iter().any(|(n, _)| n == name) {
+            continue;
+        }
+        if cfg.constants.iter().any(|(n, _)| n == name) {
+            warnings.push(format!(
+                "CONSTANT '{name}' is both assigned and substituted in cfg file (the substitution '{name} <- {target}' wins)"
+            ));
+        }
+        domains.remove(name);
+        spec.constant_substitutions.retain(|(n, _)| n != name);
+        spec.constant_substitutions
+            .push((name.clone(), target.clone()));
     }
 
     let cfg_defines_behavior =
@@ -1098,6 +1132,56 @@ mod tests {
     }
 
     #[test]
+    fn parse_constant_substitutions() {
+        let input = "CONSTANTS\n    Owners <- TraceOwners\n    N = 2\n    Work <- TraceWork";
+        let cfg = parse_cfg(input).unwrap();
+        let names = |pairs: &[(Arc<str>, Arc<str>)]| -> Vec<(String, String)> {
+            pairs
+                .iter()
+                .map(|(n, t)| (n.to_string(), t.to_string()))
+                .collect()
+        };
+        assert_eq!(
+            names(&cfg.substitutions),
+            [
+                ("Owners".to_string(), "TraceOwners".to_string()),
+                ("Work".to_string(), "TraceWork".to_string())
+            ]
+        );
+        assert_eq!(cfg.constants, [(Arc::from("N"), Value::Int(2))]);
+    }
+
+    #[test]
+    fn substitution_into_another_module_is_rejected() {
+        let error = parse_cfg("CONSTANT Limit <- [Other] Def").unwrap_err();
+        assert!(error.contains("not supported"), "{error}");
+    }
+
+    #[test]
+    fn substituted_constant_takes_the_definition_value() {
+        let mut spec = crate::parser::parse(
+            "---- MODULE Subst ----\nEXTENDS Integers\nCONSTANT Limit\nVARIABLE x\n\
+             TraceLimit == 1 + 2\nInit == x = 0\nNext == x < Limit /\\ x' = x + 1\n====",
+        )
+        .unwrap();
+        let cfg = parse_cfg("CONSTANT Limit <- TraceLimit\nINIT Init\nNEXT Next").unwrap();
+        let mut domains = Env::new();
+        let mut checker_config = CheckerConfig::default();
+        apply_config(
+            &cfg,
+            &mut spec,
+            &mut domains,
+            &mut checker_config,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
+        let (domains, _) = crate::checker::prepare_spec(&spec, &domains, None, true).unwrap();
+        assert_eq!(domains.get(&Arc::from("Limit")), Some(&Value::Int(3)));
+    }
+
+    #[test]
     fn parse_constant_string_values() {
         let input = "CONSTANT\nName = \"hello\"";
         let cfg = parse_cfg(input).unwrap();
@@ -1453,6 +1537,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constants: vec![],
+            constant_substitutions: vec![],
         };
         spec.definitions.insert(
             Arc::from("Perms"),
@@ -1498,6 +1583,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constants: vec![],
+            constant_substitutions: vec![],
         };
 
         let inner = Expr::Eq(
@@ -1551,6 +1637,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constants: vec![],
+            constant_substitutions: vec![],
         };
 
         let p = Box::new(Expr::Eq(
@@ -1606,6 +1693,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constants: vec![],
+            constant_substitutions: vec![],
         };
 
         let init_expr = Expr::Var(Arc::from("MyInit"));
@@ -1663,6 +1751,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constants: vec![],
+            constant_substitutions: vec![],
         };
 
         let init_part_1 = Expr::In(
@@ -1766,6 +1855,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constants: vec![],
+            constant_substitutions: vec![],
         };
 
         spec.definitions.insert(

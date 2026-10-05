@@ -921,7 +921,13 @@ fn main() -> ExitCode {
         let missing: Vec<_> = spec
             .constants
             .iter()
-            .filter(|c| !domains.contains_key(c))
+            .filter(|c| {
+                !domains.contains_key(c)
+                    && !spec
+                        .constant_substitutions
+                        .iter()
+                        .any(|(name, _)| name == *c)
+            })
             .collect();
         if !missing.is_empty() {
             eprintln!(
@@ -1548,7 +1554,8 @@ fn main() -> ExitCode {
         }
         CheckResult::PrepareError(
             PrepareSpecError::RefinementConfigError(message)
-            | PrepareSpecError::LivenessProperty(message),
+            | PrepareSpecError::LivenessProperty(message)
+            | PrepareSpecError::ConstantSubstitution(message),
         ) => {
             eprintln!(
                 "{}",

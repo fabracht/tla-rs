@@ -250,6 +250,9 @@ pub enum PrepareSpecError {
     RefinementConfigError(String),
     /// A liveness property the tableau checker cannot translate.
     LivenessProperty(String),
+    /// A cfg `Name <- Definition` whose definition is missing, takes parameters or
+    /// does not evaluate to a constant value.
+    ConstantSubstitution(String),
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -327,6 +330,30 @@ fn load_module_extends(
     }
 
     Ok(())
+}
+
+fn substituted_value(
+    name: &Arc<str>,
+    target: &Arc<str>,
+    domains: &mut Env,
+    defs: &Definitions,
+) -> Result<Value, String> {
+    if defs.contains_key(name) {
+        return Err(format!(
+            "substitution '{name} <- {target}': '{name}' is a defined operator; only a CONSTANT can be substituted"
+        ));
+    }
+    match defs.get(target) {
+        None => Err(format!(
+            "substitution '{name} <- {target}': no definition '{target}'"
+        )),
+        Some((params, _)) if !params.is_empty() => Err(format!(
+            "substitution '{name} <- {target}': '{target}' takes parameters, and a constant can only be replaced by a definition without them"
+        )),
+        Some(_) => eval(&Expr::Var(target.clone()), domains, defs).map_err(|e| {
+            format!("substitution '{name} <- {target}': '{target}' does not evaluate to a constant value: {e}")
+        }),
+    }
 }
 
 pub fn prepare_spec(
@@ -416,6 +443,12 @@ pub fn prepare_spec(
                 }
             }
         }
+    }
+
+    for (name, target) in &spec.constant_substitutions {
+        let value = substituted_value(name, target, &mut domains, &defs)
+            .map_err(PrepareSpecError::ConstantSubstitution)?;
+        domains.insert(name.clone(), value);
     }
 
     let missing: Vec<_> = spec
@@ -2724,6 +2757,12 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                 json_string(message)
             )
         }
+        CheckResult::PrepareError(PrepareSpecError::ConstantSubstitution(message)) => {
+            format!(
+                r#"{{"status": "config_error", "error": {}}}"#,
+                json_string(message)
+            )
+        }
         CheckResult::LivenessViolation(violation, stats) => {
             format!(
                 r#"{{"status": "liveness_violation", "property": {}, "prefix": {}, "cycle": {}, "stats": {{"states_explored": {}, "transitions": {}, "max_depth": {}, "elapsed_secs": {:.3}}}}}"#,
@@ -2821,6 +2860,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
         let result = CheckResult::InitError(EvalError::domain_error("line one\nline \"two\"\t"));
         let json = check_result_to_json(&result, &spec);
@@ -2913,6 +2953,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
 
         let domains = Env::new();
@@ -2952,6 +2993,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
 
         let domains = Env::new();
@@ -2997,6 +3039,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         }
     }
 
@@ -3055,6 +3098,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
         assert!(
             unchecked_predicate_warning(&spec, false).is_none(),
@@ -3090,6 +3134,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
         assert!(
             unchecked_predicate_warning(&spec, false).is_none(),
@@ -3118,6 +3163,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
 
         let domains = Env::new();
@@ -3163,6 +3209,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
 
         let domains = Env::new();
@@ -3206,6 +3253,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
 
         let domains = Env::new();
@@ -3262,6 +3310,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
 
         let domains = Env::new();
@@ -3299,6 +3348,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
 
         let domains = Env::new();
@@ -3338,6 +3388,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
 
         let result = check(&spec, &Env::new(), &CheckerConfig::default());
@@ -3395,6 +3446,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
 
         let result1 = check(&spec1, &Env::new(), &CheckerConfig::default());
@@ -3441,6 +3493,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
 
         let result2 = check(&spec2, &Env::new(), &CheckerConfig::default());

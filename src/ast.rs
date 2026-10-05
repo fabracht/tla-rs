@@ -431,6 +431,10 @@ pub struct Spec {
     /// The cfg `SPECIFICATION`'s temporal conjuncts other than `WF`/`SF`, which TLC
     /// treats as assumptions: only behaviors satisfying them are checked.
     pub temporal_assumptions: Vec<Expr>,
+    /// The cfg's `Name <- Definition` substitutions for constants: `Name` takes the
+    /// value of the zero-parameter `Definition`, evaluated once the modules the spec
+    /// extends and instantiates are loaded.
+    pub constant_substitutions: Vec<(Arc<str>, Arc<str>)>,
 }
 
 /// `[](P => <>Q)` with `P` and `Q` free of temporal operators, which is exactly

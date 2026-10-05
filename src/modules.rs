@@ -259,6 +259,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
 
         let mut registry = ModuleRegistry::new();
@@ -293,6 +294,7 @@ mod tests {
             liveness_properties: vec![],
             safety_properties: vec![],
             temporal_assumptions: vec![],
+            constant_substitutions: Vec::new(),
         };
 
         let (resolved, parameterized, _vars) = resolve_instances(&spec, &registry).unwrap();
