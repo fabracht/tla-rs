@@ -32,6 +32,7 @@ pub fn parse_expr(input: &str) -> Result<Expr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn parse_simple_expr() {
@@ -369,6 +370,32 @@ mod tests {
         "#;
         let spec = parse(input).unwrap();
         assert!(spec.next.is_some());
+    }
+
+    #[test]
+    fn variables_declared_over_several_statements_are_all_declared() {
+        let spec =
+            parse("VARIABLES x\nVARIABLE y\nCONSTANT N\nCONSTANTS M\nInit == x = y").unwrap();
+        assert_eq!(spec.vars, [Arc::from("x"), Arc::from("y")]);
+        assert_eq!(spec.constants, [Arc::from("N"), Arc::from("M")]);
+    }
+
+    #[test]
+    fn a_name_declared_again_with_the_same_kind_is_declared_once_with_a_warning() {
+        let (spec, warnings) =
+            parse_with_warnings("VARIABLES x\nVARIABLE x, y\nCONSTANT N, N\nInit == x = y")
+                .unwrap();
+        assert_eq!(spec.vars, [Arc::from("x"), Arc::from("y")]);
+        assert_eq!(spec.constants, [Arc::from("N")]);
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+    }
+
+    #[test]
+    fn a_name_declared_as_both_constant_and_variable_is_an_error() {
+        let Err(error) = parse("CONSTANT x\nVARIABLE x\nInit == x = 0") else {
+            panic!("a name declared as a constant and a variable should not parse");
+        };
+        assert!(error.message.contains("both"), "{}", error.message);
     }
 
     #[test]

@@ -37,12 +37,13 @@ impl Parser {
                 }
                 Token::Variables => {
                     self.advance();
-                    vars = self.parse_var_list()?;
+                    let declared = self.parse_declared_names(&vars, true)?;
+                    vars.extend(declared);
                 }
                 Token::Constants => {
                     self.advance();
-                    let consts = self.parse_var_list()?;
-                    self.constants.extend(consts);
+                    let declared = self.parse_declared_names(&vars, false)?;
+                    self.constants.extend(declared);
                 }
                 Token::Assume => {
                     self.advance();
@@ -302,6 +303,45 @@ impl Parser {
                 warning,
                 crate::span::Span::default(),
             ));
+        }
+    }
+
+    /// The names a `VARIABLES` (`variables` true) or `CONSTANTS` declaration adds.
+    /// A module may declare its variables and constants over several statements. As
+    /// in SANY, declaring a name again with the same kind is a warning and the name is
+    /// declared once, while a name that is both a variable and a constant is an error.
+    fn parse_declared_names(
+        &mut self,
+        vars: &[Arc<str>],
+        variables: bool,
+    ) -> Result<Vec<Arc<str>>> {
+        let mut names: Vec<Arc<str>> = Vec::new();
+        loop {
+            let span = self.current_span();
+            let name = self.parse_param()?;
+            let (same_kind, other_kind) = if variables {
+                (vars.contains(&name), self.constants.contains(&name))
+            } else {
+                (self.constants.contains(&name), vars.contains(&name))
+            };
+            if other_kind {
+                return Err(ParseError::new(format!(
+                    "`{name}` is declared both as a CONSTANT and as a VARIABLE"
+                ))
+                .with_span(span));
+            }
+            if same_kind || names.contains(&name) {
+                self.warnings.push(crate::span::Spanned::new(
+                    format!("multiple declarations of `{name}`; it is declared once"),
+                    span,
+                ));
+            } else {
+                names.push(name);
+            }
+            if *self.peek() != Token::Comma {
+                return Ok(names);
+            }
+            self.advance();
         }
     }
 

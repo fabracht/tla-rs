@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.21.2] - 2026-10-04
+
+### Fixed
+
+- A second `VARIABLE`/`VARIABLES` declaration replaced the first instead of adding to it, so the variables declared earlier were undefined ("undefined variable" while evaluating `Init`) (#152). Every declaration now adds its names. As in SANY, declaring a name again with the same kind (`VARIABLES x` then `VARIABLE x`, or `CONSTANTS N, N`) is a warning and the name is declared once, and a name declared both as a `CONSTANT` and as a `VARIABLE` is a parse error.
+
 ## [0.21.1] - 2026-10-04
 
 ### Fixed
