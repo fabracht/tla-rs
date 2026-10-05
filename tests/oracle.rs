@@ -428,6 +428,7 @@ fn test_engines_agree_on_known_correct_specs() {
         "official/TwoPhase",
         "should_pass/counter",
         "should_pass/two_bit",
+        "should_pass/recursive_primed_argument",
     ] {
         let owned = format!("test_cases/{name}.tla");
         let path = Path::new(&owned);
@@ -453,6 +454,56 @@ fn test_engines_agree_on_known_correct_specs() {
             w.transitions_by_action, i.transitions_by_action,
             "{name}: per-action transition histogram must match across engines"
         );
+    }
+}
+
+/// Actions defined in an extended module and referenced by name from the root
+/// (`DStep /\ UNCHANGED <<...>>`) produce the same successors under both engines
+/// (TLC: 10 distinct states).
+#[test]
+fn test_engines_agree_on_actions_from_extended_modules() {
+    let path = Path::new("test_cases/should_pass/extends_variables/extends_variables.tla");
+    let run = |use_inference_engine| {
+        check_loaded(
+            path,
+            CheckerConfig {
+                use_inference_engine,
+                ..Default::default()
+            },
+        )
+    };
+    let (walker, infer) = (run(false), run(true));
+    let (CheckResult::Ok(w), CheckResult::Ok(i)) = (&walker, &infer) else {
+        panic!("both engines must complete; walker={walker:?} infer={infer:?}");
+    };
+    assert_eq!((w.states_explored, w.transitions), (10, 20));
+    assert_eq!((i.states_explored, i.transitions), (10, 20));
+}
+
+/// A primed variable whose candidates depend on another primed variable
+/// (`x' \in {1, 2} /\ y' = 2 * x'`, written inline, through a call of a root
+/// definition, or through an operator of an extended module) takes every value the
+/// other may take, under both engines: `y = 4` is reachable and violates `Inv`.
+#[test]
+fn test_engines_find_successors_that_depend_on_another_primed_variable() {
+    for name in [
+        "primed_dependency",
+        "primed_dependency_call",
+        "imported_op_primed_arg/imported_op_primed_arg",
+    ] {
+        let owned = format!("test_cases/should_violate/{name}.tla");
+        let path = Path::new(&owned);
+        for use_inference_engine in [false, true] {
+            let config = CheckerConfig {
+                use_inference_engine,
+                ..Default::default()
+            };
+            let result = check_loaded(path, config);
+            assert!(
+                matches!(result, CheckResult::InvariantViolation(..)),
+                "{name} (inference engine: {use_inference_engine}) must reach y = 4, got: {result:?}"
+            );
+        }
     }
 }
 

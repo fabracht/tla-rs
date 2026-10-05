@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1] - 2026-10-05
+
+### Fixed
+
+- With the inference engine (`TLA_ENGINE=inference`), actions built from operators the parser does not inline lost successors (#164): an action of an extended module referenced by name (`DStep /\ UNCHANGED <<b, c, r>>`) produced none, so the spec deadlocked in its initial state, and an operator called with primed arguments (`IsTwice(y', x')`), from an extended module or through a `LET`, produced no candidates for them. Candidate inference now follows a definition without parameters referenced by name, and substitutes primed arguments and `LET` bindings into the body rather than evaluating them. An operator is substituted into once per expansion, so a `RECURSIVE` operator called with a primed argument does not expand without end. An error while inferring candidates through an `INSTANCE` operator is now reported instead of being ignored.
+- With the inference engine, a primed variable whose candidates depend on another primed variable (`x' \in {1, 2} /\ y' = 2 * x'`) was refined against the first candidate of the other only, so `y' = 4` was never generated and an invariant violation was missed. Refinement now infers candidates under every combination of the current candidates (up to 256 combinations; beyond that, the first candidates as before).
+
 ## [0.22.0] - 2026-10-05
 
 ### Added
