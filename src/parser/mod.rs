@@ -284,6 +284,71 @@ mod tests {
         }
     }
 
+    fn disjuncts(e: &Expr) -> usize {
+        match e {
+            Expr::Or(l, r) => disjuncts(l) + disjuncts(r),
+            _ => 1,
+        }
+    }
+
+    #[test]
+    fn disjunct_right_of_the_bullet_continues_the_quantifier_body() {
+        let input = r"\/ \E i \in {1, 2} : x' = i \/ x' = -i
+      \/ x' = 9
+\/ x' = 0";
+        let expr = parse_expr(input).unwrap();
+        let Expr::Or(first, _) = &expr else {
+            panic!("expected a two-item list, got {expr:?}");
+        };
+        let Expr::Exists(_, _, body) = first.as_ref() else {
+            panic!("expected the first item to be the quantifier, got {first:?}");
+        };
+        assert_eq!(disjuncts(body), 3, "the continued line is part of the body");
+        assert_eq!(disjuncts(&expr), 2);
+    }
+
+    #[test]
+    fn disjunct_right_of_a_conjunct_bullet_continues_the_quantifier_body() {
+        let input = r"/\ x # 100
+/\ \E i \in {1, 2} : x' = i
+     \/ x' = -i";
+        let expr = parse_expr(input).unwrap();
+        let Expr::And(_, second) = &expr else {
+            panic!("expected a two-item list, got {expr:?}");
+        };
+        let Expr::Exists(_, _, body) = second.as_ref() else {
+            panic!("expected the second conjunct to be the quantifier, got {second:?}");
+        };
+        assert_eq!(
+            disjuncts(body),
+            2,
+            "the bound `i` is in scope on the next line"
+        );
+    }
+
+    #[test]
+    fn disjunct_right_of_the_bullet_continues_the_else_branch() {
+        let input = r"\/ IF x > 3 THEN x' = 1 ELSE x' = 2 \/ x' = 3
+      \/ x' = 4
+\/ x' = 0";
+        let expr = parse_expr(input).unwrap();
+        let Expr::Or(first, _) = &expr else {
+            panic!("expected a two-item list, got {expr:?}");
+        };
+        let Expr::If(_, _, else_branch) = first.as_ref() else {
+            panic!("expected the first item to be IF, got {first:?}");
+        };
+        assert_eq!(disjuncts(else_branch), 3);
+    }
+
+    #[test]
+    fn disjunct_right_of_the_bullet_continues_the_item() {
+        let input = r"\/ x' = 1 \/ x' = 2
+      \/ x' = 3
+\/ x' = 4";
+        assert_eq!(disjuncts(&parse_expr(input).unwrap()), 4);
+    }
+
     #[test]
     fn parse_inline_disjunctions_in_bulleted_list() {
         let input = r#"
