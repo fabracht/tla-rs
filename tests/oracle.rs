@@ -428,6 +428,7 @@ fn test_engines_agree_on_known_correct_specs() {
         "official/TwoPhase",
         "should_pass/counter",
         "should_pass/two_bit",
+        "should_pass/recursive_primed_argument",
     ] {
         let owned = format!("test_cases/{name}.tla");
         let path = Path::new(&owned);

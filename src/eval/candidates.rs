@@ -186,7 +186,7 @@ pub(crate) fn infer_candidates(
         candidates: &mut candidates,
         not_enumerable: None,
     };
-    collect_candidates_impl(next, env, defs, &mut target)?;
+    collect_candidates_impl(next, env, defs, &mut target, &mut Vec::new())?;
     let not_enumerable = target.not_enumerable.take();
 
     if candidates.is_empty() {
@@ -226,7 +226,7 @@ pub(crate) fn infer_all_candidates(
         all_candidates: &mut all_candidates,
         not_enumerable: &mut not_enumerable,
     };
-    collect_candidates_impl(next, env, defs, &mut target)?;
+    collect_candidates_impl(next, env, defs, &mut target, &mut Vec::new())?;
 
     for (i, var) in vars.iter().enumerate() {
         if !all_candidates[i].is_empty() {
@@ -325,11 +325,15 @@ pub(crate) fn bind_params(
     saved
 }
 
+/// `expanding` holds the operators whose bodies are being substituted into, so a
+/// recursive operator called with a primed argument is expanded once rather than
+/// without end.
 fn collect_candidates_impl<T: CandidateTarget>(
     expr: &Expr,
     env: &mut Env,
     defs: &Definitions,
     target: &mut T,
+    expanding: &mut Vec<Arc<str>>,
 ) -> Result<()> {
     match expr {
         Expr::Eq(l, r) => {
@@ -369,10 +373,10 @@ fn collect_candidates_impl<T: CandidateTarget>(
 
         Expr::And(l, r) | Expr::Or(l, r) | Expr::Implies(l, r) | Expr::Equiv(l, r) => {
             if contains_prime_ref(l, defs) {
-                collect_candidates_impl(l, env, defs, target)?;
+                collect_candidates_impl(l, env, defs, target, expanding)?;
             }
             if contains_prime_ref(r, defs) {
-                collect_candidates_impl(r, env, defs, target)?;
+                collect_candidates_impl(r, env, defs, target, expanding)?;
             }
         }
 
@@ -384,7 +388,7 @@ fn collect_candidates_impl<T: CandidateTarget>(
                 let prev = env.get(&bound).cloned();
                 for val in dom {
                     env.insert(bound.clone(), val);
-                    collect_candidates_impl(body, env, defs, target)?;
+                    collect_candidates_impl(body, env, defs, target, expanding)?;
                 }
                 match prev {
                     Some(v) => env.insert(bound, v),
@@ -394,13 +398,13 @@ fn collect_candidates_impl<T: CandidateTarget>(
         }
 
         Expr::If(_, then_br, else_br) => {
-            collect_candidates_impl(then_br, env, defs, target)?;
-            collect_candidates_impl(else_br, env, defs, target)?;
+            collect_candidates_impl(then_br, env, defs, target, expanding)?;
+            collect_candidates_impl(else_br, env, defs, target, expanding)?;
         }
 
         Expr::Case(branches) => {
             for (_, result) in branches {
-                collect_candidates_impl(result, env, defs, target)?;
+                collect_candidates_impl(result, env, defs, target, expanding)?;
             }
         }
 
@@ -410,14 +414,14 @@ fn collect_candidates_impl<T: CandidateTarget>(
         {
             let applied =
                 crate::substitution::substitute_expr(body, &[(bound.clone(), (**binding).clone())]);
-            collect_candidates_impl(&applied, env, defs, target)?;
+            collect_candidates_impl(&applied, env, defs, target, expanding)?;
         }
 
         Expr::Let(bound, binding, body) => {
             if let Ok(val) = eval(binding, env, defs) {
                 let bound = bound.clone();
                 let prev = env.insert(bound.clone(), val);
-                collect_candidates_impl(body, env, defs, target)?;
+                collect_candidates_impl(body, env, defs, target, expanding)?;
                 match prev {
                     Some(v) => env.insert(bound, v),
                     None => env.remove(&bound),
@@ -439,9 +443,13 @@ fn collect_candidates_impl<T: CandidateTarget>(
         Expr::Var(name) => {
             if let Some((params, body)) = defs.get(name)
                 && params.is_empty()
+                && !expanding.contains(name)
                 && contains_prime_ref(body, defs)
             {
-                collect_candidates_impl(body, env, defs, target)?;
+                expanding.push(name.clone());
+                let collected = collect_candidates_impl(body, env, defs, target, expanding);
+                expanding.pop();
+                collected?;
             }
         }
 
@@ -449,22 +457,26 @@ fn collect_candidates_impl<T: CandidateTarget>(
             if let Some((params, body)) = defs.get(name)
                 && params.len() == args.len()
             {
-                if args.iter().any(|arg| contains_prime_ref(arg, defs)) {
+                if args.iter().any(|arg| contains_prime_ref(arg, defs)) && !expanding.contains(name)
+                {
                     let bindings: Vec<(Arc<str>, Expr)> =
                         params.iter().cloned().zip(args.iter().cloned()).collect();
                     let applied = crate::substitution::substitute_expr(body, &bindings);
-                    collect_candidates_impl(&applied, env, defs, target)?;
+                    expanding.push(name.clone());
+                    let collected = collect_candidates_impl(&applied, env, defs, target, expanding);
+                    expanding.pop();
+                    collected?;
                 } else if contains_prime_ref(body, defs) {
                     let params: Vec<Arc<str>> = params.clone();
                     let saved = bind_params(&params, args, env, defs);
-                    collect_candidates_impl(body, env, defs, target)?;
+                    collect_candidates_impl(body, env, defs, target, expanding)?;
                     restore_env(env, saved);
                 }
             }
         }
 
         Expr::LabeledAction(_, action) => {
-            collect_candidates_impl(action, env, defs, target)?;
+            collect_candidates_impl(action, env, defs, target, expanding)?;
         }
 
         Expr::QualifiedCall(instance_expr, op, args) => {
@@ -472,7 +484,7 @@ fn collect_candidates_impl<T: CandidateTarget>(
 
             match instance_expr.as_ref() {
                 Expr::Var(instance_name) => {
-                    RESOLVED_INSTANCES.with(|inst_ref| {
+                    RESOLVED_INSTANCES.with(|inst_ref| -> Result<()> {
                         let instances = inst_ref.borrow();
                         if let Some(instance_defs) = instances.get(instance_name)
                             && let Some((params, body)) = instance_defs.get(op)
@@ -485,13 +497,16 @@ fn collect_candidates_impl<T: CandidateTarget>(
                             }
                             let params: Vec<Arc<str>> = params.clone();
                             let saved = bind_params(&params, args, env, defs);
-                            let _ = collect_candidates_impl(body, env, &merged_defs, target);
+                            let collected =
+                                collect_candidates_impl(body, env, &merged_defs, target, expanding);
                             restore_env(env, saved);
+                            collected?;
                         }
-                    });
+                        Ok(())
+                    })?;
                 }
                 Expr::FnCall(instance_name, instance_args) => {
-                    PARAMETERIZED_INSTANCES.with(|inst_ref| {
+                    PARAMETERIZED_INSTANCES.with(|inst_ref| -> Result<()> {
                         let instances = inst_ref.borrow();
                         if let Some(param_inst) = instances.get(instance_name)
                             && instance_args.len() == param_inst.params.len()
@@ -515,13 +530,20 @@ fn collect_candidates_impl<T: CandidateTarget>(
                                     let params: Vec<Arc<str>> = params.clone();
                                     let body = body.clone();
                                     let saved = bind_params(&params, args, env, defs);
-                                    let _ =
-                                        collect_candidates_impl(&body, env, &merged_defs, target);
+                                    let collected = collect_candidates_impl(
+                                        &body,
+                                        env,
+                                        &merged_defs,
+                                        target,
+                                        expanding,
+                                    );
                                     restore_env(env, saved);
+                                    collected?;
                                 }
                             }
                         }
-                    });
+                        Ok(())
+                    })?;
                 }
                 _ => {}
             }
