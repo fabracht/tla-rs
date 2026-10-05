@@ -356,6 +356,46 @@ fn substituted_value(
     }
 }
 
+/// Binds each cfg `Name <- Definition` the caller left unassigned (a `--constant`,
+/// a sweep value or a WASM constant set after the cfg takes precedence), in passes
+/// until none makes progress, so a definition may use a constant substituted after
+/// it in the cfg.
+fn substitute_constants(
+    spec: &Spec,
+    domains: &mut Env,
+    defs: &Definitions,
+) -> Result<(), PrepareSpecError> {
+    let mut pending: Vec<&(Arc<str>, Arc<str>)> = spec
+        .constant_substitutions
+        .iter()
+        .filter(|(name, _)| !domains.contains_key(name))
+        .collect();
+    while !pending.is_empty() {
+        let mut failures = Vec::new();
+        for substitution @ (name, target) in pending.iter().copied() {
+            match substituted_value(name, target, domains, defs) {
+                Ok(value) => {
+                    domains.insert(name.clone(), value);
+                }
+                Err(message) => failures.push((substitution, message)),
+            }
+        }
+        if failures.len() == pending.len() {
+            let message = failures
+                .into_iter()
+                .map(|(_, message)| message)
+                .next()
+                .unwrap_or_default();
+            return Err(PrepareSpecError::ConstantSubstitution(message));
+        }
+        pending = failures
+            .into_iter()
+            .map(|(substitution, _)| substitution)
+            .collect();
+    }
+    Ok(())
+}
+
 pub fn prepare_spec(
     spec: &Spec,
     domains: &Env,
@@ -445,11 +485,7 @@ pub fn prepare_spec(
         }
     }
 
-    for (name, target) in &spec.constant_substitutions {
-        let value = substituted_value(name, target, &mut domains, &defs)
-            .map_err(PrepareSpecError::ConstantSubstitution)?;
-        domains.insert(name.clone(), value);
-    }
+    substitute_constants(spec, &mut domains, &defs)?;
 
     let missing: Vec<_> = spec
         .constants

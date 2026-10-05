@@ -437,6 +437,23 @@ pub struct Spec {
     pub constant_substitutions: Vec<(Arc<str>, Arc<str>)>,
 }
 
+impl Spec {
+    /// The declared constants that neither have a value in `domains` nor are
+    /// substituted by the cfg.
+    pub fn unassigned_constants<'a>(&'a self, domains: &Env) -> Vec<&'a Arc<str>> {
+        self.constants
+            .iter()
+            .filter(|c| {
+                !domains.contains_key(c)
+                    && !self
+                        .constant_substitutions
+                        .iter()
+                        .any(|(name, _)| name == *c)
+            })
+            .collect()
+    }
+}
+
 /// `[](P => <>Q)` with `P` and `Q` free of temporal operators, which is exactly
 /// `P ~> Q`. Any other shape under `[]` is left alone so it is never mistaken for a
 /// leads-to property.

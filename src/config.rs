@@ -1181,6 +1181,49 @@ mod tests {
         assert_eq!(domains.get(&Arc::from("Limit")), Some(&Value::Int(3)));
     }
 
+    fn substituted_constants(module: &str, cfg: &str, caller: &[(&str, Value)]) -> Env {
+        let mut spec = crate::parser::parse(module).unwrap();
+        let cfg = parse_cfg(cfg).unwrap();
+        let mut domains = Env::new();
+        let mut checker_config = CheckerConfig::default();
+        apply_config(
+            &cfg,
+            &mut spec,
+            &mut domains,
+            &mut checker_config,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
+        for (name, value) in caller {
+            domains.insert(Arc::from(*name), value.clone());
+        }
+        crate::checker::prepare_spec(&spec, &domains, None, true)
+            .unwrap()
+            .0
+    }
+
+    const SUBSTITUTED: &str = "---- MODULE Subst ----\nEXTENDS Integers\nCONSTANTS A, B\n\
+        VARIABLE x\nDefA == B + 1\nDefB == 2\nInit == x = 0\nNext == x < A /\\ x' = x + 1\n====";
+
+    #[test]
+    fn substitution_may_use_a_constant_substituted_after_it() {
+        let domains = substituted_constants(SUBSTITUTED, "CONSTANTS A <- DefA B <- DefB", &[]);
+        assert_eq!(domains.get(&Arc::from("A")), Some(&Value::Int(3)));
+    }
+
+    #[test]
+    fn constant_set_after_the_cfg_overrides_its_substitution() {
+        let domains = substituted_constants(
+            SUBSTITUTED,
+            "CONSTANTS A <- DefA B <- DefB",
+            &[("A", Value::Int(7))],
+        );
+        assert_eq!(domains.get(&Arc::from("A")), Some(&Value::Int(7)));
+        assert_eq!(domains.get(&Arc::from("B")), Some(&Value::Int(2)));
+    }
+
     #[test]
     fn parse_constant_string_values() {
         let input = "CONSTANT\nName = \"hello\"";
