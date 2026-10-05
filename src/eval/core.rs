@@ -47,24 +47,54 @@ fn floor_mod(a: i64, b: i64) -> i64 {
     }
 }
 
+/// Past this many definition unfoldings, [`unchanged_variables`] gives up on a name.
+const MAX_UNCHANGED_UNFOLDINGS: usize = 64;
+
+/// The variables `UNCHANGED <<n1, n2, ...>>` leaves unchanged: each name that is a
+/// definition without parameters whose body is a variable or a tuple of variables
+/// and such definitions, nested to any depth (`tvars == <<vars, l>>` with
+/// `vars == <<x, y>>`), stands for those variables; any other name stands for itself.
 pub(crate) fn expand_unchanged_vars(vars: &[Arc<str>], defs: &Definitions) -> Vec<Arc<str>> {
-    let mut result = Vec::new();
+    let mut result: Vec<Arc<str>> = Vec::new();
     for var in vars {
-        if let Some((params, body)) = defs.get(var)
-            && params.is_empty()
-            && let Expr::TupleLit(elems) = body.as_ref()
-            && elems.iter().all(|e| matches!(e, Expr::Var(_)))
-        {
-            for elem in elems {
-                if let Expr::Var(name) = elem {
-                    result.push(name.clone());
-                }
+        let mut names = Vec::new();
+        let expanded = if unchanged_variables(&Expr::Var(var.clone()), defs, 0, &mut names) {
+            names
+        } else {
+            vec![var.clone()]
+        };
+        for name in expanded {
+            if !result.contains(&name) {
+                result.push(name);
             }
-            continue;
         }
-        result.push(var.clone());
     }
     result
+}
+
+fn unchanged_variables(
+    expr: &Expr,
+    defs: &Definitions,
+    unfoldings: usize,
+    out: &mut Vec<Arc<str>>,
+) -> bool {
+    match expr {
+        Expr::Var(name) => match defs.get(name) {
+            Some((params, body)) => {
+                params.is_empty()
+                    && unfoldings < MAX_UNCHANGED_UNFOLDINGS
+                    && unchanged_variables(body, defs, unfoldings + 1, out)
+            }
+            None => {
+                out.push(name.clone());
+                true
+            }
+        },
+        Expr::TupleLit(items) => items
+            .iter()
+            .all(|item| unchanged_variables(item, defs, unfoldings, out)),
+        _ => false,
+    }
 }
 
 /// `Op'` for an operator `Op` without parameters: `Op` evaluated in the next state,
