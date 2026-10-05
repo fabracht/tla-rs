@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.21.0] - 2026-10-04
+
+### Fixed
+
+- `VARIABLES` declared in a module the spec EXTENDS were not state variables of the spec, so a definition from that module that reads one failed with "undefined variable" and `--validate` reported "no VARIABLES declared" (#159). Trace validation specs, which EXTEND the base specification, could not be checked at all. The variables and `CONSTANTS` of every user module reached through `EXTENDS` are now declared in the spec, ahead of its own, as in TLC; a constant declared only in an extended module must now be given a value like any other.
+
+### Added
+
+- `modules::merge_extended_declarations`, which the CLI, the library loader (`load::prepare_from_path`) and the MCP server call after parsing.
+
 ## [0.20.0] - 2026-10-04
 
 ### Added

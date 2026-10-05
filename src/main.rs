@@ -837,6 +837,8 @@ fn main() -> ExitCode {
         }
     };
 
+    tla_checker::modules::merge_extended_declarations(&mut spec, Path::new(&spec_path));
+
     let mut domains = Env::new();
 
     let cfg_path = config_path.or_else(|| {

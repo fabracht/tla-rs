@@ -54,6 +54,7 @@ pub fn prepare(
             .and_then(|s| (!s.is_empty()).then(|| SourceSpan::from_span(s, &source)));
         StructuredError::parse(err.message.clone(), span)
     })?;
+    crate::modules::merge_extended_declarations(&mut spec, &path);
     let mut warnings: Vec<ParseWarning> = parser_warnings
         .iter()
         .map(|w| ParseWarning::from_spanned(w, &source))

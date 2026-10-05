@@ -61,6 +61,7 @@ pub fn prepare_from_path_with_engine(
             message: err.message.clone(),
             span: err.span,
         })?;
+    crate::modules::merge_extended_declarations(&mut spec, spec_path);
 
     let mut domains = Env::new();
     let mut checker_config = CheckerConfig {
