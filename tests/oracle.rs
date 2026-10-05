@@ -1909,6 +1909,20 @@ fn test_should_pass_extends_variables() {
     }
 }
 
+/// A cfg's SPECIFICATION, INVARIANT and PROPERTY may name definitions of an
+/// extended module (TLC: 4 distinct states, `Reach` holds under `WF_x(Inc)`).
+#[test]
+fn test_should_pass_extends_cfg_names() {
+    let path = Path::new("test_cases/should_pass/extends_cfg_names/extends_cfg_names.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => {
+            assert_eq!(stats.states_explored, 4);
+            assert_eq!(stats.properties_checked, ["Reach".into()]);
+        }
+        other => panic!("extends_cfg_names.tla should pass, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_should_pass_extends_override() {
     let path = Path::new("test_cases/should_pass/extends_override/extends_override.tla");
