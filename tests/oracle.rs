@@ -1935,6 +1935,29 @@ fn test_should_pass_nested_unchanged() {
     }
 }
 
+/// A cfg `VIEW` makes states with the same view one state: `aux` counts steps but
+/// is projected away (TLC: 4 distinct states).
+#[test]
+fn test_should_pass_view_projection() {
+    let path = Path::new("test_cases/should_pass/view_projection.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 4),
+        other => panic!("view_projection.tla should pass, got: {other:?}"),
+    }
+}
+
+/// Under `SYMMETRY` a `VIEW` is minimized over the renamings of a state, so the
+/// states `seen = a` and `seen = b` with the same `log`, whose views are renamings of
+/// each other, are one state (TLC: 4 distinct states; 5 without SYMMETRY).
+#[test]
+fn test_should_pass_view_symmetry() {
+    let path = Path::new("test_cases/should_pass/view_symmetry.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 4),
+        other => panic!("view_symmetry.tla should pass, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_should_pass_extends_override() {
     let path = Path::new("test_cases/should_pass/extends_override/extends_override.tla");

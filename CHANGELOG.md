@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.22.0] - 2026-10-05
+
+### Added
+
+- cfg `VIEW Name` (#156): as in TLC, states with the same value of the zero-parameter definition `Name` are one state of the search, the first one reached standing for all of them, so auxiliary or history variables can be kept out of the state space. A step merged into a state it did not reach is still evaluated on the state it reached when checking liveness, so fairness and step formulas such as `[]<><<A>>_v` see the actual step. Under `SYMMETRY` the view is the least over every renaming of the state, as in TLC, so states whose views differ only by a renaming are one state (beyond 720 renamings the view of the representative state is taken instead, with a warning); liveness under both `SYMMETRY` and `VIEW` is checked on representative states, with a warning.
+- `checker::CheckerConfig::view`.
+
+### Fixed
+
+- `VIEW`, `ALIAS` and `POSTCONDITION` were not cfg directive keywords, so after a list directive such as `INVARIANT` the keyword was read as one more name of the list and the error blamed a missing definition called `VIEW` (#156). They are now directives, ending the list before them; `ALIAS` and `POSTCONDITION` are reported as not yet supported and ignored.
+
 ## [0.21.3] - 2026-10-04
 
 ### Fixed

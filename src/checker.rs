@@ -48,6 +48,8 @@ pub struct CheckerConfig {
     #[cfg(not(target_arch = "wasm32"))]
     pub trace_json_path: Option<PathBuf>,
     pub state_constraints: Vec<Expr>,
+    /// The cfg `VIEW`: states with the same value of it are the same state.
+    pub view: Option<Expr>,
     pub allow_unassigned_stutter: bool,
     pub use_inference_engine: bool,
     /// Treat `Nat` and `Int` as symbolic infinite sets (membership works,
@@ -112,6 +114,7 @@ impl Default for CheckerConfig {
             #[cfg(not(target_arch = "wasm32"))]
             trace_json_path: None,
             state_constraints: Vec::new(),
+            view: None,
             allow_unassigned_stutter: false,
             use_inference_engine: false,
             symbolic_integers: false,
@@ -707,6 +710,22 @@ fn check_with_state_vars(spec: &Spec, domains: &Env, config: &CheckerConfig) -> 
     };
 
     let base_env: Env = domains.clone();
+    let mut view = config
+        .view
+        .as_ref()
+        .map(|expr| StateView::new(expr, &base_env, &symmetry));
+    if view
+        .as_ref()
+        .is_some_and(|view| !symmetry.is_empty() && view.renamings.is_empty())
+        && !config.quiet
+    {
+        eprintln!(
+            "  Warning: the SYMMETRY group has more than {MAX_VIEW_RENAMINGS} renamings, so a \
+             VIEW is taken of each representative state rather than minimized over its \
+             renamings: states whose views differ only by a renaming may be counted \
+             separately, and the search may find more states than TLC"
+        );
+    }
     let primed_vars = make_primed_names(&spec.vars);
     let mut reusable_env = base_env.clone();
 
@@ -940,7 +959,11 @@ fn check_with_state_vars(spec: &Spec, domains: &Env, config: &CheckerConfig) -> 
             }
         }
         let canonical = symmetry.canonicalize(&state).into_owned();
-        let (idx, is_new) = states.insert_full(canonical);
+        let (idx, is_new) =
+            match insert_state(&mut states, view.as_mut(), canonical, &spec.vars, &defs) {
+                Ok(inserted) => inserted,
+                Err(e) => return CheckResult::InitError(e),
+            };
         if is_new {
             parent.push(None);
             parent_action.push(None);
@@ -1345,13 +1368,26 @@ fn check_with_state_vars(spec: &Spec, domains: &Env, config: &CheckerConfig) -> 
                 }
             }
             let canonical = symmetry.canonicalize(&transition.state).into_owned();
-            if collect_edges && !symmetry.is_empty() && canonical != transition.state {
+            let (succ_idx, is_new) =
+                match insert_state(&mut states, view.as_mut(), canonical, &spec.vars, &defs) {
+                    Ok(inserted) => inserted,
+                    Err(e) => {
+                        let (trace, _actions) =
+                            reconstruct_trace(current_idx, &states, &parent, &parent_action);
+                        let dot = do_export(&states, &parent, Some(current_idx), &all_edges);
+                        return CheckResult::NextError(e, trace, dot);
+                    }
+                };
+            if collect_edges
+                && states
+                    .get_index(succ_idx)
+                    .is_some_and(|stored| *stored != transition.state)
+            {
                 renamed_successors.insert(
                     (current_idx, all_edges[current_idx].len()),
                     transition.state.clone(),
                 );
             }
-            let (succ_idx, is_new) = states.insert_full(canonical);
             if is_new {
                 parent.push(Some(current_idx));
                 parent_action.push(transition.action.clone());
@@ -1489,6 +1525,89 @@ fn expand_action_property(
             "internal: PROPERTY '{name}' has an action part that is not [][A]_v: {other:?}"
         ))),
     }
+}
+
+/// Past this many renamings of the symmetric sets, a `VIEW` is not minimized over them.
+const MAX_VIEW_RENAMINGS: usize = 720;
+
+/// The cfg `VIEW`: as TLC fingerprints the view of a state rather than the state,
+/// states with the same view value are one state of the search, and the first one
+/// reached stands for all of them. Under `SYMMETRY` the view is the least over every
+/// renaming of the state (`renamings`, the symmetry group), so states whose views
+/// differ only by a renaming are one state, as in TLC; `renamings` is empty without
+/// symmetry, or when the group has more than [`MAX_VIEW_RENAMINGS`] elements.
+struct StateView<'a> {
+    expr: &'a Expr,
+    env: Env,
+    seen: HashMap<Value, usize>,
+    symmetry: &'a SymmetryConfig,
+    renamings: Vec<crate::symmetry::Permutation>,
+}
+
+impl<'a> StateView<'a> {
+    fn new(expr: &'a Expr, constants: &Env, symmetry: &'a SymmetryConfig) -> Self {
+        let renamings = if symmetry.is_empty() {
+            Vec::new()
+        } else {
+            symmetry.group(MAX_VIEW_RENAMINGS).unwrap_or_default()
+        };
+        Self {
+            expr,
+            env: constants.clone(),
+            seen: HashMap::new(),
+            symmetry,
+            renamings,
+        }
+    }
+
+    fn key(
+        &mut self,
+        state: &State,
+        vars: &[Arc<str>],
+        defs: &Definitions,
+    ) -> Result<Value, EvalError> {
+        let Self {
+            expr,
+            env,
+            symmetry,
+            renamings,
+            ..
+        } = self;
+        let mut view_of = |state: &State| {
+            bind_state(env, vars, state);
+            eval(expr, env, defs)
+        };
+        let mut least = view_of(state)?;
+        for renaming in renamings.iter() {
+            let value = view_of(&symmetry.permute(state, renaming))?;
+            if value < least {
+                least = value;
+            }
+        }
+        Ok(least)
+    }
+}
+
+/// Adds `state` to the search: its index and whether it is new. The index is that
+/// of an equal state already found or, under a `VIEW`, of the first state found
+/// with the same view.
+fn insert_state(
+    states: &mut IndexSet<State>,
+    view: Option<&mut StateView<'_>>,
+    state: State,
+    vars: &[Arc<str>],
+    defs: &Definitions,
+) -> Result<(usize, bool), EvalError> {
+    let Some(view) = view else {
+        return Ok(states.insert_full(state));
+    };
+    let key = view.key(&state, vars, defs)?;
+    if let Some(&index) = view.seen.get(&key) {
+        return Ok((index, false));
+    }
+    let (index, is_new) = states.insert_full(state);
+    view.seen.insert(key, index);
+    Ok((index, is_new))
 }
 
 fn bind_state(env: &mut Env, names: &[Arc<str>], state: &State) {
@@ -1786,6 +1905,16 @@ fn check_liveness_properties(
     };
 
     let expansion = if symmetry.is_empty() {
+        None
+    } else if config.view.is_some() {
+        if !config.quiet {
+            eprintln!(
+                "  Warning: liveness under SYMMETRY with a VIEW is checked on representative \
+                 states: a step the VIEW merges into a state it did not reach is not a \
+                 renaming, so the graph cannot be expanded by the symmetry group; a property \
+                 stated per element of a symmetric set may be reported violated when it is not"
+            );
+        }
         None
     } else {
         let reduced = ReducedGraph {
