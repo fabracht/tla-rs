@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.21.1] - 2026-10-04
+
+### Fixed
+
+- A cfg could not name a definition from a module the spec EXTENDS: `INIT`, `NEXT`, `SPECIFICATION`, `INVARIANT`, `PROPERTY`, `CONSTRAINT` and `SYMMETRY` each failed with "definition '...' not found in spec" (#151). The definitions of every user module reached through `EXTENDS` are now part of the spec when the cfg is applied, a module's own definition taking precedence over one it extends, so a spec split across modules, such as a trace validation spec extending its base specification, can be driven by a cfg.
+
 ## [0.21.0] - 2026-10-04
 
 ### Fixed

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::ast::Spec;
+use crate::ast::{DefinitionMap, Spec};
 use crate::eval::{Definitions, ParameterizedInstance, ParameterizedInstances};
 use crate::parser;
 use crate::substitution::apply_substitutions;
@@ -88,12 +88,14 @@ impl Default for ModuleRegistry {
     }
 }
 
-/// Adds the `VARIABLES` and `CONSTANTS` of the user modules `spec` extends,
-/// transitively, ahead of its own, as in the module TLC builds from the `EXTENDS`
-/// chain. Their definitions are merged by [`crate::checker::prepare_spec`], but a
-/// state is indexed by `spec.vars`, which must hold every variable before the spec
-/// is checked. A module that cannot be loaded is skipped here; `prepare_spec` loads
-/// the same modules and reports why.
+/// Adds the `VARIABLES`, `CONSTANTS` and definitions of the user modules `spec`
+/// extends, transitively, as in the module TLC builds from the `EXTENDS` chain:
+/// variables and constants ahead of its own, definitions under its own (a module's
+/// definition overrides one it extends, the root's override all). A state is
+/// indexed by `spec.vars`, and the cfg names definitions, so both must be complete
+/// before the cfg is applied and the spec is checked. A module that cannot be
+/// loaded is skipped here; [`crate::checker::prepare_spec`] loads the same modules
+/// and reports why.
 pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) {
     let mut registry = ModuleRegistry::new();
     let mut visited = Vec::new();
@@ -107,19 +109,24 @@ pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) {
             &mut declarations,
         );
     }
-    declarations.add(&spec.vars, &spec.constants);
+    declarations.add(&spec.vars, &spec.constants, &spec.definitions);
     spec.vars = declarations.vars;
     spec.constants = declarations.constants;
+    spec.definitions = declarations.definitions;
 }
 
 #[derive(Default)]
 struct Declarations {
     vars: Vec<Arc<str>>,
     constants: Vec<Arc<str>>,
+    definitions: DefinitionMap,
 }
 
 impl Declarations {
-    fn add(&mut self, vars: &[Arc<str>], constants: &[Arc<str>]) {
+    fn add(&mut self, vars: &[Arc<str>], constants: &[Arc<str>], definitions: &DefinitionMap) {
+        for (name, definition) in definitions {
+            self.definitions.insert(name.clone(), definition.clone());
+        }
         for var in vars {
             if !self.vars.contains(var) {
                 self.vars.push(var.clone());
@@ -147,15 +154,16 @@ fn collect_declarations(
     let Ok(module) = registry.load(name, spec_path) else {
         return;
     };
-    let (extends, vars, constants) = (
+    let (extends, vars, constants, definitions) = (
         module.extends.clone(),
         module.vars.clone(),
         module.constants.clone(),
+        module.definitions.clone(),
     );
     for inner in &extends {
         collect_declarations(inner, spec_path, registry, visited, declarations);
     }
-    declarations.add(&vars, &constants);
+    declarations.add(&vars, &constants, &definitions);
 }
 
 type InstanceVars = BTreeMap<Arc<str>, Vec<Arc<str>>>;
