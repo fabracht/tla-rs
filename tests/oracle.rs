@@ -42,6 +42,7 @@ fn check_loaded(path: &Path, mut config: CheckerConfig) -> CheckResult {
         Ok(s) => s,
         Err(e) => panic!("parse error in {}: {}", path.display(), e.message),
     };
+    tla_checker::modules::merge_extended_declarations(&mut spec, path);
     config.spec_path = Some(path.to_path_buf());
     let mut domains = Env::new();
     let cfg_path = path.with_extension("cfg");
@@ -1894,6 +1895,18 @@ fn test_should_pass_extends_transitive() {
         "extends_transitive.tla should pass, got: {:?}",
         result
     );
+}
+
+/// Variables declared in extended modules, including one reached along two
+/// `EXTENDS` paths, are state variables of the root spec (TLC: 10 distinct states,
+/// `Done` holds).
+#[test]
+fn test_should_pass_extends_variables() {
+    let path = Path::new("test_cases/should_pass/extends_variables/extends_variables.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 10),
+        other => panic!("extends_variables.tla should pass, got: {other:?}"),
+    }
 }
 
 #[test]

@@ -88,6 +88,76 @@ impl Default for ModuleRegistry {
     }
 }
 
+/// Adds the `VARIABLES` and `CONSTANTS` of the user modules `spec` extends,
+/// transitively, ahead of its own, as in the module TLC builds from the `EXTENDS`
+/// chain. Their definitions are merged by [`crate::checker::prepare_spec`], but a
+/// state is indexed by `spec.vars`, which must hold every variable before the spec
+/// is checked. A module that cannot be loaded is skipped here; `prepare_spec` loads
+/// the same modules and reports why.
+pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) {
+    let mut registry = ModuleRegistry::new();
+    let mut visited = Vec::new();
+    let mut declarations = Declarations::default();
+    for module in &spec.extends {
+        collect_declarations(
+            module,
+            spec_path,
+            &mut registry,
+            &mut visited,
+            &mut declarations,
+        );
+    }
+    declarations.add(&spec.vars, &spec.constants);
+    spec.vars = declarations.vars;
+    spec.constants = declarations.constants;
+}
+
+#[derive(Default)]
+struct Declarations {
+    vars: Vec<Arc<str>>,
+    constants: Vec<Arc<str>>,
+}
+
+impl Declarations {
+    fn add(&mut self, vars: &[Arc<str>], constants: &[Arc<str>]) {
+        for var in vars {
+            if !self.vars.contains(var) {
+                self.vars.push(var.clone());
+            }
+        }
+        for constant in constants {
+            if !self.constants.contains(constant) {
+                self.constants.push(constant.clone());
+            }
+        }
+    }
+}
+
+fn collect_declarations(
+    name: &Arc<str>,
+    spec_path: &Path,
+    registry: &mut ModuleRegistry,
+    visited: &mut Vec<Arc<str>>,
+    declarations: &mut Declarations,
+) {
+    if crate::stdlib::is_stdlib_module(name) || visited.contains(name) {
+        return;
+    }
+    visited.push(name.clone());
+    let Ok(module) = registry.load(name, spec_path) else {
+        return;
+    };
+    let (extends, vars, constants) = (
+        module.extends.clone(),
+        module.vars.clone(),
+        module.constants.clone(),
+    );
+    for inner in &extends {
+        collect_declarations(inner, spec_path, registry, visited, declarations);
+    }
+    declarations.add(&vars, &constants);
+}
+
 type InstanceVars = BTreeMap<Arc<str>, Vec<Arc<str>>>;
 type ResolvedInstances = (
     BTreeMap<Arc<str>, Definitions>,
