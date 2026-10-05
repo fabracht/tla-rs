@@ -713,7 +713,19 @@ fn check_with_state_vars(spec: &Spec, domains: &Env, config: &CheckerConfig) -> 
     let mut view = config
         .view
         .as_ref()
-        .map(|expr| StateView::new(expr, &base_env));
+        .map(|expr| StateView::new(expr, &base_env, &symmetry));
+    if view
+        .as_ref()
+        .is_some_and(|view| !symmetry.is_empty() && view.renamings.is_empty())
+        && !config.quiet
+    {
+        eprintln!(
+            "  Warning: the SYMMETRY group has more than {MAX_VIEW_RENAMINGS} renamings, so a \
+             VIEW is taken of each representative state rather than minimized over its \
+             renamings: states whose views differ only by a renaming may be counted \
+             separately, and the search may find more states than TLC"
+        );
+    }
     let primed_vars = make_primed_names(&spec.vars);
     let mut reusable_env = base_env.clone();
 
@@ -1515,22 +1527,64 @@ fn expand_action_property(
     }
 }
 
+/// Past this many renamings of the symmetric sets, a `VIEW` is not minimized over them.
+const MAX_VIEW_RENAMINGS: usize = 720;
+
 /// The cfg `VIEW`: as TLC fingerprints the view of a state rather than the state,
 /// states with the same view value are one state of the search, and the first one
-/// reached stands for all of them.
+/// reached stands for all of them. Under `SYMMETRY` the view is the least over every
+/// renaming of the state (`renamings`, the symmetry group), so states whose views
+/// differ only by a renaming are one state, as in TLC; `renamings` is empty without
+/// symmetry, or when the group has more than [`MAX_VIEW_RENAMINGS`] elements.
 struct StateView<'a> {
     expr: &'a Expr,
     env: Env,
     seen: HashMap<Value, usize>,
+    symmetry: &'a SymmetryConfig,
+    renamings: Vec<crate::symmetry::Permutation>,
 }
 
 impl<'a> StateView<'a> {
-    fn new(expr: &'a Expr, constants: &Env) -> Self {
+    fn new(expr: &'a Expr, constants: &Env, symmetry: &'a SymmetryConfig) -> Self {
+        let renamings = if symmetry.is_empty() {
+            Vec::new()
+        } else {
+            symmetry.group(MAX_VIEW_RENAMINGS).unwrap_or_default()
+        };
         Self {
             expr,
             env: constants.clone(),
             seen: HashMap::new(),
+            symmetry,
+            renamings,
         }
+    }
+
+    fn key(
+        &mut self,
+        state: &State,
+        vars: &[Arc<str>],
+        defs: &Definitions,
+    ) -> Result<Value, EvalError> {
+        let Self {
+            expr,
+            env,
+            symmetry,
+            renamings,
+            ..
+        } = self;
+        let mut view_of = |state: &State| {
+            bind_state(env, vars, state);
+            eval(expr, env, defs)
+        };
+        let mut least = view_of(state)?;
+        for renaming in renamings.iter() {
+            let value = view_of(&symmetry.permute(state, renaming))?;
+            if value < least {
+                least = value;
+            }
+        }
+        Ok(least)
     }
 }
 
@@ -1547,8 +1601,7 @@ fn insert_state(
     let Some(view) = view else {
         return Ok(states.insert_full(state));
     };
-    bind_state(&mut view.env, vars, &state);
-    let key = eval(view.expr, &mut view.env, defs)?;
+    let key = view.key(&state, vars, defs)?;
     if let Some(&index) = view.seen.get(&key) {
         return Ok((index, false));
     }
@@ -1852,6 +1905,16 @@ fn check_liveness_properties(
     };
 
     let expansion = if symmetry.is_empty() {
+        None
+    } else if config.view.is_some() {
+        if !config.quiet {
+            eprintln!(
+                "  Warning: liveness under SYMMETRY with a VIEW is checked on representative \
+                 states: a step the VIEW merges into a state it did not reach is not a \
+                 renaming, so the graph cannot be expanded by the symmetry group; a property \
+                 stated per element of a symmetric set may be reported violated when it is not"
+            );
+        }
         None
     } else {
         let reduced = ReducedGraph {

@@ -4,7 +4,7 @@
 
 ### Added
 
-- cfg `VIEW Name` (#156): as in TLC, states with the same value of the zero-parameter definition `Name` are one state of the search, the first one reached standing for all of them, so auxiliary or history variables can be kept out of the state space. A step merged into a state it did not reach is still evaluated on the state it reached when checking liveness, so fairness and step formulas such as `[]<><<A>>_v` see the actual step.
+- cfg `VIEW Name` (#156): as in TLC, states with the same value of the zero-parameter definition `Name` are one state of the search, the first one reached standing for all of them, so auxiliary or history variables can be kept out of the state space. A step merged into a state it did not reach is still evaluated on the state it reached when checking liveness, so fairness and step formulas such as `[]<><<A>>_v` see the actual step. Under `SYMMETRY` the view is the least over every renaming of the state, as in TLC, so states whose views differ only by a renaming are one state (beyond 720 renamings the view of the representative state is taken instead, with a warning); liveness under both `SYMMETRY` and `VIEW` is checked on representative states, with a warning.
 - `checker::CheckerConfig::view`.
 
 ### Fixed
