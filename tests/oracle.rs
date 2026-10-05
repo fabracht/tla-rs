@@ -1923,6 +1923,18 @@ fn test_should_pass_extends_cfg_names() {
     }
 }
 
+/// `UNCHANGED` and a `[][Next]_v` / `WF_v` subscript over a tuple whose items are
+/// themselves defined tuples (`tvars == <<vars, l>>`) leave every variable inside
+/// unchanged (TLC: 4 distinct states, `Finished` holds).
+#[test]
+fn test_should_pass_nested_unchanged() {
+    let path = Path::new("test_cases/should_pass/nested_unchanged.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 4),
+        other => panic!("nested_unchanged.tla should pass, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_should_pass_extends_override() {
     let path = Path::new("test_cases/should_pass/extends_override/extends_override.tla");

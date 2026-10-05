@@ -104,6 +104,43 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_expands_nested_tuple_definitions() {
+        let tuple =
+            |names: &[&str]| Expr::TupleLit(names.iter().map(|n| Expr::Var(var(n))).collect());
+        let definition = |body: Expr| (vec![], Arc::new(body));
+        let defs: Definitions = [
+            (var("vars"), definition(tuple(&["x", "y"]))),
+            (var("tvars"), definition(tuple(&["vars", "l"]))),
+            (var("alias"), definition(Expr::Var(var("y")))),
+            (
+                var("deep"),
+                definition(Expr::TupleLit(vec![
+                    tuple(&["x"]),
+                    tuple(&["alias", "tvars"]),
+                ])),
+            ),
+            (var("loop"), definition(Expr::Var(var("loop")))),
+            (
+                var("sum"),
+                definition(Expr::Add(
+                    Box::new(Expr::Var(var("x"))),
+                    Box::new(Expr::Var(var("y"))),
+                )),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let expand = |names: &[&str]| -> Vec<Arc<str>> {
+            core::expand_unchanged_vars(&names.iter().map(|n| var(n)).collect::<Vec<_>>(), &defs)
+        };
+        assert_eq!(expand(&["tvars"]), [var("x"), var("y"), var("l")]);
+        assert_eq!(expand(&["deep"]), [var("x"), var("y"), var("l")]);
+        assert_eq!(expand(&["vars", "x"]), [var("x"), var("y")]);
+        assert_eq!(expand(&["loop"]), [var("loop")]);
+        assert_eq!(expand(&["sum"]), [var("sum")]);
+    }
+
+    #[test]
     fn engine_override_restores_previous_selection_on_drop() {
         let before = super::walk::walk_enabled();
         {

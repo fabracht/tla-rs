@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.21.3] - 2026-10-04
+
+### Fixed
+
+- `UNCHANGED tvars` with `tvars == <<vars, l>>` and `vars` itself a defined tuple of variables did not leave the variables inside `vars` unchanged, and failed with "variable(s) not assigned" (#153). A definition without parameters under `UNCHANGED`, including the `UNCHANGED v` that `[A]_v` stands for as an action, is now expanded through nested tuples and definitions to the variables it names, so the trace-validation idiom `UNCHANGED <<vars, l>>` works.
+
 ## [0.21.2] - 2026-10-04
 
 ### Fixed
