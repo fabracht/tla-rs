@@ -16,6 +16,8 @@ pub struct TlcConfig {
     pub invariants: Vec<Arc<str>>,
     pub properties: Vec<Arc<str>>,
     pub symmetry: Option<Arc<str>>,
+    pub view: Option<Arc<str>>,
+    pub unsupported: Vec<(String, Arc<str>)>,
     pub check_deadlock: Option<bool>,
     pub symbolic_integers: Option<bool>,
     pub constraints: Vec<Arc<str>>,
@@ -33,6 +35,8 @@ impl TlcConfig {
             invariants: Vec::new(),
             properties: Vec::new(),
             symmetry: None,
+            view: None,
+            unsupported: Vec::new(),
             check_deadlock: None,
             symbolic_integers: None,
             constraints: Vec::new(),
@@ -246,6 +250,9 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                     | "CONSTRAINTS"
                     | "ACTION_CONSTRAINT"
                     | "ACTION_CONSTRAINTS"
+                    | "VIEW"
+                    | "ALIAS"
+                    | "POSTCONDITION"
             );
             if is_keyword {
                 tokens.push(Token::Keyword(word));
@@ -588,6 +595,17 @@ pub fn parse_cfg(input: &str) -> Result<TlcConfig, String> {
                     let name = expect_ident(&tokens, &mut pos)?;
                     cfg.symmetry = Some(Arc::from(name.as_str()));
                 }
+                "VIEW" => {
+                    pos += 1;
+                    let name = expect_ident(&tokens, &mut pos)?;
+                    cfg.view = Some(Arc::from(name.as_str()));
+                }
+                "ALIAS" | "POSTCONDITION" => {
+                    let directive = kw.clone();
+                    pos += 1;
+                    let name = expect_ident(&tokens, &mut pos)?;
+                    cfg.unsupported.push((directive, Arc::from(name.as_str())));
+                }
                 "CHECK_DEADLOCK" => {
                     pos += 1;
                     let name = expect_ident(&tokens, &mut pos)?;
@@ -902,6 +920,28 @@ pub fn apply_config(
                 return Err(format!("CONSTRAINT definition '{}' not found in spec", c));
             }
         }
+    }
+
+    if let Some(view_name) = &cfg.view {
+        match spec.definitions.get(view_name.as_ref()) {
+            Some((params, expr)) if params.is_empty() => {
+                checker_config.view = Some((**expr).clone());
+            }
+            Some(_) => {
+                return Err(format!(
+                    "VIEW definition '{view_name}' must have zero parameters"
+                ));
+            }
+            None => {
+                return Err(format!("VIEW definition '{view_name}' not found in spec"));
+            }
+        }
+    }
+
+    for (directive, name) in &cfg.unsupported {
+        warnings.push(format!(
+            "{directive} '{name}' is not yet supported, ignoring"
+        ));
     }
 
     if !cfg.action_constraints.is_empty() {
@@ -1275,6 +1315,20 @@ mod tests {
         let cfg = parse_cfg(input).unwrap();
         assert_eq!(cfg.properties.len(), 1);
         assert_eq!(cfg.properties[0].as_ref(), "Liveness");
+    }
+
+    #[test]
+    fn parse_view_ends_the_preceding_list() {
+        let cfg =
+            parse_cfg("INVARIANT Small\nVIEW Project\nALIAS Show\nPOSTCONDITION Done").unwrap();
+        assert_eq!(cfg.invariants, [Arc::from("Small")]);
+        assert_eq!(cfg.view.as_deref(), Some("Project"));
+        let unsupported: Vec<(&str, &str)> = cfg
+            .unsupported
+            .iter()
+            .map(|(directive, name)| (directive.as_str(), name.as_ref()))
+            .collect();
+        assert_eq!(unsupported, [("ALIAS", "Show"), ("POSTCONDITION", "Done")]);
     }
 
     #[test]

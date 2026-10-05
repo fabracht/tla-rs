@@ -48,6 +48,8 @@ pub struct CheckerConfig {
     #[cfg(not(target_arch = "wasm32"))]
     pub trace_json_path: Option<PathBuf>,
     pub state_constraints: Vec<Expr>,
+    /// The cfg `VIEW`: states with the same value of it are the same state.
+    pub view: Option<Expr>,
     pub allow_unassigned_stutter: bool,
     pub use_inference_engine: bool,
     /// Treat `Nat` and `Int` as symbolic infinite sets (membership works,
@@ -112,6 +114,7 @@ impl Default for CheckerConfig {
             #[cfg(not(target_arch = "wasm32"))]
             trace_json_path: None,
             state_constraints: Vec::new(),
+            view: None,
             allow_unassigned_stutter: false,
             use_inference_engine: false,
             symbolic_integers: false,
@@ -707,6 +710,10 @@ fn check_with_state_vars(spec: &Spec, domains: &Env, config: &CheckerConfig) -> 
     };
 
     let base_env: Env = domains.clone();
+    let mut view = config
+        .view
+        .as_ref()
+        .map(|expr| StateView::new(expr, &base_env));
     let primed_vars = make_primed_names(&spec.vars);
     let mut reusable_env = base_env.clone();
 
@@ -940,7 +947,11 @@ fn check_with_state_vars(spec: &Spec, domains: &Env, config: &CheckerConfig) -> 
             }
         }
         let canonical = symmetry.canonicalize(&state).into_owned();
-        let (idx, is_new) = states.insert_full(canonical);
+        let (idx, is_new) =
+            match insert_state(&mut states, view.as_mut(), canonical, &spec.vars, &defs) {
+                Ok(inserted) => inserted,
+                Err(e) => return CheckResult::InitError(e),
+            };
         if is_new {
             parent.push(None);
             parent_action.push(None);
@@ -1345,13 +1356,26 @@ fn check_with_state_vars(spec: &Spec, domains: &Env, config: &CheckerConfig) -> 
                 }
             }
             let canonical = symmetry.canonicalize(&transition.state).into_owned();
-            if collect_edges && !symmetry.is_empty() && canonical != transition.state {
+            let (succ_idx, is_new) =
+                match insert_state(&mut states, view.as_mut(), canonical, &spec.vars, &defs) {
+                    Ok(inserted) => inserted,
+                    Err(e) => {
+                        let (trace, _actions) =
+                            reconstruct_trace(current_idx, &states, &parent, &parent_action);
+                        let dot = do_export(&states, &parent, Some(current_idx), &all_edges);
+                        return CheckResult::NextError(e, trace, dot);
+                    }
+                };
+            if collect_edges
+                && states
+                    .get_index(succ_idx)
+                    .is_some_and(|stored| *stored != transition.state)
+            {
                 renamed_successors.insert(
                     (current_idx, all_edges[current_idx].len()),
                     transition.state.clone(),
                 );
             }
-            let (succ_idx, is_new) = states.insert_full(canonical);
             if is_new {
                 parent.push(Some(current_idx));
                 parent_action.push(transition.action.clone());
@@ -1489,6 +1513,48 @@ fn expand_action_property(
             "internal: PROPERTY '{name}' has an action part that is not [][A]_v: {other:?}"
         ))),
     }
+}
+
+/// The cfg `VIEW`: as TLC fingerprints the view of a state rather than the state,
+/// states with the same view value are one state of the search, and the first one
+/// reached stands for all of them.
+struct StateView<'a> {
+    expr: &'a Expr,
+    env: Env,
+    seen: HashMap<Value, usize>,
+}
+
+impl<'a> StateView<'a> {
+    fn new(expr: &'a Expr, constants: &Env) -> Self {
+        Self {
+            expr,
+            env: constants.clone(),
+            seen: HashMap::new(),
+        }
+    }
+}
+
+/// Adds `state` to the search: its index and whether it is new. The index is that
+/// of an equal state already found or, under a `VIEW`, of the first state found
+/// with the same view.
+fn insert_state(
+    states: &mut IndexSet<State>,
+    view: Option<&mut StateView<'_>>,
+    state: State,
+    vars: &[Arc<str>],
+    defs: &Definitions,
+) -> Result<(usize, bool), EvalError> {
+    let Some(view) = view else {
+        return Ok(states.insert_full(state));
+    };
+    bind_state(&mut view.env, vars, &state);
+    let key = eval(view.expr, &mut view.env, defs)?;
+    if let Some(&index) = view.seen.get(&key) {
+        return Ok((index, false));
+    }
+    let (index, is_new) = states.insert_full(state);
+    view.seen.insert(key, index);
+    Ok((index, is_new))
 }
 
 fn bind_state(env: &mut Env, names: &[Arc<str>], state: &State) {

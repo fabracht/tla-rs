@@ -38,6 +38,26 @@ fn run_inline(name: &str, module: &str) -> CheckResult {
 // --- Standalone fixture wiring: these test_cases/ liveness specs were never
 // exercised by cargo test, so a semantic regression in them went uncaught. ---
 
+/// Under a cfg `VIEW`, a `Tick` step that changes only the projected-away `aux` is
+/// merged into its own source state. It is still a `Tick` step, not a stutter: the
+/// fair `Tick` loop at x = 3 takes `<<Tick>>_vars` forever, so `[]<><<Tick>>_vars`
+/// holds, and it never returns to x = 0, so `[]<>(x = 0)` is violated (TLC).
+#[test]
+fn view_merged_step_is_still_the_step_taken() {
+    match check_liveness_at(&manifest_path(
+        "test_cases/should_pass/view_fairness_ticks.tla",
+    )) {
+        CheckResult::Ok(_) => {}
+        other => panic!("the fair Tick loop takes <<Tick>>_vars forever; got {other:?}"),
+    }
+    match check_liveness_at(&manifest_path(
+        "test_cases/should_violate/view_fairness.tla",
+    )) {
+        CheckResult::LivenessViolation(violation, _) => assert_eq!(&*violation.property, "Back"),
+        other => panic!("the fair Tick loop at x = 3 violates Back; got {other:?}"),
+    }
+}
+
 #[test]
 fn fixture_eventually_holds_under_weak_fairness() {
     match check_liveness_at(&manifest_path("test_cases/should_pass/eventually_test.tla")) {
