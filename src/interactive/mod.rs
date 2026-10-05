@@ -59,9 +59,8 @@ pub fn run_interactive(spec: &Spec, domains: &Env, spec_path: &str) -> io::Resul
     let Some(initial) = initial_states.into_iter().next() else {
         let mut diag = Diagnostic::error("no initial states found");
         let missing: Vec<&str> = spec
-            .constants
-            .iter()
-            .filter(|c| !domains.contains_key(c))
+            .unassigned_constants(domains)
+            .into_iter()
             .map(|c| c.as_ref())
             .collect();
         if !missing.is_empty() {

@@ -431,6 +431,27 @@ pub struct Spec {
     /// The cfg `SPECIFICATION`'s temporal conjuncts other than `WF`/`SF`, which TLC
     /// treats as assumptions: only behaviors satisfying them are checked.
     pub temporal_assumptions: Vec<Expr>,
+    /// The cfg's `Name <- Definition` substitutions for constants: `Name` takes the
+    /// value of the zero-parameter `Definition`, evaluated once the modules the spec
+    /// extends and instantiates are loaded.
+    pub constant_substitutions: Vec<(Arc<str>, Arc<str>)>,
+}
+
+impl Spec {
+    /// The declared constants that neither have a value in `domains` nor are
+    /// substituted by the cfg.
+    pub fn unassigned_constants<'a>(&'a self, domains: &Env) -> Vec<&'a Arc<str>> {
+        self.constants
+            .iter()
+            .filter(|c| {
+                !domains.contains_key(c)
+                    && !self
+                        .constant_substitutions
+                        .iter()
+                        .any(|(name, _)| name == *c)
+            })
+            .collect()
+    }
 }
 
 /// `[](P => <>Q)` with `P` and `Q` free of temporal operators, which is exactly

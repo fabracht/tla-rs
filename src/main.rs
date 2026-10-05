@@ -918,11 +918,7 @@ fn main() -> ExitCode {
             println!("  Variables: {} declared", spec.vars.len());
         }
 
-        let missing: Vec<_> = spec
-            .constants
-            .iter()
-            .filter(|c| !domains.contains_key(c))
-            .collect();
+        let missing = spec.unassigned_constants(&domains);
         if !missing.is_empty() {
             eprintln!(
                 "  Missing constants: {}",
@@ -1472,9 +1468,8 @@ fn main() -> ExitCode {
             let mut diag = Diagnostic::error("no initial states found");
             if !spec.constants.is_empty() {
                 let missing: Vec<_> = spec
-                    .constants
-                    .iter()
-                    .filter(|c| !domains.contains_key(c))
+                    .unassigned_constants(&domains)
+                    .into_iter()
                     .map(|c| c.as_ref())
                     .collect();
                 if !missing.is_empty() {
@@ -1548,7 +1543,8 @@ fn main() -> ExitCode {
         }
         CheckResult::PrepareError(
             PrepareSpecError::RefinementConfigError(message)
-            | PrepareSpecError::LivenessProperty(message),
+            | PrepareSpecError::LivenessProperty(message)
+            | PrepareSpecError::ConstantSubstitution(message),
         ) => {
             eprintln!(
                 "{}",

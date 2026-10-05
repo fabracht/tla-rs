@@ -511,7 +511,8 @@ fn map_prepare_error(err: PrepareSpecError, source: &Source) -> CheckOutcome {
         PrepareSpecError::RefinementConfigError(message) => {
             (ErrorPhase::Config, StructuredError::internal(message))
         }
-        PrepareSpecError::LivenessProperty(message) => {
+        PrepareSpecError::LivenessProperty(message)
+        | PrepareSpecError::ConstantSubstitution(message) => {
             (ErrorPhase::Config, StructuredError::config(message))
         }
     };

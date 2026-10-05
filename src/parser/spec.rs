@@ -277,6 +277,7 @@ impl Parser {
             liveness_properties: self.liveness_properties.clone(),
             safety_properties: Vec::new(),
             temporal_assumptions: Vec::new(),
+            constant_substitutions: Vec::new(),
         })
     }
 

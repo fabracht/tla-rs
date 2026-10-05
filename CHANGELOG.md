@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.20.0] - 2026-10-04
+
+### Added
+
+- cfg constant substitution `Name <- Definition` in a `CONSTANT`/`CONSTANTS` section, as in TLC (#154): the constant takes the value of the zero-parameter `Definition`, evaluated once the modules the spec extends and instantiates are loaded, so it may use their operators and the other constants, substituted ones included in any order. A value given for the same name by `--constant`, `--sweep` or the WASM API overrides it. A missing definition, one with parameters, one that does not evaluate to a constant value (it reads a variable, say), a substitution for a defined operator rather than a constant, and the module-scoped form `Name <- [Module] Definition` are each reported with a message instead of failing to parse at `<`.
+
+### Changed
+
+- `ast::Spec` has a `constant_substitutions` field, and `checker::PrepareSpecError` a `ConstantSubstitution` variant (`config_error` in `--json`, phase `config` in MCP).
+
 ## [0.19.1] - 2026-10-04
 
 ### Fixed
