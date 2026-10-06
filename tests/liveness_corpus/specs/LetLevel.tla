@@ -6,6 +6,7 @@ Inc == x < 2 /\ x' = x + 1 /\ y' = y
 Spec == Init /\ [][Inc]_vars /\ WF_vars(Inc)
 En(a) == ENABLED a
 Lt3(v) == v < 2
+EnOf(v) == ENABLED (v' = v + 1)
 ViaLet == [](LET a == Inc IN ENABLED a)
 ViaCall == []En(Inc)
 LetUnused == [](LET a == Inc IN x < 2)
@@ -20,4 +21,9 @@ ParamLet == [](LET F(v) == v' = v IN x < 2)
 LetInEnabledCall == [](ENABLED K(Inc))
 TopLet == LET a == Inc IN x > 0
 TopLetHolds == LET a == Inc IN x = 0
+LocalHigherOrder == [](LET G(A) == ENABLED A IN G(Inc))
+QuantifiedLet == \A p \in {1, 2} : [](LET a == Inc IN x < 2)
+LetOfEnabled == [](LET a == ENABLED Inc IN a)
+LetActionUnderEnabled == [](LET a == Inc IN (ENABLED (x' = x) /\ x < 2))
+ParamUnderEnabled == [](EnOf(x) /\ x < 2)
 ====

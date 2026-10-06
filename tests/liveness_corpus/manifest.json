@@ -4345,5 +4345,100 @@
     "tla_rs_now_kind": null,
     "xfail_until_phase": null,
     "note": "checked on the initial states, and it holds (#134)."
+  },
+  {
+    "id": "C225",
+    "spec": "specs/LetLevel.tla",
+    "cfg": "cfgs/C225.cfg",
+    "specification": "Spec",
+    "property": "LocalHigherOrder",
+    "property_text": "[](LET G(A) == ENABLED A IN G(Inc))",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property LocalHigherOrder was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.024053 (rev: 0dab95e)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "3",
+    "note": "a call to a parameterized LET operator with an action argument counts the argument: temporal (#134). The legacy engine classifies it as an invariant (same violation, kind only)."
+  },
+  {
+    "id": "C226",
+    "spec": "specs/LetLevel.tla",
+    "cfg": "cfgs/C226.cfg",
+    "specification": "Spec",
+    "property": "QuantifiedLet",
+    "property_text": "\\A p \\in {1, 2} : [](LET a == Inc IN x < 2)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property QuantifiedLet was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.024053 (rev: 0dab95e)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "3",
+    "note": "the level rule applies under a quantifier: temporal (#134). The legacy engine classifies it as an invariant (same violation, kind only)."
+  },
+  {
+    "id": "C227",
+    "spec": "specs/LetLevel.tla",
+    "cfg": "cfgs/C227.cfg",
+    "specification": "Spec",
+    "property": "LetOfEnabled",
+    "property_text": "[](LET a == ENABLED Inc IN a)",
+    "expected": "violated",
+    "kind": "invariant",
+    "tlc": {
+      "verdict_raw": "Error: Invariant LetOfEnabled is violated.",
+      "exit_code": 12,
+      "version": "2026.10.01.024053 (rev: 0dab95e)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": null,
+    "note": "a LET definition that is ENABLED of an action is at state level: invariant (#134)."
+  },
+  {
+    "id": "C228",
+    "spec": "specs/LetLevel.tla",
+    "cfg": "cfgs/C228.cfg",
+    "specification": "Spec",
+    "property": "LetActionUnderEnabled",
+    "property_text": "[](LET a == Inc IN (ENABLED (x' = x) /\\ x < 2))",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property LetActionUnderEnabled was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.024053 (rev: 0dab95e)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": "3",
+    "note": "an action LET definition counts even when the body's actions are all under ENABLED: temporal (#134). The legacy engine classifies it as an invariant (same violation, kind only)."
+  },
+  {
+    "id": "C229",
+    "spec": "specs/LetLevel.tla",
+    "cfg": "cfgs/C229.cfg",
+    "specification": "Spec",
+    "property": "ParamUnderEnabled",
+    "property_text": "[](EnOf(x) /\\ x < 2)",
+    "expected": "violated",
+    "kind": "invariant",
+    "tlc": {
+      "verdict_raw": "Error: Invariant ParamUnderEnabled is violated.",
+      "exit_code": 12,
+      "version": "2026.10.01.024053 (rev: 0dab95e)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "invariant",
+    "xfail_until_phase": null,
+    "note": "a parameter primed only under the operator's ENABLED, with a state argument, stays at state level: invariant (#134)."
   }
 ]
