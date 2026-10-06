@@ -2009,6 +2009,30 @@ fn test_should_pass_view_symmetry() {
     }
 }
 
+/// A non-junction token at or left of a junction list's bullet ends the list, which
+/// is then one operand of the expression it starts (`/\ a /\ b => c` is
+/// `(a /\ b) => c`), including inside a quantifier body and after an item holding a
+/// quantifier, `IF` or `LET` (TLC: every invariant holds).
+#[test]
+fn test_should_pass_bullet_implication() {
+    let path = Path::new("test_cases/should_pass/bullet_implication.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("bullet_implication.tla should pass, got: {other:?}"),
+    }
+}
+
+/// openraft's `LogMatching` shape: the guard list before `=>` at the bullet column
+/// is the antecedent, so empty logs satisfy it (TLC: 9 distinct states, holds).
+#[test]
+fn test_should_pass_log_matching() {
+    let path = Path::new("test_cases/should_pass/log_matching.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 9),
+        other => panic!("log_matching.tla should pass, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_should_pass_extends_override() {
     let path = Path::new("test_cases/should_pass/extends_override/extends_override.tla");

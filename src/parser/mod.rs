@@ -342,6 +342,80 @@ mod tests {
         assert_eq!(disjuncts(else_branch), 3);
     }
 
+    fn conjuncts(e: &Expr) -> usize {
+        match e {
+            Expr::And(l, r) => conjuncts(l) + conjuncts(r),
+            _ => 1,
+        }
+    }
+
+    #[test]
+    fn implication_at_the_bullet_takes_the_whole_list() {
+        let input = r"/\ x > 10
+/\ x < 20
+=> x = 42";
+        let Expr::Implies(list, _) = parse_expr(input).unwrap() else {
+            panic!("expected the list to be the antecedent");
+        };
+        assert_eq!(conjuncts(&list), 2);
+        let input = r"\/ x > 10
+\/ x < 0
+<=> x = 42";
+        assert!(
+            matches!(parse_expr(input).unwrap(), Expr::Equiv(list, _) if disjuncts(&list) == 2)
+        );
+    }
+
+    #[test]
+    fn implication_right_of_the_bullet_continues_the_item() {
+        let input = r"/\ x > 1
+/\ x < 0
+     => x = 42";
+        let expr = parse_expr(input).unwrap();
+        let Expr::And(_, last) = &expr else {
+            panic!("expected a two-item list, got {expr:?}");
+        };
+        assert!(matches!(last.as_ref(), Expr::Implies(_, _)));
+    }
+
+    #[test]
+    fn implication_at_an_inner_bullet_takes_the_inner_list() {
+        let inner = r"/\ x < 5
+/\ \/ x < 5
+   \/ x > 10
+   => x = 42";
+        let Expr::And(_, item) = parse_expr(inner).unwrap() else {
+            panic!("expected a two-item outer list");
+        };
+        assert!(matches!(item.as_ref(), Expr::Implies(list, _) if disjuncts(list) == 2));
+        let outer = r"/\ x < 5
+/\ \/ x < 5
+   \/ x > 10
+=> x = 42";
+        let Expr::Implies(list, _) = parse_expr(outer).unwrap() else {
+            panic!("expected the outer list to be the antecedent");
+        };
+        assert_eq!(conjuncts(&list), 2);
+    }
+
+    #[test]
+    fn implication_at_the_bullet_ends_a_quantifier_body_in_an_item() {
+        let input = r"\A i \in S :
+  /\ i > 10
+  /\ x < 20
+  => x = 42";
+        let Expr::Forall(_, _, body) = parse_expr(input).unwrap() else {
+            panic!("expected a quantifier");
+        };
+        assert!(matches!(body.as_ref(), Expr::Implies(list, _) if conjuncts(list) == 2));
+        let input = r"/\ x > 5
+/\ \A i \in S : i > 0
+=> x = 42";
+        assert!(
+            matches!(parse_expr(input).unwrap(), Expr::Implies(list, _) if conjuncts(&list) == 2)
+        );
+    }
+
     #[test]
     fn disjunct_right_of_the_bullet_continues_the_item() {
         let input = r"\/ x' = 1 \/ x' = 2

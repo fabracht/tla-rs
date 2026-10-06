@@ -14,6 +14,9 @@ impl Parser {
     fn parse_implies(&mut self) -> Result<Expr> {
         let mut left = self.parse_or()?;
         loop {
+            if self.at_enclosing_bullet() {
+                break;
+            }
             match self.peek() {
                 Token::Implies => {
                     self.advance();
@@ -97,6 +100,18 @@ impl Parser {
         }
     }
 
+    /// Whether the current token, outside parentheses, sits at or left of the bullet
+    /// column of the innermost junction list being parsed: there it ends the list's
+    /// current item, so an operator such as `=>` takes the whole list as its left
+    /// operand, as in SANY.
+    fn at_enclosing_bullet(&self) -> bool {
+        self.paren_depth == 0
+            && self
+                .list_col_stack
+                .last()
+                .is_some_and(|&bullet| self.current_column() <= bullet)
+    }
+
     /// Whether the junction at the current token ends a nested body (a quantifier
     /// body, an `IF` branch) that began at `start_line`/`start_col`: inside a
     /// junction list, at or left of the innermost bullet column, as in SANY;
@@ -111,6 +126,7 @@ impl Parser {
     pub(super) fn parse_and_conjunct(&mut self, list_col: Option<u32>) -> Result<Expr> {
         let left = self.parse_comparison()?;
         let mut result = match self.peek() {
+            _ if self.at_enclosing_bullet() => left,
             Token::Implies => {
                 self.advance();
                 let right = self.parse_comparison()?;
@@ -225,6 +241,9 @@ impl Parser {
     fn parse_single_implies(&mut self) -> Result<Expr> {
         let mut left = self.parse_single_or()?;
         loop {
+            if self.at_enclosing_bullet() {
+                break;
+            }
             match self.peek() {
                 Token::Implies => {
                     self.advance();
@@ -304,6 +323,9 @@ impl Parser {
     pub(super) fn parse_quantifier_body(&mut self) -> Result<Expr> {
         let mut left = self.parse_quantifier_or()?;
         loop {
+            if self.at_enclosing_bullet() {
+                break;
+            }
             match self.peek() {
                 Token::Implies => {
                     self.advance();

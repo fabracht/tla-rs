@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.23.1] - 2026-10-06
+
+### Fixed
+
+- A junction list followed by `=>` or `<=>` at or left of its bullet column took the operator into its last item, so `/\ x > 10 /\ x < 20` over two lines followed by `=> x = 42` meant `x > 10 /\ (x < 20 => x = 42)` and a guarded invariant was reported violated (or held) for the wrong reason, with no error (#167). As in SANY, a token at or left of the innermost bullet column now ends the list's current item, so the list is one operand of the expression it starts: `(x > 10 /\ x < 20) => x = 42`. This holds for `/\` and `\/` lists, nested lists (the innermost bullet decides), and an item ending in a quantifier, `IF` or `LET`; an `=>` right of the bullet still continues the item.
+
 ## [0.23.0] - 2026-10-05
 
 ### Fixed
