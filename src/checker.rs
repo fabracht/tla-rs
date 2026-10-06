@@ -2345,7 +2345,7 @@ pub fn format_value(val: &Value) -> String {
     match val {
         Value::Bool(b) => b.to_string(),
         Value::Int(i) => i.to_string(),
-        Value::Str(s) => format!("\"{}\"", s),
+        Value::Str(s) => crate::ast::quote_string(s),
         Value::Model(m) => m.to_string(),
         Value::IntSet(d) => d.name().to_string(),
         Value::Set(s) => {

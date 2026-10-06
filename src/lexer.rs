@@ -330,6 +330,38 @@ impl<'a> Lexer<'a> {
             .any(char::is_alphabetic)
     }
 
+    /// The rest of a string literal whose opening `"` was just consumed, through
+    /// the closing `"`. As in SANY, `\"`, `\\`, `\n`, `\t`, `\r` and `\f` stand
+    /// for one character each, and any other escape is an error.
+    fn string_literal(&mut self) -> Result<Arc<str>, LexError> {
+        let mut text = String::new();
+        while let Some(c) = self.advance() {
+            match c {
+                '"' => break,
+                '\\' => {
+                    let escape = self.pos - 1;
+                    text.push(match self.advance() {
+                        Some('"') => '"',
+                        Some('\\') => '\\',
+                        Some('n') => '\n',
+                        Some('t') => '\t',
+                        Some('r') => '\r',
+                        Some('f') => '\u{c}',
+                        other => {
+                            let shown = other.map(String::from).unwrap_or_default();
+                            return Err(LexError::new(
+                                format!("unknown escape `\\{shown}` in a string"),
+                                escape,
+                            ));
+                        }
+                    });
+                }
+                c => text.push(c),
+            }
+        }
+        Ok(text.into())
+    }
+
     fn advance(&mut self) -> Option<char> {
         let c = self.peek_char()?;
         self.pos += c.len_utf8();
@@ -746,13 +778,7 @@ impl<'a> Lexer<'a> {
 
         if c == '"' {
             self.advance();
-            let start = self.pos;
-            while self.peek_char().is_some_and(|c| c != '"') {
-                self.advance();
-            }
-            let s: Arc<str> = self.input[start..self.pos].into();
-            self.advance();
-            return Ok(Token::Str(s));
+            return Ok(Token::Str(self.string_literal()?));
         }
 
         if c.is_ascii_digit() {
@@ -1225,13 +1251,7 @@ impl<'a> Lexer<'a> {
 
         if c == '"' {
             self.advance();
-            let start = self.pos;
-            while self.peek_char().is_some_and(|c| c != '"') {
-                self.advance();
-            }
-            let s: Arc<str> = self.input[start..self.pos].into();
-            self.advance();
-            return Ok(Token::Str(s));
+            return Ok(Token::Str(self.string_literal()?));
         }
 
         if c.is_ascii_digit() {
@@ -1396,6 +1416,21 @@ impl From<LexError> for String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn string_escapes_stand_for_one_character_each() {
+        let mut lexer = Lexer::new(r#""a\"b\\c\nd\te\rf\fg""#);
+        assert_eq!(
+            lexer.tokenize().unwrap(),
+            vec![Token::Str("a\"b\\c\nd\te\rf\u{c}g".into()), Token::Eof]
+        );
+    }
+
+    #[test]
+    fn an_unknown_string_escape_is_an_error() {
+        let error = Lexer::new(r#""a\qb""#).tokenize().unwrap_err();
+        assert!(error.contains("unknown escape"), "{error}");
+    }
 
     #[test]
     fn lex_leading_underscore_identifier() {

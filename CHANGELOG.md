@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.3] - 2026-10-06
+
+### Fixed
+
+- A string literal ended at an escaped quote, so `"a\"b"` failed to parse, and a trace value holding nested JSON (`"[\"4916d32b\",\"work-1\"]"`) failed with an error pointing inside the string (#172). As in SANY, `\"`, `\\`, `\n`, `\t`, `\r` and `\f` now stand for one character each, any other escape is an error, and values are printed with their escapes, as TLC prints them. A cfg string keeps its backslashes, as in TLC.
+- `STRING`, the set of all strings, was an undefined variable (#173). It is now a built-in infinite set: `s \in STRING` holds for every string, and enumerating it (`\A s \in STRING : ...`) fails with "cannot enumerate the infinite set STRING", as TLC rejects it.
+
 ## [0.23.2] - 2026-10-06
 
 ### Fixed

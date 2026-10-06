@@ -1,10 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+/// An infinite set decided by membership rather than enumerated: `Nat` and `Int`
+/// under symbolic integers, and `STRING`, the set of all strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IntDomain {
     Nat,
     Int,
+    String,
 }
 
 impl IntDomain {
@@ -12,15 +15,37 @@ impl IntDomain {
         match self {
             IntDomain::Nat => "Nat",
             IntDomain::Int => "Int",
+            IntDomain::String => "STRING",
         }
     }
 
-    pub fn contains(self, n: i64) -> bool {
-        match self {
-            IntDomain::Nat => n >= 0,
-            IntDomain::Int => true,
+    pub fn contains(self, value: &Value) -> bool {
+        match (self, value) {
+            (IntDomain::Nat, Value::Int(n)) => *n >= 0,
+            (IntDomain::Int, Value::Int(_)) | (IntDomain::String, Value::Str(_)) => true,
+            _ => false,
         }
     }
+}
+
+/// `text` as a TLA+ string literal, with `"`, `\` and the control characters a
+/// literal can hold escaped as SANY reads them.
+pub fn quote_string(text: &str) -> String {
+    let mut quoted = String::with_capacity(text.len() + 2);
+    quoted.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            '\n' => quoted.push_str("\\n"),
+            '\t' => quoted.push_str("\\t"),
+            '\r' => quoted.push_str("\\r"),
+            '\u{c}' => quoted.push_str("\\f"),
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

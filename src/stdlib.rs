@@ -8,6 +8,7 @@ pub fn load_builtins(env: &mut Env) {
         .into_iter()
         .collect();
     env.insert(Arc::from("BOOLEAN"), Value::set(boolean));
+    env.insert(Arc::from("STRING"), Value::IntSet(IntDomain::String));
 }
 
 pub fn is_stdlib_module(name: &str) -> bool {

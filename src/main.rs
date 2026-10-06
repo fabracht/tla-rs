@@ -151,7 +151,7 @@ fn format_value_short(val: &Value) -> String {
         }
         Value::Int(n) => n.to_string(),
         Value::Bool(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
-        Value::Str(s) => format!("\"{}\"", s),
+        Value::Str(s) => tla_checker::ast::quote_string(s),
         Value::Model(m) => m.to_string(),
         other => format!("{:?}", other),
     }

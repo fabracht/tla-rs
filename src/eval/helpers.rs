@@ -277,7 +277,7 @@ pub(crate) fn in_set_symbolic(
         }
         _ => match eval(set_expr, env, defs)? {
             Value::Set(s) => Ok(s.contains(val)),
-            Value::IntSet(d) => Ok(matches!(val, Value::Int(n) if d.contains(*n))),
+            Value::IntSet(d) => Ok(d.contains(val)),
             other => Err(EvalError::type_mismatch("Set", other)),
         },
     }
