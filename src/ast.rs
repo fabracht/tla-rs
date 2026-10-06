@@ -664,7 +664,9 @@ pub enum PropertyPart {
 /// With [`Classification::Syntactic`] the property is classified as TLC does, on its
 /// syntax once operators are expanded: only a state predicate, `[]P` and `[][A]_v`
 /// are safety parts, and every other conjunct, whatever its shape, is passed whole
-/// to the tableau checker.
+/// to the tableau checker. `[]P` is a safety part only when TLC's level bound of `P`
+/// ([`crate::level::Levels::bound`]) is at most that of a state, and an error when
+/// `P` is an action, as in SANY.
 pub fn classify_property(
     expr: &Expr,
     vars: &[Arc<str>],
@@ -675,7 +677,8 @@ pub fn classify_property(
     let normalized = normalizer.normalize(expr, &[], &mut Vec::new(), 0);
     normalizer.require_constant_domains(&normalized)?;
     let mut parts = Vec::new();
-    classify_into(&normalized, mode, &mut parts)?;
+    let mut levels = crate::level::LevelAnalysis::new(vars, defs);
+    classify_into(&normalized, mode, &mut levels, &mut parts)?;
     Ok(parts)
 }
 
@@ -1042,6 +1045,7 @@ fn push_guard(guard: &Expr, body: &Expr) -> Option<Expr> {
 fn classify_into(
     expr: &Expr,
     mode: Classification,
+    levels: &mut crate::level::LevelAnalysis<'_>,
     parts: &mut Vec<PropertyPart>,
 ) -> Result<(), String> {
     if is_state_level(expr) {
@@ -1050,8 +1054,8 @@ fn classify_into(
     }
     match expr {
         Expr::And(l, r) => {
-            classify_into(l, mode, parts)?;
-            classify_into(r, mode, parts)
+            classify_into(l, mode, levels, parts)?;
+            classify_into(r, mode, levels, parts)
         }
         Expr::Or(_, _) if mode == Classification::Syntactic => {
             parts.push(PropertyPart::Liveness(expr.clone()));
@@ -1059,8 +1063,8 @@ fn classify_into(
         }
         Expr::Or(l, r) => {
             let mut disjuncts = Vec::new();
-            classify_into(l, mode, &mut disjuncts)?;
-            classify_into(r, mode, &mut disjuncts)?;
+            classify_into(l, mode, levels, &mut disjuncts)?;
+            classify_into(r, mode, levels, &mut disjuncts)?;
             if !disjuncts
                 .iter()
                 .all(|part| matches!(part, PropertyPart::Liveness(_)))
@@ -1074,7 +1078,16 @@ fn classify_into(
             Ok(())
         }
         Expr::Always(inner) if is_state_level(inner) => {
-            parts.push(PropertyPart::Invariant((**inner).clone()));
+            use crate::level::Level;
+            let inner_levels = levels.levels(inner);
+            if inner_levels.exact == Level::Action {
+                return Err("[] followed by an action not of the form [A]_v".to_string());
+            }
+            if inner_levels.bound <= Level::State || mode == Classification::Rewriting {
+                parts.push(PropertyPart::Invariant((**inner).clone()));
+            } else {
+                parts.push(PropertyPart::Liveness(expr.clone()));
+            }
             Ok(())
         }
         Expr::BoxAction(_, _) => {
@@ -1085,7 +1098,7 @@ fn classify_into(
             let bind = |inner: Expr| Expr::Forall(var.clone(), domain.clone(), Box::new(inner));
             let mut has_liveness = false;
             let mut body_parts = Vec::new();
-            classify_into(body, mode, &mut body_parts)?;
+            classify_into(body, mode, levels, &mut body_parts)?;
             for part in body_parts {
                 match part {
                     PropertyPart::Init(p) => parts.push(PropertyPart::Init(bind(p))),

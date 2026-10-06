@@ -129,7 +129,7 @@ fn disjunct_matches(
 /// would (as in TLC, the constraint prunes behaviors, not enabledness), or, failing
 /// both, when `A` itself has a successor that changes `v`: an action `Next` never
 /// takes is enabled wherever it could be taken, as `ENABLED` says. That last check
-/// is skipped for an `A` provably a sub-action of `Next` ([`is_sub_action`]), whose
+/// is skipped for an `A` provably a sub-action of `Next` (`is_sub_action`), whose
 /// every step is an explored edge or a successor outside the `CONSTRAINT`. `taken` is
 /// exact for every edge inside a full-graph SCC, the only edges a fair cycle can
 /// use; edges that leave the SCC are evaluated only until one proves enabledness.

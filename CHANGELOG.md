@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.23.0] - 2026-10-05
+
+### Fixed
+
+- A `PROPERTY` `[]P` whose `P` holds an action in a `LET` definition or an operator argument, such as `[](LET a == Inc IN ENABLED a)` or `[]En(Inc)`, was classified as an invariant, where TLC treats it as a temporal property: the violation was the same, but it was reported as an invariant violation (#134). Properties are now classified by expression levels computed as SANY and TLC do (`level::LevelAnalysis`): under the tableau engine, `[]P` is an invariant only when TLC's level bound of `P`, which counts a `LET`'s definitions and an application's arguments, is that of a state (`ENABLED` makes its operand a state formula, so `[](ENABLED Inc)` stays an invariant). The legacy engine keeps classifying such a `[]P` as an invariant.
+- `[]P` over an action not under `ENABLED`, such as `[](x' >= x)` or `[](UNCHANGED y)`, was taken as an invariant and failed while checking with "undefined variable"; it is now rejected when the cfg is applied, as SANY rejects it ("[] followed by an action not of the form [A]_v").
+
+### Added
+
+- `level::Level`, `level::Levels` and `level::LevelAnalysis`.
+
 ## [0.22.1] - 2026-10-05
 
 ### Fixed

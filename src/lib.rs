@@ -10,6 +10,7 @@ pub mod graph;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod interactive;
 pub mod intern;
+pub mod level;
 pub mod lexer;
 pub mod liveness;
 #[cfg(not(target_arch = "wasm32"))]
