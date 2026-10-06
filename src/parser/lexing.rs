@@ -34,10 +34,12 @@ pub struct Parser {
     /// `LET` binding shadows it, and inlining would use the wrong (top-level) body.
     pub(super) let_scope: Vec<Arc<str>>,
     /// Bullet columns of the junction lists whose items are currently being
-    /// parsed, innermost last. A `/\` or `\/` at or left of the innermost column
-    /// ends the current item, so a nested expression — a `LET` body, an `IF`
-    /// branch — stops there instead of swallowing the next bullet of an
-    /// enclosing list. Empty at paren depth, where alignment does not apply.
+    /// parsed, innermost last. A token at or left of the innermost column ends the
+    /// current item, so a nested expression — a `LET` body, an `IF` branch, an
+    /// implication — stops there instead of swallowing the next bullet of an
+    /// enclosing list or the operator the list is an operand of. Alignment does not
+    /// apply inside parentheses: the stack is kept there, and readers check
+    /// `paren_depth` before using it.
     pub(super) list_col_stack: Vec<u32>,
     /// Whether the `/`-is-integer-division warning has already been emitted, so a
     /// spec with many `/` uses gets one warning, not one per occurrence.

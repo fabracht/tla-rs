@@ -12,26 +12,37 @@ impl Parser {
     }
 
     fn parse_implies(&mut self) -> Result<Expr> {
-        let mut left = self.parse_or()?;
+        self.parse_implication(Self::parse_or)
+    }
+
+    /// An implication over `operand`s, as TLA+ ranks them: `=>` binds looser than
+    /// `<=>` and `~>`, which bind looser than the junctions `operand` parses. An
+    /// operator at or left of the enclosing bullet column ends the expression, so
+    /// it applies to the junction list the expression is an item of.
+    fn parse_implication(&mut self, operand: fn(&mut Self) -> Result<Expr>) -> Result<Expr> {
+        let mut left = self.parse_equivalence(operand)?;
+        while *self.peek() == Token::Implies && !self.at_enclosing_bullet() {
+            self.advance();
+            let right = self.parse_equivalence(operand)?;
+            left = Expr::Implies(Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_equivalence(&mut self, operand: fn(&mut Self) -> Result<Expr>) -> Result<Expr> {
+        let mut left = operand(self)?;
         loop {
-            match self.peek() {
-                Token::Implies => {
-                    self.advance();
-                    let right = self.parse_or()?;
-                    left = Expr::Implies(Box::new(left), Box::new(right));
-                }
-                Token::Equiv => {
-                    self.advance();
-                    let right = self.parse_or()?;
-                    left = Expr::Equiv(Box::new(left), Box::new(right));
-                }
-                Token::LeadsTo => {
-                    self.advance();
-                    let right = self.parse_or()?;
-                    left = Expr::LeadsTo(Box::new(left), Box::new(right));
-                }
+            let combine: fn(Box<Expr>, Box<Expr>) -> Expr = match self.peek() {
+                Token::Equiv => Expr::Equiv,
+                Token::LeadsTo => Expr::LeadsTo,
                 _ => break,
+            };
+            if self.at_enclosing_bullet() {
+                break;
             }
+            self.advance();
+            let right = operand(self)?;
+            left = combine(Box::new(left), Box::new(right));
         }
         Ok(left)
     }
@@ -87,14 +98,30 @@ impl Parser {
 
     fn parse_or_item(&mut self, bullet: Option<u32>) -> Result<Expr> {
         match bullet {
-            Some(column) => {
-                self.list_col_stack.push(column);
-                let item = self.parse_and();
-                self.list_col_stack.pop();
-                item
-            }
+            Some(column) => self.parse_bullet_item(column),
             None => self.parse_and(),
         }
+    }
+
+    /// One item of a junction list whose bullet is at `column`: a whole expression,
+    /// implications included, that ends at the first token at or left of `column`.
+    pub(super) fn parse_bullet_item(&mut self, column: u32) -> Result<Expr> {
+        self.list_col_stack.push(column);
+        let item = self.parse_implies();
+        self.list_col_stack.pop();
+        item
+    }
+
+    /// Whether the current token, outside parentheses, sits at or left of the bullet
+    /// column of the innermost junction list being parsed: there it ends the list's
+    /// current item, so an operator such as `=>` takes the whole list as its left
+    /// operand, as in SANY.
+    fn at_enclosing_bullet(&self) -> bool {
+        self.paren_depth == 0
+            && self
+                .list_col_stack
+                .last()
+                .is_some_and(|&bullet| self.current_column() <= bullet)
     }
 
     /// Whether the junction at the current token ends a nested body (a quantifier
@@ -109,20 +136,7 @@ impl Parser {
     }
 
     pub(super) fn parse_and_conjunct(&mut self, list_col: Option<u32>) -> Result<Expr> {
-        let left = self.parse_comparison()?;
-        let mut result = match self.peek() {
-            Token::Implies => {
-                self.advance();
-                let right = self.parse_comparison()?;
-                Expr::Implies(Box::new(left), Box::new(right))
-            }
-            Token::Equiv => {
-                self.advance();
-                let right = self.parse_comparison()?;
-                Expr::Equiv(Box::new(left), Box::new(right))
-            }
-            _ => left,
-        };
+        let mut result = self.parse_comparison()?;
         while *self.peek() == Token::And {
             if let Some(lc) = list_col
                 && self.paren_depth == 0
@@ -143,14 +157,7 @@ impl Parser {
         Ok(result)
     }
 
-    pub(super) fn parse_and_item(&mut self, list_col: u32) -> Result<Expr> {
-        self.list_col_stack.push(list_col);
-        let result = self.parse_and_item_inner(list_col);
-        self.list_col_stack.pop();
-        result
-    }
-
-    fn parse_and_item_inner(&mut self, list_col: u32) -> Result<Expr> {
+    fn parse_infix_and_operand(&mut self, list_col: u32) -> Result<Expr> {
         let start_line = self.current_line();
         let mut item = self.parse_and_conjunct(Some(list_col))?;
         while *self.peek() == Token::Or {
@@ -176,8 +183,9 @@ impl Parser {
             self.advance();
             self.consume_label();
         }
+        let bulleted = list_anchor.is_some();
         let mut left = if let Some((lc, _)) = list_anchor {
-            self.parse_and_item(lc)?
+            self.parse_bullet_item(lc)?
         } else {
             self.parse_and_conjunct(None)?
         };
@@ -199,10 +207,10 @@ impl Parser {
                     }
                     self.advance();
                     let label = self.consume_label();
-                    let right = if let Some((lc, _)) = list_anchor {
-                        self.parse_and_item(lc)?
-                    } else {
-                        self.parse_and_conjunct(None)?
+                    let right = match list_anchor {
+                        Some((lc, _)) if bulleted => self.parse_bullet_item(lc)?,
+                        Some((lc, _)) => self.parse_infix_and_operand(lc)?,
+                        None => self.parse_and_conjunct(None)?,
                     };
                     let right = wrap_with_label(right, label);
                     left = Expr::And(Box::new(left), Box::new(right));
@@ -223,23 +231,7 @@ impl Parser {
     }
 
     fn parse_single_implies(&mut self) -> Result<Expr> {
-        let mut left = self.parse_single_or()?;
-        loop {
-            match self.peek() {
-                Token::Implies => {
-                    self.advance();
-                    let right = self.parse_single_or()?;
-                    left = Expr::Implies(Box::new(left), Box::new(right));
-                }
-                Token::Equiv => {
-                    self.advance();
-                    let right = self.parse_single_or()?;
-                    left = Expr::Equiv(Box::new(left), Box::new(right));
-                }
-                _ => break,
-            }
-        }
-        Ok(left)
+        self.parse_implication(Self::parse_single_or)
     }
 
     fn parse_single_or(&mut self) -> Result<Expr> {
@@ -302,28 +294,7 @@ impl Parser {
     }
 
     pub(super) fn parse_quantifier_body(&mut self) -> Result<Expr> {
-        let mut left = self.parse_quantifier_or()?;
-        loop {
-            match self.peek() {
-                Token::Implies => {
-                    self.advance();
-                    let right = self.parse_quantifier_or()?;
-                    left = Expr::Implies(Box::new(left), Box::new(right));
-                }
-                Token::Equiv => {
-                    self.advance();
-                    let right = self.parse_quantifier_or()?;
-                    left = Expr::Equiv(Box::new(left), Box::new(right));
-                }
-                Token::LeadsTo => {
-                    self.advance();
-                    let right = self.parse_quantifier_or()?;
-                    left = Expr::LeadsTo(Box::new(left), Box::new(right));
-                }
-                _ => break,
-            }
-        }
-        Ok(left)
+        self.parse_implication(Self::parse_quantifier_or)
     }
 
     fn parse_quantifier_or(&mut self) -> Result<Expr> {
