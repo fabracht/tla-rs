@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.22.2] - 2026-10-05
+
+### Fixed
+
+- A `PROPERTY` `[]P` whose `P` holds an action in a `LET` definition or an operator argument, such as `[](LET a == Inc IN ENABLED a)` or `[]En(Inc)`, was classified as an invariant, where TLC treats it as a temporal property: the violation was the same, but it was reported as an invariant violation (#134). TLC gives a `LET` the level of its definitions and an operator application that of its arguments, used or not, while `ENABLED` makes its whole operand a state formula. Under the tableau engine, `[]P` is now an invariant only when no `LET` definition or operator argument in `P` is an action outside `ENABLED` (`[](ENABLED Inc)` stays an invariant). The legacy engine keeps classifying it as an invariant.
+
 ## [0.22.1] - 2026-10-05
 
 ### Fixed

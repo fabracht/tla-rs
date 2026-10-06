@@ -212,6 +212,34 @@ pub(crate) fn contains_free_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
     )
 }
 
+/// Whether `expr`, outside `ENABLED`, has a `LET` definition or an operator argument
+/// that refers to a primed variable `ENABLED` does not bind. TLC gives a `LET` the
+/// level of its definitions as well as of its body, and an operator application that
+/// of its arguments, even unused ones, while `ENABLED` makes its whole operand a state
+/// formula; so `[]P` over such an expression is a temporal formula, not an invariant.
+/// Calls the parser inlines are `LET`s here, and follow the same rule.
+pub(crate) fn binds_an_action(expr: &Expr, defs: &Definitions) -> bool {
+    let mut visited = BTreeSet::new();
+    let action_binding = |e: &Expr| match e {
+        Expr::Let(_, binding, _) => contains_free_prime_ref(binding, defs),
+        Expr::FnCall(_, args) | Expr::QualifiedCall(_, _, args) => {
+            args.iter().any(|arg| contains_free_prime_ref(arg, defs))
+        }
+        _ => false,
+    };
+    refers_through_defs(
+        expr,
+        defs,
+        &mut visited,
+        &action_binding,
+        Walk {
+            lets: LetScope::Opaque,
+            unknown_calls_match: false,
+            skips_enabled: true,
+        },
+    )
+}
+
 pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
     let mut visited = BTreeSet::new();
     let is_prime = |e: &Expr| matches!(e, Expr::Prime(_) | Expr::Unchanged(_));
