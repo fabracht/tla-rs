@@ -811,6 +811,14 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                         args.len()
                     )));
                 }
+                if args
+                    .iter()
+                    .any(|arg| super::ast_utils::is_operator_reference(arg, env, defs))
+                {
+                    let subs: Vec<(Arc<str>, Expr)> =
+                        params.iter().cloned().zip(args.iter().cloned()).collect();
+                    return eval(&substitute_expr(body, &subs), env, defs);
+                }
                 let mut arg_vals = Vec::with_capacity(args.len());
                 for arg_expr in args {
                     match eval(arg_expr, env, defs) {
@@ -1565,6 +1573,10 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 }
                 result
             } else {
+                if super::ast_utils::is_operator_reference(binding, env, defs) {
+                    let subs = [(var.clone(), (**binding).clone())];
+                    return eval(&substitute_expr(body, &subs), env, defs);
+                }
                 let val = match eval(binding, env, defs) {
                     Ok(value) => value,
                     Err(_) if super::ast_utils::contains_prime_ref(binding, defs) => {

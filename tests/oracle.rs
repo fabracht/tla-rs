@@ -2033,6 +2033,27 @@ fn test_should_pass_log_matching() {
     }
 }
 
+/// Operators passed as arguments to operators — by name, as a `LAMBDA`, from a
+/// `LET`, through another operator's parameter, with two parameters, and to an
+/// operator of an extended module that the parser does not inline — are substituted
+/// where they are called, including an action in `Next` (TLC: 4 distinct states).
+#[test]
+fn test_should_pass_operator_arguments() {
+    let path = Path::new("test_cases/should_pass/operator_arguments/operator_arguments.tla");
+    for use_inference_engine in [false, true] {
+        let config = CheckerConfig {
+            use_inference_engine,
+            ..Default::default()
+        };
+        match check_loaded(path, config) {
+            CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 4),
+            other => panic!(
+                "operator_arguments.tla (inference: {use_inference_engine}) should pass, got: {other:?}"
+            ),
+        }
+    }
+}
+
 #[test]
 fn test_should_pass_extends_override() {
     let path = Path::new("test_cases/should_pass/extends_override/extends_override.tla");

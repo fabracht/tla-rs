@@ -457,7 +457,10 @@ fn collect_candidates_impl<T: CandidateTarget>(
             if let Some((params, body)) = defs.get(name)
                 && params.len() == args.len()
             {
-                if args.iter().any(|arg| contains_prime_ref(arg, defs)) && !expanding.contains(name)
+                if args.iter().any(|arg| {
+                    contains_prime_ref(arg, defs)
+                        || super::ast_utils::is_operator_reference(arg, env, defs)
+                }) && !expanding.contains(name)
                 {
                     let bindings: Vec<(Arc<str>, Expr)> =
                         params.iter().cloned().zip(args.iter().cloned()).collect();

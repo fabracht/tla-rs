@@ -175,7 +175,13 @@ impl Parser {
                         }
                         let mut result = body;
                         for (param, arg) in params.iter().zip(args) {
-                            result = Expr::Let(param.clone(), Box::new(arg), Box::new(result));
+                            result = match self.operator_argument(&arg) {
+                                Some(operator) => crate::substitution::substitute_expr(
+                                    &result,
+                                    &[(param.clone(), operator)],
+                                ),
+                                None => Expr::Let(param.clone(), Box::new(arg), Box::new(result)),
+                            };
                         }
                         return Ok(result);
                     }
@@ -255,6 +261,28 @@ impl Parser {
             other => Err(ParseError::new(format!("unexpected {other}"))
                 .with_span(span)
                 .with_context("expression", format!("{other}"))),
+        }
+    }
+
+    /// An argument that is an operator rather than a value, as a `LAMBDA`: a
+    /// `LAMBDA` itself, or the name of an operator with parameters, so that a call
+    /// of the parameter it is passed for becomes a call of that operator.
+    fn operator_argument(&self, arg: &Expr) -> Option<Expr> {
+        match arg {
+            Expr::Lambda(_, _) => Some(arg.clone()),
+            Expr::Var(name) if !self.let_scope.contains(name) => {
+                let (params, _) = self.fn_definitions.get(name)?;
+                (!params.is_empty()).then(|| {
+                    Expr::Lambda(
+                        params.clone(),
+                        Box::new(Expr::FnCall(
+                            name.clone(),
+                            params.iter().cloned().map(Expr::Var).collect(),
+                        )),
+                    )
+                })
+            }
+            _ => None,
         }
     }
 

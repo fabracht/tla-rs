@@ -212,6 +212,23 @@ pub(crate) fn contains_free_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
     )
 }
 
+/// Whether `expr`, passed as an argument or bound by a `LET`, is an operator rather
+/// than a value: a `LAMBDA`, or the name of an operator with parameters that no
+/// value in `env` shadows. It is substituted where it is used, never evaluated.
+pub(crate) fn is_operator_reference(
+    expr: &Expr,
+    env: &crate::ast::Env,
+    defs: &Definitions,
+) -> bool {
+    match expr {
+        Expr::Lambda(_, _) => true,
+        Expr::Var(name) => {
+            !env.contains_key(name) && defs.get(name).is_some_and(|(params, _)| !params.is_empty())
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
     let mut visited = BTreeSet::new();
     let is_prime = |e: &Expr| matches!(e, Expr::Prime(_) | Expr::Unchanged(_));
