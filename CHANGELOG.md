@@ -5,6 +5,7 @@
 ### Fixed
 
 - A junction list followed by `=>` or `<=>` at or left of its bullet column took the operator into its last item, so `/\ x > 10 /\ x < 20` over two lines followed by `=> x = 42` meant `x > 10 /\ (x < 20 => x = 42)` and a guarded invariant was reported violated (or held) for the wrong reason, with no error (#167). As in SANY, a token at or left of the innermost bullet column now ends the list's current item, so the list is one operand of the expression it starts: `(x > 10 /\ x < 20) => x = 42`. This holds for `/\` and `\/` lists, nested lists (the innermost bullet decides), and an item ending in a quantifier, `IF` or `LET`; an `=>` right of the bullet still continues the item.
+- `=>` and `<=>` bound tighter than `/\` and `\/` after a junction operand: `TRUE \/ TRUE => FALSE` meant `TRUE \/ (TRUE => FALSE)`, and `/\ FALSE => TRUE /\ FALSE` meant `(FALSE => TRUE) /\ FALSE`, each giving the wrong verdict silently. `=>` now binds looser than `<=>` and `~>`, which bind looser than the junctions, as in TLA+: a list item is a whole expression ending at its bullet, so `/\ A` followed by `/\ P ~> Q` is `A /\ (P ~> Q)`, no longer `(A /\ P) ~> Q`.
 
 ## [0.23.0] - 2026-10-05
 

@@ -38,4 +38,11 @@ OrOfAnds ==
        /\ x < 20
        => x = 42
     \/ FALSE
+GuardThenConjunction ==
+    /\ x < 0 => x = 1 /\ x = 2
+EquivUnderImplication ==
+    x < 0 => x = 1 <=> x = 2
+EquivThenImplication ==
+    /\ x >= 0
+    /\ x < 0 => x = 1 <=> x = 2
 ====

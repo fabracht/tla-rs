@@ -350,6 +350,36 @@ mod tests {
     }
 
     #[test]
+    fn implication_binds_looser_than_junctions_and_equivalence() {
+        assert!(matches!(
+            parse_expr(r"TRUE \/ TRUE => FALSE").unwrap(),
+            Expr::Implies(l, _) if matches!(*l, Expr::Or(_, _))
+        ));
+        assert!(matches!(
+            parse_expr(r"/\ FALSE => TRUE /\ FALSE").unwrap(),
+            Expr::Implies(_, r) if matches!(*r, Expr::And(_, _))
+        ));
+        assert!(matches!(
+            parse_expr("FALSE => TRUE <=> FALSE").unwrap(),
+            Expr::Implies(_, r) if matches!(*r, Expr::Equiv(_, _))
+        ));
+        assert!(matches!(
+            parse_expr("TRUE <=> TRUE => FALSE").unwrap(),
+            Expr::Implies(l, _) if matches!(*l, Expr::Equiv(_, _))
+        ));
+    }
+
+    #[test]
+    fn leads_to_in_an_item_stays_in_the_item() {
+        let input = r"/\ A
+/\ P ~> Q";
+        let Expr::And(_, item) = parse_expr(input).unwrap() else {
+            panic!("expected a two-item list");
+        };
+        assert!(matches!(item.as_ref(), Expr::LeadsTo(_, _)));
+    }
+
+    #[test]
     fn implication_at_the_bullet_takes_the_whole_list() {
         let input = r"/\ x > 10
 /\ x < 20
