@@ -173,11 +173,7 @@ impl Parser {
                             )
                             .into());
                         }
-                        let mut result = body;
-                        for (param, arg) in params.iter().zip(args) {
-                            result = Expr::Let(param.clone(), Box::new(arg), Box::new(result));
-                        }
-                        return Ok(result);
+                        return Ok(self.inline_call(&params, &body, args));
                     }
                     self.advance();
                     let mut args = Vec::new();
@@ -255,6 +251,72 @@ impl Parser {
             other => Err(ParseError::new(format!("unexpected {other}"))
                 .with_span(span)
                 .with_context("expression", format!("{other}"))),
+        }
+    }
+
+    /// `body` with `params` bound to `args`, as a call of the operator they belong
+    /// to. An operator argument is substituted where its parameter is called; a
+    /// value argument is bound by a `LET`, so it is evaluated once. A value
+    /// parameter whose name occurs in another argument is renamed first, so its
+    /// `LET` cannot capture that occurrence (`Pair(a, b) == <<a, b>>` called as
+    /// `Pair(b, 1)`); otherwise the call keeps the shape that names its action.
+    fn inline_call(&self, params: &[Arc<str>], body: &Expr, args: Vec<Expr>) -> Expr {
+        let mut substitutions: Vec<(Arc<str>, Expr)> = Vec::new();
+        let mut bindings: Vec<(Arc<str>, Expr)> = Vec::new();
+        for (index, (param, arg)) in params.iter().zip(&args).enumerate() {
+            let captured = args
+                .iter()
+                .enumerate()
+                .any(|(other, a)| other != index && crate::eval::expr_references(a, param));
+            match self.operator_argument(arg) {
+                Some(operator) => substitutions.push((param.clone(), operator)),
+                None if captured => {
+                    let fresh = crate::substitution::fresh_name(param, |candidate| {
+                        crate::eval::expr_references(body, candidate)
+                            || args
+                                .iter()
+                                .any(|a| crate::eval::expr_references(a, candidate))
+                            || params.contains(candidate)
+                    });
+                    substitutions.push((param.clone(), Expr::Var(fresh.clone())));
+                    bindings.push((fresh, arg.clone()));
+                }
+                None => bindings.push((param.clone(), arg.clone())),
+            }
+        }
+        let inlined = if substitutions.is_empty() {
+            body.clone()
+        } else {
+            crate::substitution::substitute_expr(body, &substitutions)
+        };
+        bindings.into_iter().fold(inlined, |result, (name, arg)| {
+            Expr::Let(name, Box::new(arg), Box::new(result))
+        })
+    }
+
+    /// An argument that is an operator rather than a value: a `LAMBDA`, the name
+    /// of an operator with parameters (as the equivalent `LAMBDA`), or an operator
+    /// of an `INSTANCE`, so that a call of the parameter it is passed for becomes a
+    /// call of that operator.
+    fn operator_argument(&self, arg: &Expr) -> Option<Expr> {
+        match arg {
+            Expr::Lambda(_, _) => Some(arg.clone()),
+            Expr::QualifiedCall(_, _, instance_args) if instance_args.is_empty() => {
+                Some(arg.clone())
+            }
+            Expr::Var(name) if !self.let_scope.contains(name) => {
+                let (params, _) = self.fn_definitions.get(name)?;
+                (!params.is_empty()).then(|| {
+                    Expr::Lambda(
+                        params.clone(),
+                        Box::new(Expr::FnCall(
+                            name.clone(),
+                            params.iter().cloned().map(Expr::Var).collect(),
+                        )),
+                    )
+                })
+            }
+            _ => None,
         }
     }
 

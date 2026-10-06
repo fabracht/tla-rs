@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.2] - 2026-10-06
+
+### Fixed
+
+- An operator passed as an argument to another operator failed with "undefined variable": `Apply(F(_), v) == F(v)` called as `Apply(Lt, x)`, a `LAMBDA` argument, a `LET`-defined operator, and `Gen(A(_), k) == ENABLED A(k)` called as `Gen(Step, 2)` in a property (#135). The argument was bound as a value; it is now substituted into the operator's body, where a call of the parameter becomes a call of the operator (or the `LAMBDA` applied to the call's arguments). This covers `LAMBDA`s, operators named by a parameter or a `LET`, operators of an `INSTANCE` (`Apply(I!Lt, x)`), calls the parser inlines, calls of operators of extended modules, an operator passed on through another operator's parameter, operators with several parameters, and actions built this way in `Next`, under both engines.
+- An inlined call let a parameter capture a call-site name used in another argument: `Pair(a, b) == <<a, b>>` called as `\E b \in {7} : Pair(b, 1)` gave `<<1, 1>>` rather than `<<7, 1>>`, a wrong verdict with no error. The parameter is now renamed when another argument mentions its name.
+
 ## [0.23.1] - 2026-10-06
 
 ### Fixed

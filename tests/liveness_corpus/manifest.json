@@ -4440,5 +4440,62 @@
     "tla_rs_now_kind": "invariant",
     "xfail_until_phase": null,
     "note": "a parameter primed only under the operator's ENABLED, with a state argument, stays at state level: invariant (#134)."
+  },
+  {
+    "id": "C230",
+    "spec": "specs/OperatorArgument.tla",
+    "cfg": "cfgs/C230.cfg",
+    "specification": "Spec",
+    "property": "EventuallyDisabled",
+    "property_text": "<>[]~Gen(Step, 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.024053 (rev: 0dab95e)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "an operator passed by name to an operator that applies ENABLED to it (#135)."
+  },
+  {
+    "id": "C231",
+    "spec": "specs/OperatorArgument.tla",
+    "cfg": "cfgs/C231.cfg",
+    "specification": "Spec",
+    "property": "EventuallyDisabledLambda",
+    "property_text": "<>[]~Gen(LAMBDA k : ..., 2)",
+    "expected": "ok",
+    "kind": null,
+    "tlc": {
+      "verdict_raw": "Model checking completed. No error has been found.",
+      "exit_code": 0,
+      "version": "2026.10.01.024053 (rev: 0dab95e)"
+    },
+    "tla_rs_now": "ok",
+    "tla_rs_now_kind": null,
+    "xfail_until_phase": null,
+    "note": "the same operator passed as a LAMBDA (#135)."
+  },
+  {
+    "id": "C232",
+    "spec": "specs/OperatorArgument.tla",
+    "cfg": "cfgs/C232.cfg",
+    "specification": "Spec",
+    "property": "EventuallyEnabled",
+    "property_text": "<>[]Gen(Step, 2)",
+    "expected": "violated",
+    "kind": "liveness",
+    "tlc": {
+      "verdict_raw": "Error: Temporal property EventuallyEnabled was violated.",
+      "exit_code": 13,
+      "version": "2026.10.01.024053 (rev: 0dab95e)"
+    },
+    "tla_rs_now": "violated",
+    "tla_rs_now_kind": "liveness",
+    "xfail_until_phase": null,
+    "note": "violated: the action stops being enabled at x = 2 (#135)."
   }
 ]

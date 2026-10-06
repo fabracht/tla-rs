@@ -7,7 +7,7 @@ use crate::eval::{Definitions, expr_references};
 /// A `$`-suffixed name derived from `base` that no `clashes` predicate rejects.
 /// The `$` cannot appear in a source identifier, so a name that also avoids every
 /// caller-supplied clash source is guaranteed fresh in scope.
-fn fresh_name(base: &Arc<str>, clashes: impl Fn(&Arc<str>) -> bool) -> Arc<str> {
+pub(crate) fn fresh_name(base: &Arc<str>, clashes: impl Fn(&Arc<str>) -> bool) -> Arc<str> {
     let mut i = 0u64;
     loop {
         let cand: Arc<str> = Arc::from(format!("{base}${i}"));
@@ -405,10 +405,23 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
                 Box::new(nbody),
             )
         }
-        Expr::FnCall(name, args) => Expr::FnCall(
-            name.clone(),
-            args.iter().map(|a| substitute_expr(a, subs)).collect(),
-        ),
+        Expr::FnCall(name, args) => {
+            let args: Vec<Expr> = args.iter().map(|a| substitute_expr(a, subs)).collect();
+            match subs.iter().find(|(param, _)| param == name).map(|(_, r)| r) {
+                Some(Expr::Var(operator)) => Expr::FnCall(operator.clone(), args),
+                Some(Expr::QualifiedCall(instance, operator, instance_args))
+                    if instance_args.is_empty() =>
+                {
+                    Expr::QualifiedCall(instance.clone(), operator.clone(), args)
+                }
+                Some(Expr::Lambda(params, body)) if params.len() == args.len() => {
+                    let bindings: Vec<(Arc<str>, Expr)> =
+                        params.iter().cloned().zip(args).collect();
+                    substitute_expr(body, &bindings)
+                }
+                _ => Expr::FnCall(name.clone(), args),
+            }
+        }
         Expr::Lambda(params, body) => {
             let filtered_subs: Vec<_> = subs
                 .iter()
@@ -522,13 +535,15 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
             Box::new(substitute_expr(else_br, subs)),
         ),
         Expr::Let(var, binding, body) => {
+            let binding = substitute_expr(binding, subs);
             let filtered_subs: Vec<_> = subs.iter().filter(|(p, _)| p != var).cloned().collect();
+            if matches!(binding, Expr::Lambda(_, _)) {
+                let mut with_operator = filtered_subs;
+                with_operator.push((var.clone(), binding));
+                return substitute_expr(body, &with_operator);
+            }
             let (nvar, nbody) = substitute_bound(var, body, &filtered_subs);
-            Expr::Let(
-                nvar,
-                Box::new(substitute_expr(binding, subs)),
-                Box::new(nbody),
-            )
+            Expr::Let(nvar, Box::new(binding), Box::new(nbody))
         }
         Expr::Case(branches) => Expr::Case(
             branches
@@ -648,6 +663,34 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
 mod tests {
     use super::*;
     use crate::ast::Value;
+
+    #[test]
+    fn a_call_of_a_parameter_bound_to_an_operator_calls_the_operator() {
+        let call = Expr::FnCall(var("F"), vec![Expr::Var(var("x"))]);
+        assert_eq!(
+            substitute_expr(&call, &[(var("F"), Expr::Var(var("Lt")))]),
+            Expr::FnCall(var("Lt"), vec![Expr::Var(var("x"))])
+        );
+        let lambda = Expr::Lambda(
+            vec![var("v")],
+            Box::new(Expr::Lt(
+                Box::new(Expr::Var(var("v"))),
+                Box::new(lit_int(3)),
+            )),
+        );
+        assert_eq!(
+            substitute_expr(&call, &[(var("F"), lambda)]),
+            Expr::Lt(Box::new(Expr::Var(var("x"))), Box::new(lit_int(3)))
+        );
+    }
+
+    #[test]
+    fn a_let_bound_to_an_operator_is_substituted_into_its_body() {
+        let body = Expr::FnCall(var("G"), vec![lit_int(1)]);
+        let expr = Expr::Let(var("G"), Box::new(Expr::Var(var("F"))), Box::new(body));
+        let lambda = Expr::Lambda(vec![var("v")], Box::new(Expr::Var(var("v"))));
+        assert_eq!(substitute_expr(&expr, &[(var("F"), lambda)]), lit_int(1));
+    }
 
     fn var(name: &str) -> Arc<str> {
         Arc::from(name)
