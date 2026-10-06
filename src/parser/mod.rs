@@ -350,6 +350,26 @@ mod tests {
     }
 
     #[test]
+    fn an_inlined_call_does_not_capture_a_call_site_name() {
+        let spec = parse(
+            "Pair(a, b) == <<a, b>>\nApply(F(_), v) == F(v)\n\
+             P == \\E b \\in {7} : Pair(b, 1)\nQ == \\E v \\in {5} : Apply(LAMBDA a : a < v, 3)",
+        )
+        .unwrap();
+        let mentions = |name: &str, needle: &str| {
+            format!("{:?}", spec.definitions.get(name).unwrap().1).contains(needle)
+        };
+        assert!(
+            mentions("P", "b$0"),
+            "the parameter b is renamed away from the argument b"
+        );
+        assert!(
+            mentions("Q", "v$0"),
+            "the parameter v is renamed away from the LAMBDA's v"
+        );
+    }
+
+    #[test]
     fn implication_binds_looser_than_junctions_and_equivalence() {
         assert!(matches!(
             parse_expr(r"TRUE \/ TRUE => FALSE").unwrap(),

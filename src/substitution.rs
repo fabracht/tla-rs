@@ -7,7 +7,7 @@ use crate::eval::{Definitions, expr_references};
 /// A `$`-suffixed name derived from `base` that no `clashes` predicate rejects.
 /// The `$` cannot appear in a source identifier, so a name that also avoids every
 /// caller-supplied clash source is guaranteed fresh in scope.
-fn fresh_name(base: &Arc<str>, clashes: impl Fn(&Arc<str>) -> bool) -> Arc<str> {
+pub(crate) fn fresh_name(base: &Arc<str>, clashes: impl Fn(&Arc<str>) -> bool) -> Arc<str> {
     let mut i = 0u64;
     loop {
         let cand: Arc<str> = Arc::from(format!("{base}${i}"));
@@ -409,6 +409,11 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
             let args: Vec<Expr> = args.iter().map(|a| substitute_expr(a, subs)).collect();
             match subs.iter().find(|(param, _)| param == name).map(|(_, r)| r) {
                 Some(Expr::Var(operator)) => Expr::FnCall(operator.clone(), args),
+                Some(Expr::QualifiedCall(instance, operator, instance_args))
+                    if instance_args.is_empty() =>
+                {
+                    Expr::QualifiedCall(instance.clone(), operator.clone(), args)
+                }
                 Some(Expr::Lambda(params, body)) if params.len() == args.len() => {
                     let bindings: Vec<(Arc<str>, Expr)> =
                         params.iter().cloned().zip(args).collect();

@@ -97,6 +97,20 @@ fn unchanged_variables(
     }
 }
 
+/// `body` evaluated with `params` replaced by `args` as expressions rather than
+/// bound to their values: for an argument that is an operator, or that refers to a
+/// primed variable without a value yet.
+fn eval_substituted(
+    body: &Expr,
+    params: &[Arc<str>],
+    args: &[Expr],
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<Value> {
+    let subs: Vec<(Arc<str>, Expr)> = params.iter().cloned().zip(args.iter().cloned()).collect();
+    eval(&substitute_expr(body, &subs), env, defs)
+}
+
 /// `Op'` for an operator `Op` without parameters: `Op` evaluated in the next state,
 /// its body read with every state variable bound to its next-state value, so the
 /// operators it calls, with or without parameters, see the next state too. When
@@ -815,18 +829,14 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     .iter()
                     .any(|arg| super::ast_utils::is_operator_reference(arg, env, defs))
                 {
-                    let subs: Vec<(Arc<str>, Expr)> =
-                        params.iter().cloned().zip(args.iter().cloned()).collect();
-                    return eval(&substitute_expr(body, &subs), env, defs);
+                    return eval_substituted(body, params, args, env, defs);
                 }
                 let mut arg_vals = Vec::with_capacity(args.len());
                 for arg_expr in args {
                     match eval(arg_expr, env, defs) {
                         Ok(value) => arg_vals.push(value),
                         Err(_) if super::ast_utils::contains_prime_ref(arg_expr, defs) => {
-                            let subs: Vec<(Arc<str>, Expr)> =
-                                params.iter().cloned().zip(args.iter().cloned()).collect();
-                            return eval(&substitute_expr(body, &subs), env, defs);
+                            return eval_substituted(body, params, args, env, defs);
                         }
                         Err(e) => return Err(e),
                     }
@@ -1573,15 +1583,15 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 }
                 result
             } else {
+                let bound = std::slice::from_ref(var);
+                let binding_arg = std::slice::from_ref(binding.as_ref());
                 if super::ast_utils::is_operator_reference(binding, env, defs) {
-                    let subs = [(var.clone(), (**binding).clone())];
-                    return eval(&substitute_expr(body, &subs), env, defs);
+                    return eval_substituted(body, bound, binding_arg, env, defs);
                 }
                 let val = match eval(binding, env, defs) {
                     Ok(value) => value,
                     Err(_) if super::ast_utils::contains_prime_ref(binding, defs) => {
-                        let subs = [(var.clone(), (**binding).clone())];
-                        return eval(&substitute_expr(body, &subs), env, defs);
+                        return eval_substituted(body, bound, binding_arg, env, defs);
                     }
                     Err(e) => return Err(e),
                 };

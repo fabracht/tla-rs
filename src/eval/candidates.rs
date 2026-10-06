@@ -409,7 +409,16 @@ fn collect_candidates_impl<T: CandidateTarget>(
         }
 
         Expr::Let(bound, binding, body)
-            if contains_prime_ref(binding, defs)
+            if let Some((params, op_body)) = super::ast_utils::parameterized_let_op(binding) =>
+        {
+            let mut local_defs = defs.clone();
+            local_defs.insert(bound.clone(), (params, Arc::new(op_body.clone())));
+            collect_candidates_impl(body, env, &local_defs, target, expanding)?;
+        }
+
+        Expr::Let(bound, binding, body)
+            if (contains_prime_ref(binding, defs)
+                || super::ast_utils::is_operator_reference(binding, env, defs))
                 && super::ast_utils::parameterized_let_op(binding).is_none() =>
         {
             let applied =
