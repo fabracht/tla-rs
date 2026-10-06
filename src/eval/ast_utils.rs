@@ -11,7 +11,7 @@ pub(crate) fn format_expr_brief(expr: &Expr) -> String {
         Expr::Lit(Value::Bool(true)) => "TRUE".to_string(),
         Expr::Lit(Value::Bool(false)) => "FALSE".to_string(),
         Expr::Lit(Value::Int(n)) => n.to_string(),
-        Expr::Lit(Value::Str(s)) => format!("\"{s}\""),
+        Expr::Lit(Value::Str(s)) => crate::ast::quote_string(s),
         Expr::Lit(v) => format_value(v),
         Expr::Var(name) => name.to_string(),
         Expr::Prime(name) => format!("{name}'"),

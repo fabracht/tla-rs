@@ -2369,7 +2369,7 @@ pub fn format_value(val: &Value) -> String {
             } else {
                 let pairs: Vec<_> = r
                     .iter()
-                    .map(|(k, v)| format!("\"{}\" :> {}", k, format_value(v)))
+                    .map(|(k, v)| format!("{} :> {}", crate::ast::quote_string(k), format_value(v)))
                     .collect();
                 format!("({})", pairs.join(" @@ "))
             }

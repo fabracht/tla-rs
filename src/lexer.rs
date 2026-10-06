@@ -332,12 +332,23 @@ impl<'a> Lexer<'a> {
 
     /// The rest of a string literal whose opening `"` was just consumed, through
     /// the closing `"`. As in SANY, `\"`, `\\`, `\n`, `\t`, `\r` and `\f` stand
-    /// for one character each, and any other escape is an error.
+    /// for one character each, and any other escape is an error, as is a string the
+    /// line or the input ends inside.
     fn string_literal(&mut self) -> Result<Arc<str>, LexError> {
+        let opening = self.pos - 1;
         let mut text = String::new();
-        while let Some(c) = self.advance() {
+        loop {
+            let Some(c) = self.advance() else {
+                return Err(LexError::new("unterminated string", opening));
+            };
             match c {
                 '"' => break,
+                '\n' | '\r' => {
+                    return Err(LexError::new(
+                        "unterminated string: a line ends inside it",
+                        opening,
+                    ));
+                }
                 '\\' => {
                     let escape = self.pos - 1;
                     text.push(match self.advance() {
@@ -1424,6 +1435,14 @@ mod tests {
             lexer.tokenize().unwrap(),
             vec![Token::Str("a\"b\\c\nd\te\rf\u{c}g".into()), Token::Eof]
         );
+    }
+
+    #[test]
+    fn an_unterminated_string_is_an_error() {
+        for input in ["\"abc", "\"abc\ndef\""] {
+            let error = Lexer::new(input).tokenize().unwrap_err();
+            assert!(error.contains("unterminated string"), "{input:?}: {error}");
+        }
     }
 
     #[test]

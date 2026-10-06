@@ -541,14 +541,29 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 return Ok(Value::Bool(true));
             }
             let ls = eval_set(l, env, defs)?;
-            let rs = eval_set(r, env, defs)?;
-            Ok(Value::Bool(ls.is_subset(&rs)))
+            match eval(r, env, defs)? {
+                Value::Set(rs) => Ok(Value::Bool(ls.is_subset(&rs))),
+                Value::IntSet(domain) => Ok(Value::Bool(ls.iter().all(|e| domain.contains(e)))),
+                other => Err(EvalError::type_mismatch("Set", other)),
+            }
         }
 
         Expr::ProperSubset(l, r) => {
+            if is_symbolic_set_expr(r, env, defs)? {
+                let ls = eval_set(l, env, defs)?;
+                for elem in &ls {
+                    if !in_set_symbolic(elem, r, env, defs)? {
+                        return Ok(Value::Bool(false));
+                    }
+                }
+                return Ok(Value::Bool(true));
+            }
             let ls = eval_set(l, env, defs)?;
-            let rs = eval_set(r, env, defs)?;
-            Ok(Value::Bool(ls.is_subset(&rs) && ls != rs))
+            match eval(r, env, defs)? {
+                Value::Set(rs) => Ok(Value::Bool(ls.is_subset(&rs) && *rs != ls)),
+                Value::IntSet(domain) => Ok(Value::Bool(ls.iter().all(|e| domain.contains(e)))),
+                other => Err(EvalError::type_mismatch("Set", other)),
+            }
         }
 
         Expr::Powerset(e) => {

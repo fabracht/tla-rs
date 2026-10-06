@@ -1,7 +1,7 @@
 use super::Definitions;
 use super::core::eval;
 use super::error::{EvalError, Result};
-use crate::ast::{Env, Expr, Value};
+use crate::ast::{Env, Expr, IntDomain, Value};
 use crate::checker::format_value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -170,21 +170,26 @@ pub(crate) fn is_non_enumerable_set_expr(
 
 enum ResolvedDomain<'a> {
     Concrete(BTreeSet<Value>),
+    Infinite(IntDomain),
     Symbolic(&'a Expr),
 }
 
 impl<'a> ResolvedDomain<'a> {
     fn resolve(expr: &'a Expr, env: &mut Env, defs: &Definitions) -> Result<Self> {
         if is_symbolic_set_expr(expr, env, defs)? {
-            Ok(ResolvedDomain::Symbolic(expr))
-        } else {
-            Ok(ResolvedDomain::Concrete(eval_set(expr, env, defs)?))
+            return Ok(ResolvedDomain::Symbolic(expr));
+        }
+        match eval(expr, env, defs)? {
+            Value::Set(s) => Ok(ResolvedDomain::Concrete(Arc::unwrap_or_clone(s))),
+            Value::IntSet(domain) => Ok(ResolvedDomain::Infinite(domain)),
+            other => Err(EvalError::type_mismatch("Set", other)),
         }
     }
 
     fn contains(&self, val: &Value, env: &mut Env, defs: &Definitions) -> Result<bool> {
         match self {
             ResolvedDomain::Concrete(s) => Ok(s.contains(val)),
+            ResolvedDomain::Infinite(domain) => Ok(domain.contains(val)),
             ResolvedDomain::Symbolic(e) => in_set_symbolic(val, e, env, defs),
         }
     }

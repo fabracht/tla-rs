@@ -133,6 +133,14 @@ mod tests {
     }
 
     #[test]
+    fn a_record_key_that_is_not_an_identifier_is_printed_escaped() {
+        let record = Value::Record(Arc::new(
+            [(Arc::from("a\"b"), Value::Int(1))].into_iter().collect(),
+        ));
+        assert_eq!(crate::checker::format_value(&record), r#"("a\"b" :> 1)"#);
+    }
+
+    #[test]
     fn quoted_strings_escape_what_a_literal_cannot_hold() {
         assert_eq!(crate::ast::quote_string("a\"b\\c\nd"), r#""a\"b\\c\nd""#);
     }
