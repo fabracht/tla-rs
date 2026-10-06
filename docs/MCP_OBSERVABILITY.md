@@ -30,14 +30,20 @@ Status legend: ✅ done · 🔭 follow-up
 
 `max_seconds` already flows through:
 
-- `checker::check` — checked at each state-iteration boundary
+- `checker::check_with_state_vars` — checked at each state-iteration boundary
+- `checker::check_liveness_properties` — checked during the liveness phase
 - `CheckResult::MaxTimeExceeded(stats)` carries partial stats
 - `mcp::runner` — maps it to `CheckOutcome::LimitReached { limit: MaxSeconds, stats }`
 
-**Gap:** the check fires only between states. A single `next_states` call with
-high fanout can exceed `max_seconds` without returning. Per-state evaluation is
-not interruptible. This is documented in the tool description so callers know
-that `max_seconds` is a soft bound at state boundaries.
+A `max_seconds` limit can therefore come from the liveness phase after the
+state search finished, in which case the safety result is complete and only the
+liveness analysis ran out of time.
+
+**Gap:** the check fires only between states (and between liveness steps). A
+single `next_states` call with high fanout can exceed `max_seconds` without
+returning. Per-state evaluation is not interruptible. This is documented in the
+tool description so callers know that `max_seconds` is a soft bound at state
+boundaries.
 
 What `[Tool result missing due to internal error]` means in practice: the MCP
 client (or the network/process boundary) gave up before the checker did.
@@ -59,10 +65,13 @@ structurally.
 
 ### ✅ #3: Bounded Nat in TypeOK
 
-`seq: Nat` in a TypeOK is essentially unbounded for TLC. tla-rs bounds `Nat`
-to `0..100` by default, and makes it an infinite set decided by membership
-under symbolic integers, but the bounded form is still cheaper to check. The
-`validate_spec` tool description recommends `seq: 0..MaxSeq` (or similar), so
+`seq: Nat` in a TypeOK is essentially unbounded for TLC. By default tla-rs
+bounds `Nat` to `0..100` and `Int` to `-100..100`, so `x \in Nat` is FALSE once
+`x` passes 100: TypeOK reports a false violation and quantifiers over `Nat` miss
+larger values. Symbolic integers are opt-in (MCP `symbolic_integers`, cfg
+`SYMBOLIC_INTEGERS TRUE` or `--symbolic-integers`) and make `Nat`/`Int` infinite
+sets decided by membership. The `validate_spec` tool description recommends
+`seq: 0..MaxSeq` (or similar), which is both correct and cheaper to check, so
 the caller sees it before launching a slow run.
 
 ### ✅ #4: Budget advisories
@@ -126,5 +135,5 @@ The disciplined sequence the caller used after the timeout:
 4. Project the larger run.
 5. Grow `max_states` / `max_seconds` on evidence — or shrink constants.
 
-#1 and #2 above would automate steps 3-4. Until then, the `check_spec`
-description points callers at this sequence.
+The `check_spec` description already gives the formulas for steps 3-4; #1 and
+#2 above would compute them instead of leaving them to the caller.
