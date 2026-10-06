@@ -497,7 +497,7 @@ fn format_value_compact(v: &Value) -> String {
     match v {
         Value::Bool(b) => b.to_string(),
         Value::Int(n) => n.to_string(),
-        Value::Str(s) => format!("\"{}\"", s),
+        Value::Str(s) => crate::ast::quote_string(s),
         Value::Model(m) => m.to_string(),
         Value::IntSet(d) => d.name().to_string(),
         Value::Set(s) if s.is_empty() => "{}".to_string(),
@@ -585,7 +585,7 @@ fn format_expr(expr: &Expr) -> String {
         Expr::Lit(Value::Bool(true)) => "TRUE".to_string(),
         Expr::Lit(Value::Bool(false)) => "FALSE".to_string(),
         Expr::Lit(Value::Int(n)) => n.to_string(),
-        Expr::Lit(Value::Str(s)) => format!("\"{}\"", s),
+        Expr::Lit(Value::Str(s)) => crate::ast::quote_string(s),
         Expr::Var(name) => name.to_string(),
         Expr::Prime(name) => format!("{}'", name),
         Expr::Eq(l, r) => format!("{} = {}", format_expr(l), format_expr(r)),

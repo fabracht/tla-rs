@@ -2084,6 +2084,17 @@ fn test_should_pass_operator_argument_edge_cases() {
     }
 }
 
+/// Escaped quotes and backslashes in string literals, including a nested-JSON trace
+/// value, and `STRING` in a type invariant (TLC: 3 distinct states, both hold).
+#[test]
+fn test_should_pass_strings() {
+    let path = Path::new("test_cases/should_pass/strings.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("strings.tla should pass, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_should_pass_extends_override() {
     let path = Path::new("test_cases/should_pass/extends_override/extends_override.tla");

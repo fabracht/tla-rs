@@ -2345,7 +2345,7 @@ pub fn format_value(val: &Value) -> String {
     match val {
         Value::Bool(b) => b.to_string(),
         Value::Int(i) => i.to_string(),
-        Value::Str(s) => format!("\"{}\"", s),
+        Value::Str(s) => crate::ast::quote_string(s),
         Value::Model(m) => m.to_string(),
         Value::IntSet(d) => d.name().to_string(),
         Value::Set(s) => {
@@ -2369,7 +2369,7 @@ pub fn format_value(val: &Value) -> String {
             } else {
                 let pairs: Vec<_> = r
                     .iter()
-                    .map(|(k, v)| format!("\"{}\" :> {}", k, format_value(v)))
+                    .map(|(k, v)| format!("{} :> {}", crate::ast::quote_string(k), format_value(v)))
                     .collect();
                 format!("({})", pairs.join(" @@ "))
             }

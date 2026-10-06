@@ -104,6 +104,48 @@ mod tests {
     }
 
     #[test]
+    fn string_is_decided_by_membership_and_not_enumerated() {
+        let mut env = Env::new();
+        crate::stdlib::load_builtins(&mut env);
+        let defs = Definitions::new();
+        let member = |value: Value, env: &mut Env| {
+            eval(
+                &Expr::In(
+                    Box::new(Expr::Lit(value)),
+                    Box::new(Expr::Var(var("STRING"))),
+                ),
+                env,
+                &defs,
+            )
+        };
+        assert_eq!(
+            member(Value::Str("a".into()), &mut env).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(member(Value::Int(3), &mut env).unwrap(), Value::Bool(false));
+        let every = Expr::Forall(
+            var("s"),
+            Box::new(Expr::Var(var("STRING"))),
+            Box::new(Expr::Lit(Value::Bool(true))),
+        );
+        let error = eval(&every, &mut env, &defs).unwrap_err().to_string();
+        assert!(error.contains("STRING"), "{error}");
+    }
+
+    #[test]
+    fn a_record_key_that_is_not_an_identifier_is_printed_escaped() {
+        let record = Value::Record(Arc::new(
+            [(Arc::from("a\"b"), Value::Int(1))].into_iter().collect(),
+        ));
+        assert_eq!(crate::checker::format_value(&record), r#"("a\"b" :> 1)"#);
+    }
+
+    #[test]
+    fn quoted_strings_escape_what_a_literal_cannot_hold() {
+        assert_eq!(crate::ast::quote_string("a\"b\\c\nd"), r#""a\"b\\c\nd""#);
+    }
+
+    #[test]
     fn unchanged_expands_nested_tuple_definitions() {
         let tuple =
             |names: &[&str]| Expr::TupleLit(names.iter().map(|n| Expr::Var(var(n))).collect());

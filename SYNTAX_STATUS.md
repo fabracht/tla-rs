@@ -68,6 +68,9 @@ Cross-checked against:
 | `{e : <<x, y>> \in S}` | | Set map with tuple binder |
 | `Cardinality(S)` | | Set cardinality (FiniteSets) |
 | `IsFiniteSet(S)` | | Finiteness test (FiniteSets) |
+| `BOOLEAN` | | The set `{FALSE, TRUE}` |
+| `STRING` | | The set of all strings: membership only (`s \in STRING`); enumerating it is an error, as in TLC |
+| `"a\"b"` | | String literal; `\"`, `\\`, `\n`, `\t`, `\r` and `\f` are escapes, any other escape is an error |
 
 ### Quantifiers
 | ASCII | Unicode | Description |
