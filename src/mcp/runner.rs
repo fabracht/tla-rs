@@ -940,16 +940,23 @@ mod tests {
     }
 
     #[test]
-    fn check_spec_surfaces_parse_warning_for_dropped_invariant() {
-        let dir_name = "tlc_test_check_spec_warnings";
+    fn check_spec_reports_a_definition_that_fails_to_parse() {
+        let dir_name = "tlc_test_check_spec_definition_parse_error";
         let spec = "---- MODULE Dropped ----\nVARIABLES x\nInit == x = 0\nNext == x' = x\nInvBad == IF x\nInvType == x = 0\n====\n";
         let path = write_spec(dir_name, spec);
         let out = check_spec(&check_input(&path));
-        assert!(
-            !out.warnings.is_empty(),
-            "check_spec must surface the dropped-invariant parse warning; got {:?}",
-            out.warnings
-        );
         let _ = std::fs::remove_dir_all(std::env::temp_dir().join(dir_name));
+        let CheckOutcome::Error { error, .. } = out.outcome else {
+            panic!(
+                "a definition that fails to parse must be an error, got {:?}",
+                out.outcome
+            );
+        };
+        assert!(
+            matches!(error.kind, crate::mcp::schema::ErrorKind::Parse),
+            "{error:?}"
+        );
+        assert!(error.message.contains("'InvBad'"), "{error:?}");
+        assert_eq!(error.span.map(|span| span.start_line), Some(6), "{error:?}");
     }
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.24.0] - 2026-10-06
+
+### Changed
+
+- A definition whose body does not parse is an error, as in SANY (#171). It used to be a warning and the definition was dropped, so the spec failed later at each use with "undefined variable", often with a "did you mean" suggestion for another name, or passed when nothing used it. The error names the definition and points at the offending token (or at the definition's name when the parser has no position for it). This covers infix operator definitions and `*Spec` definitions, which were dropped without any warning. A module loaded through `EXTENDS` or `INSTANCE` that fails to parse reports its file, line and column; through `INSTANCE` it used to be a warning followed by "instance not found".
+
 ## [0.23.3] - 2026-10-06
 
 ### Fixed

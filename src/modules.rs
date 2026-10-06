@@ -51,10 +51,20 @@ impl ModuleRegistry {
 
         self.loading_stack.push(name.clone());
 
-        let spec = parser::parse(&content)
-            .map_err(|e| ModuleError::ParseError(format!("{}: {}", name, e.message)))?;
+        let parsed = parser::parse(&content).map_err(|e| {
+            let location = match e.span {
+                Some(span) => {
+                    let (line, column) = crate::source::Source::new(name.clone(), content.as_str())
+                        .line_col(span.start);
+                    format!("{}:{line}:{column}", file_path.display())
+                }
+                None => file_path.display().to_string(),
+            };
+            ModuleError::ParseError(format!("{location}: {}", e.message))
+        });
 
         self.loading_stack.pop();
+        let spec = parsed?;
         self.modules.insert(name.clone(), spec);
         self.modules.get(&name).ok_or(ModuleError::NotFound(name))
     }
@@ -290,6 +300,37 @@ mod tests {
         assert!(result.is_ok());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_module_that_fails_to_parse_reports_its_file_and_line() {
+        let dir = std::env::temp_dir().join("tlc_test_module_parse_error");
+        let _ = std::fs::create_dir_all(&dir);
+        let tla_path = dir.join("BrokenDef.tla");
+        std::fs::write(
+            &tla_path,
+            "---- MODULE BrokenDef ----\nGood == 1\nBad == [a/b |-> 1]\n====\n",
+        )
+        .expect("write module");
+
+        let base = dir.join("base.tla");
+        let mut reg = ModuleRegistry::new();
+        let first = reg.load("BrokenDef", &base).map(|_| ());
+        let second = reg.load("BrokenDef", &base).map(|_| ());
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let expected_location = format!("{}:3:13", tla_path.display());
+        match first {
+            Err(ModuleError::ParseError(message)) => {
+                assert!(message.starts_with(&expected_location), "{message}");
+                assert!(message.contains("'Bad'"), "{message}");
+            }
+            other => panic!("expected a parse error, got {other:?}"),
+        }
+        assert!(
+            matches!(second, Err(ModuleError::ParseError(_))),
+            "loading again after a parse error must not report a cycle: {second:?}"
+        );
     }
 
     #[test]

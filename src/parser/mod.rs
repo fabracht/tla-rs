@@ -523,6 +523,46 @@ mod tests {
     }
 
     #[test]
+    fn a_definition_whose_body_does_not_parse_is_an_error_naming_it() {
+        let input = "VARIABLE x\nBad == [a |-> ]\nInit == x = 0";
+        let Err(error) = parse(input) else {
+            panic!("a definition that fails to parse is an error");
+        };
+        assert!(
+            error.message.contains("operator 'Bad'"),
+            "{}",
+            error.message
+        );
+        let span = error.span.expect("the error points at the offending token");
+        assert_eq!(&input[span.start as usize..span.end as usize], "]");
+    }
+
+    #[test]
+    fn an_infix_definition_whose_body_does_not_parse_is_an_error_naming_it() {
+        let Err(error) = parse("VARIABLE x\na \\o b == ]\nInit == x = 0") else {
+            panic!("an infix definition that fails to parse is an error");
+        };
+        assert!(
+            error.message.contains("infix operator '\\o'"),
+            "{}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn a_spec_definition_whose_body_does_not_parse_is_an_error_naming_it() {
+        let Err(error) = parse("VARIABLE x\nInit == x = 0\nSpec == Init /\\ )\nNext == x' = x")
+        else {
+            panic!("a *Spec definition that fails to parse is an error");
+        };
+        assert!(
+            error.message.contains("operator 'Spec'"),
+            "{}",
+            error.message
+        );
+    }
+
+    #[test]
     fn parse_spec_definition_stored() {
         let input = r#"
             VARIABLES x

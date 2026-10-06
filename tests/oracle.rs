@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tla_checker::ast::{Env, Value};
 use tla_checker::checker::{CheckResult, CheckerConfig, PrepareSpecError, check};
 use tla_checker::config::{apply_config, parse_cfg};
-use tla_checker::parser::{parse, parse_with_warnings};
+use tla_checker::parser::parse;
 
 /// The suite runs under the walker by default; `TLA_ENGINE=inference` runs the
 /// whole suite under the legacy engine so both can be exercised in CI.
@@ -1389,12 +1389,13 @@ Pairs == {<<1, 2>>}
 Init == x = 0
 Next == \E <<a, a>> \in Pairs : x' = a
 ===="#;
-    let (_, warnings) = parse_with_warnings(input).expect("spec should parse with warning");
-    assert!(
-        warnings.iter().any(|w| w.value.contains("duplicate name")),
-        "expected duplicate-name warning, got: {:?}",
-        warnings.iter().map(|w| &w.value).collect::<Vec<_>>()
-    );
+    let Err(err) = parse(input) else {
+        panic!("a duplicate name in a tuple binder must not parse");
+    };
+    assert!(err.message.contains("operator 'Next'"), "{err:?}");
+    assert!(err.message.contains("duplicate name 'a'"), "{err:?}");
+    let span = err.span.expect("the error points at the definition");
+    assert_eq!(&input[span.start as usize..span.end as usize], "Next");
 }
 
 #[test]
@@ -2138,6 +2139,33 @@ fn test_should_error_extends_parse_error() {
             "extends_parse_error.tla should produce PrepareSpecError::InstanceError, got: {:?}",
             other
         ),
+    }
+}
+
+#[test]
+fn test_should_error_definition_parse_error() {
+    let input = fs::read_to_string("test_cases/should_error/definition_parse_error.tla")
+        .expect("read spec");
+    let Err(err) = parse(&input) else {
+        panic!("a definition that fails to parse must be an error");
+    };
+    assert!(err.message.contains("'Bad'"), "{err:?}");
+    let span = err.span.expect("the error points at the offending token");
+    assert_eq!(&input[span.start as usize..span.end as usize], "|->");
+}
+
+#[test]
+fn test_should_error_instance_definition_parse_error() {
+    let path = Path::new(
+        "test_cases/should_error/instance_definition_parse_error/instance_definition_parse_error.tla",
+    );
+    match check_spec_file_allow_deadlock(path) {
+        CheckResult::PrepareError(PrepareSpecError::InstanceError(e)) => {
+            let msg = format!("{e:?}");
+            assert!(msg.contains("Helpers.tla:4:13"), "{msg}");
+            assert!(msg.contains("'Bad'"), "{msg}");
+        }
+        other => panic!("expected PrepareSpecError::InstanceError, got: {other:?}"),
     }
 }
 

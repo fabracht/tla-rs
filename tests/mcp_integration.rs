@@ -416,7 +416,7 @@ fn validate_spec_surfaces_parser_warnings() {
     let path = std::env::temp_dir().join("tla_mcp_warn_spec.tla");
     std::fs::write(
         &path,
-        "---- MODULE WarnSpec ----\nVARIABLE x\nInit == x = 0\nNext == x' = x + 1\nBadOp ==\n====\n",
+        "---- MODULE WarnSpec ----\nVARIABLE x\nInit == x = 0\nNext == x' = x + 1\nHalf == x / 2\n====\n",
     )
     .unwrap();
     let input = ValidateSpecInput {
@@ -430,14 +430,35 @@ fn validate_spec_surfaces_parser_warnings() {
 
     assert!(matches!(out.status, ValidationStatus::Ok));
     assert!(
-        !out.warnings.is_empty(),
-        "expected parser warning for malformed BadOp body; got none"
-    );
-    assert!(
-        out.warnings.iter().any(|w| w.message.contains("BadOp")),
-        "warning should mention BadOp; got {:?}",
+        out.warnings
+            .iter()
+            .any(|w| w.message.contains("integer division")),
+        "expected the integer-division warning; got {:?}",
         out.warnings
     );
+}
+
+#[test]
+fn validate_spec_reports_a_definition_that_fails_to_parse() {
+    let path = std::env::temp_dir().join("tla_mcp_bad_definition_spec.tla");
+    std::fs::write(
+        &path,
+        "---- MODULE BadDef ----\nVARIABLE x\nInit == x = 0\nNext == x' = x + 1\nBadOp == [a |-> ]\n====\n",
+    )
+    .unwrap();
+    let input = ValidateSpecInput {
+        spec_path: path.to_string_lossy().into_owned(),
+        constants: BTreeMap::new(),
+        config_path: None,
+        liveness_engine: None,
+    };
+    let out = runner::validate_spec(&input);
+    let _ = std::fs::remove_file(&path);
+
+    assert!(matches!(out.status, ValidationStatus::Error));
+    let error = out.error.expect("a parse error");
+    assert!(error.message.contains("'BadOp'"), "{error:?}");
+    assert_eq!(error.span.map(|span| span.start_line), Some(5), "{error:?}");
 }
 
 #[test]

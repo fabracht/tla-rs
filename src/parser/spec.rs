@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::ast::{Expr, LivenessProperty, Spec};
 use crate::lexer::Token;
+use crate::span::Span;
 
 use super::error::{ParseError, Result};
 use super::lexing::Parser;
@@ -135,6 +136,7 @@ impl Parser {
                 }
                 Token::Ident(name) => {
                     let name = name.clone();
+                    let name_span = self.current_span();
                     self.advance();
 
                     if let Some(sym) = Self::infix_op_name(self.peek())
@@ -150,13 +152,11 @@ impl Parser {
                                 self.fn_definitions.insert(sym, (vec![name, rhs], body));
                             }
                             Err(e) => {
-                                let message = format!(
-                                    "failed to parse infix operator '\\{}': {}",
-                                    sym, e.message
-                                );
-                                let span = e.span.unwrap_or_default();
-                                self.warnings.push(crate::span::Spanned::new(message, span));
-                                self.skip_to_next_definition();
+                                return Err(Self::definition_error(
+                                    &format!("infix operator '\\{sym}'"),
+                                    name_span,
+                                    e,
+                                ));
                             }
                         }
                         continue;
@@ -179,8 +179,12 @@ impl Parser {
                                 self.extract_fairness_and_liveness(&name, &spec_expr);
                                 self.definitions.insert(name, spec_expr);
                             }
-                            Err(_) => {
-                                self.skip_to_next_definition();
+                            Err(e) => {
+                                return Err(Self::definition_error(
+                                    &format!("operator '{name}'"),
+                                    name_span,
+                                    e,
+                                ));
                             }
                         }
                         continue;
@@ -196,12 +200,11 @@ impl Parser {
                     let expr = match self.parse_expr() {
                         Ok(e) => e,
                         Err(e) => {
-                            let message =
-                                format!("failed to parse operator '{}': {}", name, e.message);
-                            let span = e.span.unwrap_or_default();
-                            self.warnings.push(crate::span::Spanned::new(message, span));
-                            self.skip_to_next_definition();
-                            continue;
+                            return Err(Self::definition_error(
+                                &format!("operator '{name}'"),
+                                name_span,
+                                e,
+                            ));
                         }
                     };
 
@@ -280,6 +283,14 @@ impl Parser {
             temporal_assumptions: Vec::new(),
             constant_substitutions: Vec::new(),
         })
+    }
+
+    fn definition_error(definition: &str, name_span: Span, error: ParseError) -> ParseError {
+        ParseError {
+            message: format!("failed to parse {definition}: {}", error.message),
+            span: error.span.or(Some(name_span)),
+            ..error
+        }
     }
 
     fn extract_fairness_and_liveness(&mut self, name: &Arc<str>, expr: &Expr) {

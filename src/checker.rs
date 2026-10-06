@@ -460,6 +460,12 @@ pub fn prepare_spec(
             }
             match registry.load(&inst.module_name, spec_path) {
                 Ok(_) => {}
+                Err(ModuleError::ParseError(message)) => {
+                    return Err(PrepareSpecError::InstanceError(EvalError::DomainError {
+                        message: format!("parse error in module {}: {message}", inst.module_name),
+                        span: None,
+                    }));
+                }
                 Err(e) => {
                     if !quiet {
                         eprintln!(

@@ -156,7 +156,7 @@ impl ServerHandler for TlaMcpServer {
             \n\
             • `limit_reached` is NOT a pass. It means the budget (max_states / max_depth) was exhausted before exploring the full reachable state space — treat as inconclusive. Either grow the budget OR shrink the state space (smaller constants, enable `symmetry`) before drawing conclusions.\n\
             \n\
-            • Always validate_spec after editing a .tla file. The parser is tolerant: malformed operator bodies become SILENT omissions, so a spec can 'parse cleanly' while missing the operator you cared about. Cross-check the returned `spec.invariants` list against what you expected.\n\
+            • Always validate_spec after editing a .tla file. A definition whose body does not parse is a parse error that names the definition and points at the offending token; fix it first. Then cross-check the returned `spec.invariants` list against what you expected: invariants come from the cfg or from name prefixes (`Inv*`, `TypeOK*`), so a misnamed one is simply not checked.\n\
             \n\
             • Bugs are local. Counterexample traces can be long, but the rule violation is almost always in the LAST transition — compare `trace[len-2]` vs `trace[len-1]` using their `display` fields, and inspect `actions[len-1]` for the action that fired. Reasoning about the whole trace usually wastes effort. A `liveness_violation` is different: its `cycle` repeats forever, so the question is what never happens on it — the state the property waits for is never reached, or an action stays enabled without being taken (missing fairness, or an action whose guard is too strong).\n\
             \n\
