@@ -246,6 +246,8 @@ impl LivenessError {
 #[derive(Debug)]
 pub enum PrepareSpecError {
     InstanceError(EvalError),
+    /// A module the spec extends or instantiates does not parse.
+    ModuleParse(String),
     MissingConstants(Vec<Arc<str>>),
     AssumeViolation(usize),
     AssumeError(usize, EvalError),
@@ -266,7 +268,7 @@ fn load_module_extends(
     domains: &mut crate::ast::Env,
     extended_defs: &mut Definitions,
     ancestors: &mut Vec<Arc<str>>,
-) -> Result<(), EvalError> {
+) -> Result<(), PrepareSpecError> {
     if ancestors.iter().any(|a| a == name) {
         let mut cycle_path: Vec<String> = ancestors
             .iter()
@@ -274,10 +276,10 @@ fn load_module_extends(
             .map(|a| a.to_string())
             .collect();
         cycle_path.push(name.to_string());
-        return Err(EvalError::DomainError {
+        return Err(PrepareSpecError::InstanceError(EvalError::DomainError {
             message: format!("cyclic EXTENDS dependency: {}", cycle_path.join(" -> ")),
             span: None,
-        });
+        }));
     }
 
     if let Some(cached) = registry.get(name) {
@@ -289,33 +291,7 @@ fn load_module_extends(
 
     let (child_extends, child_defs) = match registry.load(name, spec_path) {
         Ok(loaded) => (loaded.extends.clone(), loaded.definitions.clone()),
-        Err(ModuleError::NotFound(_)) => {
-            return Err(EvalError::DomainError {
-                message: format!(
-                    "module {} not found (no file {}.tla in spec directory)",
-                    name, name
-                ),
-                span: None,
-            });
-        }
-        Err(ModuleError::ParseError(msg)) => {
-            return Err(EvalError::DomainError {
-                message: format!("parse error in module {}: {}", name, msg),
-                span: None,
-            });
-        }
-        Err(ModuleError::CyclicDependency(dep)) => {
-            return Err(EvalError::DomainError {
-                message: format!("cyclic dependency loading module {}", dep),
-                span: None,
-            });
-        }
-        Err(ModuleError::IoError(msg)) => {
-            return Err(EvalError::DomainError {
-                message: format!("I/O error loading module {}: {}", name, msg),
-                span: None,
-            });
-        }
+        Err(error) => return Err(module_load_error(name, error)),
     };
 
     ancestors.push(name.clone());
@@ -333,6 +309,26 @@ fn load_module_extends(
     }
 
     Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn module_load_error(name: &str, error: ModuleError) -> PrepareSpecError {
+    let message = match error {
+        ModuleError::ParseError(message) => {
+            return PrepareSpecError::ModuleParse(format!(
+                "parse error in module {name}: {message}"
+            ));
+        }
+        ModuleError::NotFound(_) => {
+            format!("module {name} not found (no file {name}.tla in spec directory)")
+        }
+        ModuleError::CyclicDependency(dep) => format!("cyclic dependency loading module {dep}"),
+        ModuleError::IoError(message) => format!("I/O error loading module {name}: {message}"),
+    };
+    PrepareSpecError::InstanceError(EvalError::DomainError {
+        message,
+        span: None,
+    })
 }
 
 fn substituted_value(
@@ -424,16 +420,14 @@ pub fn prepare_spec(
             if stdlib::is_stdlib_module(module) {
                 continue;
             }
-            if let Err(err) = load_module_extends(
+            load_module_extends(
                 module,
                 spec_path,
                 &mut registry,
                 &mut domains,
                 &mut extended_defs,
                 &mut ancestors,
-            ) {
-                return Err(PrepareSpecError::InstanceError(err));
-            }
+            )?;
         }
     }
     for (name, def) in &spec.definitions {
@@ -460,14 +454,15 @@ pub fn prepare_spec(
             }
             match registry.load(&inst.module_name, spec_path) {
                 Ok(_) => {}
-                Err(e) => {
+                Err(ModuleError::NotFound(_)) => {
                     if !quiet {
+                        let module = &inst.module_name;
                         eprintln!(
-                            "  Warning: could not load module {}: {:?}",
-                            inst.module_name, e
+                            "  Warning: could not load module {module}: no file {module}.tla in spec directory"
                         );
                     }
                 }
+                Err(error) => return Err(module_load_error(&inst.module_name, error)),
             }
         }
         match resolve_instances(spec, &registry) {
@@ -796,6 +791,12 @@ fn check_with_state_vars(spec: &Spec, domains: &Env, config: &CheckerConfig) -> 
         .count_properties
         .iter()
         .filter_map(|name| match defs.get(name) {
+            Some((_, expr)) if let Expr::Unparsed(unparsed) = expr.as_ref() => {
+                if !config.quiet {
+                    eprintln!("  Warning: count property skipped: {unparsed}");
+                }
+                None
+            }
             Some((params, expr)) if params.is_empty() => Some((name.clone(), (**expr).clone())),
             Some(_) => {
                 if !config.quiet {
@@ -2880,6 +2881,12 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
             format!(
                 r#"{{"status": "instance_error", "error": {}}}"#,
                 json_string(&format_eval_error(e))
+            )
+        }
+        CheckResult::PrepareError(PrepareSpecError::ModuleParse(message)) => {
+            format!(
+                r#"{{"status": "parse_error", "error": {}}}"#,
+                json_string(message)
             )
         }
         CheckResult::PrepareError(PrepareSpecError::MissingConstants(missing)) => {

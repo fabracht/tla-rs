@@ -77,6 +77,7 @@ pub enum Token {
     Case,
     Other,
     Let,
+    Define,
     Def,
     Except,
     Domain,
@@ -93,6 +94,7 @@ pub enum Token {
     Local,
     With,
     By,
+    Prove,
     ProofDef,
     Qed,
     Lemma,
@@ -220,6 +222,7 @@ impl std::fmt::Display for Token {
             Token::Case => write!(f, "`CASE`"),
             Token::Other => write!(f, "`OTHER`"),
             Token::Let => write!(f, "`LET`"),
+            Token::Define => write!(f, "`DEFINE`"),
             Token::Def => write!(f, "`IN`"),
             Token::Except => write!(f, "`EXCEPT`"),
             Token::Domain => write!(f, "`DOMAIN`"),
@@ -236,6 +239,7 @@ impl std::fmt::Display for Token {
             Token::Local => write!(f, "`LOCAL`"),
             Token::With => write!(f, "`WITH`"),
             Token::By => write!(f, "`BY`"),
+            Token::Prove => write!(f, "`PROVE`"),
             Token::ProofDef => write!(f, "`PROOF`"),
             Token::Qed => write!(f, "`QED`"),
             Token::Lemma => write!(f, "`LEMMA`"),
@@ -295,7 +299,7 @@ impl std::fmt::Display for Token {
 pub struct Lexer<'a> {
     input: &'a str,
     pos: usize,
-    seen_module: bool,
+    open_modules: usize,
     module_ended: bool,
 }
 
@@ -304,7 +308,7 @@ impl<'a> Lexer<'a> {
         Self {
             input,
             pos: 0,
-            seen_module: false,
+            open_modules: 0,
             module_ended: false,
         }
     }
@@ -404,8 +408,13 @@ impl<'a> Lexer<'a> {
                     self.advance();
                 }
                 if self.pos - start >= 4 {
+                    let rest_start = self.pos;
                     while self.peek_char().is_some_and(|c| c != '\n') {
                         self.advance();
+                    }
+                    if self.input[rest_start..self.pos].split_whitespace().next() == Some("MODULE")
+                    {
+                        self.open_modules += 1;
                     }
                 } else {
                     self.pos = start;
@@ -417,9 +426,12 @@ impl<'a> Lexer<'a> {
                     self.advance();
                 }
                 if self.pos - start >= 4 {
-                    if self.seen_module {
-                        self.module_ended = true;
-                        return;
+                    if self.open_modules > 0 {
+                        self.open_modules -= 1;
+                        if self.open_modules == 0 {
+                            self.module_ended = true;
+                            return;
+                        }
                     }
                     while self.peek_char().is_some_and(|c| c != '\n') {
                         self.advance();
@@ -816,7 +828,7 @@ impl<'a> Lexer<'a> {
                 "TRUE" => Token::True,
                 "FALSE" => Token::False,
                 "MODULE" => {
-                    self.seen_module = true;
+                    self.open_modules += 1;
                     Token::Module
                 }
                 "EXTENDS" => Token::Extends,
@@ -880,13 +892,13 @@ impl<'a> Lexer<'a> {
                 "QED" => Token::Qed,
                 "LEMMA" => Token::Lemma,
                 "ENABLED" => Token::Enabled,
-                "DEFINE" => Token::Let,
+                "DEFINE" => Token::Define,
                 "PICK" => Token::Choose,
                 "WITNESS" => Token::By,
                 "OBVIOUS" => Token::By,
                 "OMITTED" => Token::By,
                 "NEW" => Token::By,
-                "PROVE" => Token::By,
+                "PROVE" => Token::Prove,
                 "SUFFICES" => Token::By,
                 "COROLLARY" => Token::Lemma,
                 "HAVE" => Token::By,
@@ -1289,7 +1301,7 @@ impl<'a> Lexer<'a> {
                 "TRUE" => Token::True,
                 "FALSE" => Token::False,
                 "MODULE" => {
-                    self.seen_module = true;
+                    self.open_modules += 1;
                     Token::Module
                 }
                 "EXTENDS" => Token::Extends,
@@ -1353,13 +1365,13 @@ impl<'a> Lexer<'a> {
                 "QED" => Token::Qed,
                 "LEMMA" => Token::Lemma,
                 "ENABLED" => Token::Enabled,
-                "DEFINE" => Token::Let,
+                "DEFINE" => Token::Define,
                 "PICK" => Token::Choose,
                 "WITNESS" => Token::By,
                 "OBVIOUS" => Token::By,
                 "OMITTED" => Token::By,
                 "NEW" => Token::By,
-                "PROVE" => Token::By,
+                "PROVE" => Token::Prove,
                 "SUFFICES" => Token::By,
                 "COROLLARY" => Token::Lemma,
                 "HAVE" => Token::By,

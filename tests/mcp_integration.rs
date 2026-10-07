@@ -416,7 +416,7 @@ fn validate_spec_surfaces_parser_warnings() {
     let path = std::env::temp_dir().join("tla_mcp_warn_spec.tla");
     std::fs::write(
         &path,
-        "---- MODULE WarnSpec ----\nVARIABLE x\nInit == x = 0\nNext == x' = x + 1\nBadOp ==\n====\n",
+        "---- MODULE WarnSpec ----\nVARIABLE x\nInit == x = 0\nNext == x' = x + 1\nHalf == x / 2\n====\n",
     )
     .unwrap();
     let input = ValidateSpecInput {
@@ -430,14 +430,64 @@ fn validate_spec_surfaces_parser_warnings() {
 
     assert!(matches!(out.status, ValidationStatus::Ok));
     assert!(
-        !out.warnings.is_empty(),
-        "expected parser warning for malformed BadOp body; got none"
-    );
-    assert!(
-        out.warnings.iter().any(|w| w.message.contains("BadOp")),
-        "warning should mention BadOp; got {:?}",
+        out.warnings
+            .iter()
+            .any(|w| w.message.contains("integer division")),
+        "expected the integer-division warning; got {:?}",
         out.warnings
     );
+}
+
+#[test]
+fn a_definition_that_fails_to_parse_is_a_warning_until_it_is_used() {
+    let path = std::env::temp_dir().join("tla_mcp_bad_definition_spec.tla");
+    std::fs::write(
+        &path,
+        "---- MODULE BadDef ----\nVARIABLE x\nInit == x = 0\nNext == x' = BadOp\nBadOp == [a |-> ]\n====\n",
+    )
+    .unwrap();
+    let validated = runner::validate_spec(&ValidateSpecInput {
+        spec_path: path.to_string_lossy().into_owned(),
+        constants: BTreeMap::new(),
+        config_path: None,
+        liveness_engine: None,
+    });
+    let checked = runner::check_spec(&CheckSpecInput {
+        spec_path: path.to_string_lossy().into_owned(),
+        max_states: 10,
+        max_depth: 10,
+        max_seconds: 30,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: None,
+        symbolic_integers: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        liveness_engine: None,
+        config_path: None,
+    });
+    let _ = std::fs::remove_file(&path);
+
+    assert!(matches!(validated.status, ValidationStatus::Ok));
+    assert!(
+        validated
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("'BadOp'")),
+        "{:?}",
+        validated.warnings
+    );
+    match checked.outcome {
+        CheckOutcome::Error { error, .. } => assert!(
+            error.message.contains(
+                "`BadOp` is defined, but its definition did not parse: line 5, column 17"
+            ),
+            "{error:?}"
+        ),
+        other => panic!("using BadOp must report why it did not parse, got {other:?}"),
+    }
 }
 
 #[test]

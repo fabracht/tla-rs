@@ -142,6 +142,12 @@ impl Parser {
         !s.is_empty() && (s.chars().all(|c| c.is_ascii_uppercase()) || s.ends_with('_'))
     }
 
+    /// Whether `name` is detected as the spec's `role` (`Init` or `Next`): the
+    /// name itself or a module prefix followed by it (`TPInit`, `M_Next`).
+    pub(crate) fn is_behavior_name(name: &str, role: &str) -> bool {
+        name == role || name.strip_suffix(role).is_some_and(Self::is_module_prefix)
+    }
+
     pub(super) fn is_invariant_name(name: &str) -> bool {
         for suffix in ["TypeOK", "Inv"] {
             if name.starts_with(suffix) {
@@ -186,44 +192,152 @@ impl Parser {
         }
     }
 
+    /// Skips a theorem or proof up to the next unit. An `ASSUME ... PROVE` in it is
+    /// part of the proof, not a module `ASSUME`, and a definition in a `LET` it
+    /// opened or after a proof step's `DEFINE` is local to it.
     pub(super) fn skip_to_next_definition(&mut self) {
+        let mut open_lets = 0usize;
+        let mut defining = false;
         loop {
-            match self.peek() {
-                Token::Eof => break,
-                Token::Variables
-                | Token::Constants
-                | Token::Module
-                | Token::Extends
-                | Token::Theorem => break,
-                Token::Invariant => break,
-                Token::Ident(_) => {
-                    let start = self.pos;
-                    self.advance();
-                    if *self.peek() == Token::EqEq {
-                        self.pos = start;
-                        break;
-                    }
-                    if *self.peek() == Token::LParen {
-                        self.advance();
-                        let mut depth = 1;
-                        while depth > 0 && *self.peek() != Token::Eof {
-                            match self.peek() {
-                                Token::LParen => depth += 1,
-                                Token::RParen => depth -= 1,
-                                _ => {}
-                            }
-                            self.advance();
-                        }
-                        if *self.peek() == Token::EqEq {
-                            self.pos = start;
-                            break;
-                        }
-                    }
-                }
-                _ => {
-                    self.advance();
-                }
+            let proof_local = (open_lets > 0 || defining) && matches!(self.peek(), Token::Ident(_));
+            let proof_assume = *self.peek() == Token::Assume && self.assume_has_prove();
+            if self.at_unit_start() && !proof_local && !proof_assume {
+                return;
+            }
+            match self.advance() {
+                Token::Let => open_lets += 1,
+                Token::Def => open_lets = open_lets.saturating_sub(1),
+                Token::Define => defining = true,
+                _ => {}
             }
         }
+    }
+
+    /// Skips the rest of a definition that did not parse, from the token after its
+    /// name. While a `LET` the failed body opened is open, what starts right of
+    /// `column`, the failed definition's own, belongs to it; a unit at or left of it
+    /// ends the skip even then (a body whose `IN` is missing).
+    pub(super) fn skip_failed_definition(&mut self, column: u32) {
+        while !matches!(self.peek(), Token::EqEq | Token::Eof) {
+            self.advance();
+        }
+        self.advance();
+        if *self.peek() == Token::Instance {
+            self.advance();
+        }
+        let mut open_lets = 0usize;
+        loop {
+            let belongs_to_body =
+                open_lets > 0 && self.column_of(self.current_span().start) > column;
+            if *self.peek() == Token::Eof || (self.at_unit_start() && !belongs_to_body) {
+                return;
+            }
+            match self.advance() {
+                Token::Let => open_lets += 1,
+                Token::Def => open_lets = open_lets.saturating_sub(1),
+                _ => {}
+            }
+        }
+    }
+
+    /// A separator the top level skips between units.
+    pub(super) fn is_separator(token: &Token) -> bool {
+        matches!(
+            token,
+            Token::Semicolon | Token::Dollar | Token::Pipe | Token::Caret | Token::Ampersand
+        )
+    }
+
+    /// Whether a `PROVE` follows the `ASSUME` at the current position before the
+    /// next unit, making it an `ASSUME ... PROVE` statement of a proof.
+    fn assume_has_prove(&self) -> bool {
+        for (index, token) in self.tokens.iter().enumerate().skip(self.pos + 1) {
+            match &token.value {
+                Token::Prove => return true,
+                Token::Eof
+                | Token::Module
+                | Token::Extends
+                | Token::Variables
+                | Token::Constants
+                | Token::Assume
+                | Token::Theorem
+                | Token::Lemma
+                | Token::ProofStep
+                | Token::Qed
+                | Token::ProofDef
+                | Token::Recursive
+                | Token::Local
+                | Token::Instance
+                | Token::Invariant => return false,
+                Token::Ident(_)
+                    if matches!(
+                        self.tokens.get(index + 1).map(|next| &next.value),
+                        Some(Token::EqEq)
+                    ) =>
+                {
+                    return false;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// Whether the next token starts a module unit: a declaration, an `ASSUME`,
+    /// `THEOREM` or proof step, or a definition (`Name ==`, `Name(...) ==`,
+    /// `f[...] ==` or `a \op b ==`).
+    pub(super) fn at_unit_start(&self) -> bool {
+        match self.peek() {
+            Token::Eof
+            | Token::Module
+            | Token::Extends
+            | Token::Variables
+            | Token::Constants
+            | Token::Assume
+            | Token::Theorem
+            | Token::Recursive
+            | Token::Local
+            | Token::Instance
+            | Token::Lemma
+            | Token::ProofStep
+            | Token::By
+            | Token::Prove
+            | Token::Qed
+            | Token::ProofDef
+            | Token::Invariant => true,
+            Token::Ident(_) => match self.peek_n(1) {
+                Token::EqEq => true,
+                Token::LParen => self.group_then_eqeq(self.pos + 1, &Token::LParen, &Token::RParen),
+                Token::LBracket => {
+                    self.group_then_eqeq(self.pos + 1, &Token::LBracket, &Token::RBracket)
+                }
+                tok => {
+                    Self::infix_op_name(tok).is_some()
+                        && matches!(self.peek_n(2), Token::Ident(_))
+                        && *self.peek_n(3) == Token::EqEq
+                }
+            },
+            _ => false,
+        }
+    }
+
+    fn group_then_eqeq(&self, open: usize, opening: &Token, closing: &Token) -> bool {
+        let mut depth = 0usize;
+        for (index, token) in self.tokens.iter().enumerate().skip(open) {
+            if token.value == *opening {
+                depth += 1;
+            } else if token.value == *closing {
+                depth -= 1;
+                if depth == 0 {
+                    return self
+                        .tokens
+                        .get(index + 1)
+                        .is_some_and(|next| next.value == Token::EqEq);
+                }
+            } else if token.value == Token::Eof {
+                return false;
+            }
+        }
+        false
     }
 }

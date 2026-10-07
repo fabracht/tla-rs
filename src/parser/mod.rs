@@ -522,6 +522,276 @@ mod tests {
         assert!(error.message.contains("both"), "{}", error.message);
     }
 
+    fn unparsed(input: &str, name: &str) -> (Spec, crate::ast::UnparsedDefinition) {
+        let (spec, warnings) = parse_with_warnings(input).expect("the module parses");
+        let unparsed = spec
+            .unparsed_definition(name)
+            .cloned()
+            .unwrap_or_else(|| panic!("`{name}` should be recorded as unparsed: {warnings:?}"));
+        assert!(
+            warnings.iter().any(|w| w.value.contains("failed to parse")),
+            "{warnings:?}"
+        );
+        (spec, unparsed)
+    }
+
+    #[test]
+    fn a_definition_whose_body_does_not_parse_stays_defined_with_its_parse_error() {
+        let (spec, bad) = unparsed("VARIABLE x\nBad == [a |-> ]\nInit == x = 0", "Bad");
+        assert_eq!((bad.line, bad.column), (2, 15));
+        assert!(bad.message.contains("unexpected `]`"), "{}", bad.message);
+        assert!(spec.init.is_some(), "the next definition still parses");
+    }
+
+    #[test]
+    fn a_parameterized_definition_that_does_not_parse_keeps_its_parameters() {
+        let (spec, _) = unparsed("VARIABLE x\nBad(a, b) == [a |-> ]\nInit == x = 0", "Bad");
+        let (params, _) = spec.definitions.get("Bad").expect("Bad stays defined");
+        assert_eq!(params, &[Arc::from("a"), Arc::from("b")]);
+    }
+
+    #[test]
+    fn an_init_that_does_not_parse_is_the_init_and_fails_when_used() {
+        let (spec, _) = unparsed("VARIABLE x\nInit == x = [a |-> ]\nNext == x' = x", "Init");
+        assert!(
+            matches!(spec.init, Some(Expr::Unparsed(_))),
+            "{:?}",
+            spec.init
+        );
+    }
+
+    #[test]
+    fn a_proof_assume_is_not_a_module_assume() {
+        let spec = parse(
+            "VARIABLE x\nInit == x = 0\nTHEOREM Lem == ASSUME NEW S, NEW y \\in S PROVE y \\in S\n  <1>1. ASSUME NEW z PROVE z = z\n    OBVIOUS\n  <1>2. QED BY <1>1\nASSUME TRUE\nNext == x' = x",
+        )
+        .expect("the proofs are skipped");
+        assert_eq!(spec.assumes.len(), 1);
+        assert!(spec.init.is_some() && spec.next.is_some());
+    }
+
+    #[test]
+    fn definitions_indented_right_of_a_failed_one_are_kept() {
+        let (spec, _) = unparsed(
+            "VARIABLE x\n  Bad == [i \\in 1..2, j \\in 1..2 |-> i]\n    Init == x = 0\n    Next == x' = 1 - x",
+            "Bad",
+        );
+        assert!(matches!(spec.init, Some(Expr::Eq(_, _))), "{:?}", spec.init);
+        assert!(spec.next.is_some());
+    }
+
+    #[test]
+    fn a_failed_instance_definition_does_not_become_an_unnamed_instance() {
+        let (spec, _) = unparsed(
+            "VARIABLE x\nM == INSTANCE Foo WITH p <- [a |-> ]\nInit == x = 0",
+            "M",
+        );
+        assert!(spec.instances.is_empty(), "{:?}", spec.instances);
+        let (spec, _) = unparsed("VARIABLE x\nM(a,) == INSTANCE Foo\nInit == x = 0", "M");
+        assert!(spec.instances.is_empty(), "{:?}", spec.instances);
+        assert!(spec.init.is_some());
+    }
+
+    #[test]
+    fn an_invariant_that_does_not_parse_is_still_an_invariant() {
+        let (spec, _) = unparsed("VARIABLE x\nInvBad == x = ]\nInit == x = 0", "InvBad");
+        assert_eq!(spec.invariant_names, vec![Some(Arc::from("InvBad"))]);
+        assert!(matches!(spec.invariants.as_slice(), [Expr::Unparsed(_)]));
+    }
+
+    #[test]
+    fn a_spec_that_does_not_parse_adds_no_temporal_parts() {
+        let (spec, _) = unparsed(
+            "VARIABLE x\nHelperSpec == x \\in {0, 1} /\\ ]\nInit == x = 0",
+            "HelperSpec",
+        );
+        assert!(spec.liveness_properties.is_empty() && spec.fairness.is_empty());
+    }
+
+    #[test]
+    fn a_module_assume_ends_a_body_even_when_a_proof_follows() {
+        let spec = parse(
+            "CONSTANT N\nVARIABLE x\nInit == x = 0\nNext == x' = (x + 1) % N\nASSUME N \\in Nat \\ {0, 1, 2, 3}\nUSE DEF Init",
+        )
+        .expect("the spec parses");
+        assert!(matches!(spec.next, Some(Expr::Eq(_, _))), "{:?}", spec.next);
+        assert_eq!(spec.assumes.len(), 1);
+    }
+
+    #[test]
+    fn a_theorem_name_is_not_a_definition() {
+        let spec = parse(
+            "VARIABLE x\nInit == x = 0\nLEMMA TypeOKInductive == ASSUME NEW y \\in {0, 1} PROVE y \\in {0, 1}\nTHEOREM InvT == x = x\nNext == x' = x",
+        )
+        .expect("the spec parses");
+        assert!(!spec.definitions.contains_key("TypeOKInductive"));
+        assert!(!spec.definitions.contains_key("InvT"));
+        assert!(spec.invariants.is_empty());
+        assert!(spec.next.is_some());
+    }
+
+    #[test]
+    fn a_proof_define_or_let_is_not_a_definition() {
+        let spec = parse(
+            "VARIABLE x\nInit == x = 0\nTHEOREM T == LET InvL == x = 7 IN InvL\n<1> DEFINE InvX == x = 5\n           TypeOKY == x = 6\n<1>1. LET InvZ == x = 8 IN InvZ\n  OBVIOUS\n<1> QED BY DEF Init\nNext == x' = x",
+        )
+        .expect("the proof is skipped");
+        for name in ["InvL", "InvX", "TypeOKY", "InvZ"] {
+            assert!(!spec.definitions.contains_key(name), "{name}");
+        }
+        assert!(spec.invariants.is_empty());
+        assert!(spec.next.is_some());
+    }
+
+    #[test]
+    fn text_after_a_definition_that_is_not_a_unit_is_an_error() {
+        for junk in ["InvSmall = x <= 1", "this is junk text", "a ^+ == a"] {
+            let input = format!("VARIABLE x\nInit == x = 0\nMax == 3\n{junk}\nInv == x <= 2");
+            let Err(error) = parse(&input) else {
+                panic!("`{junk}` after a definition must not parse");
+            };
+            let (line, _) = crate::source::Source::new("t", input.as_str())
+                .line_col(error.span.map_or(0, |s| s.start));
+            assert_eq!(line, 4, "{junk}: {}", error.message);
+        }
+    }
+
+    #[test]
+    fn a_recursive_declaration_inside_a_failed_let_stays_inside_it() {
+        let (spec, _) = unparsed(
+            "VARIABLE x\nb(n) == n\nBad == LET RECURSIVE b(_)\n           b(n) == ]\n       IN b(1)\nInit == x = b(0)",
+            "Bad",
+        );
+        let (_, body) = spec.definitions.get("b").expect("b stays defined");
+        assert!(matches!(body.as_ref(), Expr::Var(_)), "{body:?}");
+        assert!(spec.init.is_some());
+    }
+
+    #[test]
+    fn a_malformed_parameter_list_keeps_its_names_and_is_not_the_init() {
+        let (spec, _) = unparsed("VARIABLE x\nInit(a b) == x = ]\nNext == x' = x", "Init");
+        assert!(spec.init.is_none());
+        let (params, _) = spec
+            .definitions
+            .get("Init")
+            .expect("Init(a b) stays defined");
+        assert_eq!(params, &[Arc::from("a"), Arc::from("b")]);
+    }
+
+    #[test]
+    fn a_stray_separator_after_a_body_does_not_fail_the_definition() {
+        let spec = parse("VARIABLE x\nInit == x = 0\nNext == x' = 1 - x ;\nInv == x \\in {0, 1}")
+            .expect("the spec parses");
+        assert!(matches!(spec.next, Some(Expr::Eq(_, _))), "{:?}", spec.next);
+    }
+
+    #[test]
+    fn an_infix_definition_whose_body_does_not_parse_is_recorded_under_its_symbol() {
+        let (_, bad) = unparsed("VARIABLE x\na \\o b == ]\nInit == x = 0", "o");
+        assert_eq!(bad.line, 2);
+    }
+
+    #[test]
+    fn a_spec_definition_whose_body_does_not_parse_is_recorded() {
+        let (spec, _) = unparsed(
+            "VARIABLE x\nInit == x = 0\nSpec == Init /\\ )\nNext == x' = x",
+            "Spec",
+        );
+        assert!(spec.next.is_some());
+    }
+
+    #[test]
+    fn a_body_that_stops_before_the_next_definition_is_recorded() {
+        let (spec, bad) = unparsed("VARIABLE x\nBad == x $$ 1\nInit == x = 0", "Bad");
+        assert_eq!((bad.line, bad.column), (2, 10));
+        assert!(spec.init.is_some());
+    }
+
+    #[test]
+    fn a_function_definition_is_recorded_as_unparsed() {
+        let (spec, f) = unparsed("VARIABLE x\nf[n \\in 1..3] == n\nInit == x = f[1]", "f");
+        assert_eq!((f.line, f.column), (2, 2));
+        assert!(spec.init.is_some());
+    }
+
+    #[test]
+    fn the_column_counts_characters() {
+        let (_, bad) = unparsed("VARIABLE x\nBad == \"é\" = [a |-> ]\nInit == x = 0", "Bad");
+        assert_eq!((bad.line, bad.column), (2, 21));
+    }
+
+    #[test]
+    fn a_let_definition_in_a_failed_body_does_not_replace_a_top_level_one() {
+        let (spec, _) = unparsed(
+            "VARIABLE x\nb == 100\nBad == LET a == ]\n           b == 2\n           c == 3\n       IN a + b\nInit == x = b",
+            "Bad",
+        );
+        let (_, b) = spec.definitions.get("b").expect("b stays defined");
+        assert!(
+            matches!(b.as_ref(), Expr::Lit(crate::ast::Value::Int(100))),
+            "{b:?}"
+        );
+        assert!(!spec.definitions.contains_key("c"));
+        assert!(spec.init.is_some());
+    }
+
+    #[test]
+    fn an_empty_body_does_not_take_the_next_definition_with_it() {
+        let (spec, bad) = unparsed("VARIABLE x\nBad ==\nInit == x = 0\nNext == x' = x", "Bad");
+        assert_eq!(bad.line, 3);
+        assert!(spec.init.is_some() && spec.next.is_some());
+    }
+
+    #[test]
+    fn a_parameterized_spec_named_operator_keeps_its_parameters() {
+        let spec = parse("VARIABLE x\nMySpec(a) == a + 1\nInit == x = MySpec(1)").unwrap();
+        let (params, _) = spec.definitions.get("MySpec").expect("MySpec is defined");
+        assert_eq!(params, &[Arc::from("a")]);
+    }
+
+    #[test]
+    fn a_theorem_does_not_swallow_the_unit_after_it() {
+        let spec =
+            parse("VARIABLE x\nTHEOREM x = x\nASSUME TRUE\nINSTANCE Naturals\nInit == x = 0")
+                .unwrap();
+        assert_eq!(spec.assumes.len(), 1);
+        assert_eq!(spec.instances.len(), 1);
+    }
+
+    #[test]
+    fn a_separator_mentioning_module_does_not_open_one() {
+        let spec = parse("---- MODULE M ----\nVARIABLE x\n---- helpers used by MODULE M ----\nInit == x = 0\n====\nnot TLA+\n")
+            .expect("text after ==== is ignored");
+        assert!(spec.init.is_some());
+    }
+
+    #[test]
+    fn a_top_level_name_without_a_definition_header_is_an_error() {
+        let Err(error) = parse("VARIABLE x\nthis is not a definition\nInit == x = 0") else {
+            panic!("text that is not a definition must not parse");
+        };
+        assert!(error.message.contains("unexpected"), "{}", error.message);
+    }
+
+    #[test]
+    fn text_after_the_end_of_the_module_is_ignored() {
+        let spec = parse("---- MODULE M ----\nVARIABLE x\nInit == x = 0\nNext == x' = x\n====\nnot TLA+ at all\n")
+            .expect("text after ==== is not part of the module");
+        assert!(spec.next.is_some());
+        assert!(
+            spec.definitions
+                .values()
+                .all(|(_, body)| !matches!(body.as_ref(), Expr::Unparsed(_)))
+        );
+    }
+
+    #[test]
+    fn a_nested_module_does_not_end_the_enclosing_one() {
+        let spec = parse("---- MODULE Outer ----\nVARIABLE x\n---- MODULE Inner ----\nA == 1\n====\nInit == x = 0\n====\ntrailing\n")
+            .expect("the outer module continues after the inner one");
+        assert!(spec.init.is_some());
+    }
+
     #[test]
     fn parse_spec_definition_stored() {
         let input = r#"

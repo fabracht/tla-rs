@@ -1,13 +1,27 @@
 use std::sync::Arc;
 
-use crate::ast::{Expr, LivenessProperty, Spec};
+use crate::ast::{Expr, InstanceDecl, LivenessProperty, Spec, UnparsedDefinition};
 use crate::lexer::Token;
+use crate::span::Span;
 
 use super::error::{ParseError, Result};
 use super::lexing::Parser;
 
+enum Definition {
+    Operator {
+        params: Option<Vec<Arc<str>>>,
+        body: Expr,
+    },
+    Infix {
+        symbol: Arc<str>,
+        rhs: Arc<str>,
+        body: Expr,
+    },
+    Instance(InstanceDecl),
+}
+
 impl Parser {
-    fn infix_op_name(tok: &Token) -> Option<Arc<str>> {
+    pub(super) fn infix_op_name(tok: &Token) -> Option<Arc<str>> {
         match tok {
             Token::CustomOp(n) => Some(n.clone()),
             Token::BagAdd => Some(Arc::from("oplus")),
@@ -61,45 +75,13 @@ impl Parser {
                     let expr = self.parse_expr()?;
                     self.assumes.push(expr);
                 }
-                Token::Theorem => {
+                Token::Theorem | Token::Lemma => {
                     self.advance();
-                    while *self.peek() != Token::Eof
-                        && !matches!(
-                            self.peek(),
-                            Token::Variables
-                                | Token::Constants
-                                | Token::Module
-                                | Token::Extends
-                                | Token::Theorem
-                        )
-                    {
-                        if let Token::Ident(_) = self.peek() {
-                            let start = self.pos;
-                            self.advance();
-                            if *self.peek() == Token::EqEq {
-                                self.pos = start;
-                                break;
-                            }
-                            if *self.peek() == Token::LParen {
-                                self.advance();
-                                let mut depth = 1;
-                                while depth > 0 && *self.peek() != Token::Eof {
-                                    match self.peek() {
-                                        Token::LParen => depth += 1,
-                                        Token::RParen => depth -= 1,
-                                        _ => {}
-                                    }
-                                    self.advance();
-                                }
-                                if *self.peek() == Token::EqEq {
-                                    self.pos = start;
-                                    break;
-                                }
-                            }
-                        } else {
-                            self.advance();
-                        }
+                    if matches!(self.peek(), Token::Ident(_)) && *self.peek_n(1) == Token::EqEq {
+                        self.advance();
+                        self.advance();
                     }
+                    self.skip_to_next_definition();
                 }
                 Token::Recursive => {
                     self.advance();
@@ -120,115 +102,74 @@ impl Parser {
                     let inst = self.parse_instance(None, Vec::new())?;
                     self.instances.push(inst);
                 }
-                Token::Lemma | Token::ProofStep => {
+                Token::ProofStep
+                | Token::By
+                | Token::Prove
+                | Token::Qed
+                | Token::ProofDef
+                | Token::Enabled => {
+                    self.advance();
                     self.skip_to_next_definition();
                 }
-                Token::By | Token::Qed | Token::ProofDef | Token::Enabled => {
-                    self.skip_to_next_definition();
-                }
-                Token::Semicolon
-                | Token::Dollar
-                | Token::Pipe
-                | Token::Caret
-                | Token::Ampersand => {
+                tok if Self::is_separator(tok) => {
                     self.advance();
                 }
                 Token::Ident(name) => {
                     let name = name.clone();
+                    let name_span = self.current_span();
+                    let name_pos = self.pos;
+                    let has_definition_header = self.at_unit_start();
                     self.advance();
-
-                    if let Some(sym) = Self::infix_op_name(self.peek())
-                        && matches!(self.peek_n(1), Token::Ident(_))
-                        && *self.peek_n(2) == Token::EqEq
-                    {
-                        self.advance();
-                        let rhs = self.expect_ident()?;
-                        self.expect(Token::EqEq)?;
-                        match self.parse_expr() {
-                            Ok(body) => {
-                                self.user_infix_ops.insert(sym.clone());
-                                self.fn_definitions.insert(sym, (vec![name, rhs], body));
-                            }
-                            Err(e) => {
-                                let message = format!(
-                                    "failed to parse infix operator '\\{}': {}",
-                                    sym, e.message
-                                );
-                                let span = e.span.unwrap_or_default();
-                                self.warnings.push(crate::span::Spanned::new(message, span));
-                                self.skip_to_next_definition();
-                            }
+                    let infix = match (Self::infix_op_name(self.peek()), self.peek_n(1)) {
+                        (Some(symbol), Token::Ident(rhs)) if *self.peek_n(2) == Token::EqEq => {
+                            Some((symbol, rhs.clone()))
                         }
-                        continue;
-                    }
-
-                    let params = if *self.peek() == Token::LParen {
-                        self.advance();
-                        let params = self.parse_var_list()?;
-                        self.expect(Token::RParen)?;
-                        Some(params)
-                    } else {
-                        None
+                        _ => None,
                     };
-
-                    self.expect(Token::EqEq)?;
-
-                    if name.as_ref() == "Spec" || name.ends_with("Spec") {
-                        match self.parse_expr() {
-                            Ok(spec_expr) => {
-                                self.extract_fairness_and_liveness(&name, &spec_expr);
-                                self.definitions.insert(name, spec_expr);
-                            }
-                            Err(_) => {
-                                self.skip_to_next_definition();
-                            }
-                        }
-                        continue;
-                    }
-
-                    if *self.peek() == Token::Instance {
-                        self.advance();
-                        let inst = self.parse_instance(Some(name), params.unwrap_or_default())?;
-                        self.instances.push(inst);
-                        continue;
-                    }
-
-                    let expr = match self.parse_expr() {
-                        Ok(e) => e,
-                        Err(e) => {
-                            let message =
-                                format!("failed to parse operator '{}': {}", name, e.message);
-                            let span = e.span.unwrap_or_default();
-                            self.warnings.push(crate::span::Spanned::new(message, span));
-                            self.skip_to_next_definition();
-                            continue;
+                    let column = self.column_of(name_span.start);
+                    let definition = match &infix {
+                        Some((symbol, _)) => self.parse_infix_definition(symbol.clone(), column),
+                        None => self.parse_definition(&name, column),
+                    };
+                    let definition = match definition {
+                        Ok(definition) => definition,
+                        Err(error) if !has_definition_header => return Err(error),
+                        Err(error) => {
+                            self.recover_definition(&name, name_pos, name_span, infix, error)
                         }
                     };
+                    match definition {
+                        Definition::Infix { symbol, rhs, body } => {
+                            self.user_infix_ops.insert(symbol.clone());
+                            self.fn_definitions.insert(symbol, (vec![name, rhs], body));
+                        }
+                        Definition::Instance(inst) => self.instances.push(inst),
+                        Definition::Operator { params, body } => {
+                            let is_zero_arg = params.is_none();
+                            if is_zero_arg && name.ends_with("Spec") {
+                                self.extract_fairness_and_liveness(&name, &body);
+                                self.definitions.insert(name, body);
+                                continue;
+                            }
+                            let is_init_name = is_zero_arg && Self::is_behavior_name(&name, "Init");
+                            let is_next_name = is_zero_arg && Self::is_behavior_name(&name, "Next");
 
-                    let is_zero_arg = params.is_none();
-                    let is_init_name = is_zero_arg
-                        && (name.as_ref() == "Init"
-                            || (name.ends_with("Init")
-                                && Self::is_module_prefix(&name[..name.len() - 4])));
-                    let is_next_name = is_zero_arg
-                        && (name.as_ref() == "Next"
-                            || (name.ends_with("Next")
-                                && Self::is_module_prefix(&name[..name.len() - 4])));
-
-                    if is_init_name {
-                        init = Some(expr.clone());
-                        self.definitions.insert(name, expr);
-                    } else if is_next_name {
-                        next = Some(expr.clone());
-                        self.definitions.insert(name, expr);
-                    } else if is_zero_arg && Self::is_invariant_name(&name) {
-                        invariants.push(expr.clone());
-                        invariant_names.push(Some(name.clone()));
-                        self.definitions.insert(name, expr);
-                    } else if let Some(params) = params {
-                        self.fn_definitions.insert(name, (params, expr));
-                    } else {
-                        self.definitions.insert(name, expr);
+                            if is_init_name {
+                                init = Some(body.clone());
+                                self.definitions.insert(name, body);
+                            } else if is_next_name {
+                                next = Some(body.clone());
+                                self.definitions.insert(name, body);
+                            } else if is_zero_arg && Self::is_invariant_name(&name) {
+                                invariants.push(body.clone());
+                                invariant_names.push(Some(name.clone()));
+                                self.definitions.insert(name, body);
+                            } else if let Some(params) = params {
+                                self.fn_definitions.insert(name, (params, body));
+                            } else {
+                                self.definitions.insert(name, body);
+                            }
+                        }
                     }
                 }
                 Token::Invariant => {
@@ -280,6 +221,127 @@ impl Parser {
             temporal_assumptions: Vec::new(),
             constant_substitutions: Vec::new(),
         })
+    }
+
+    fn parse_infix_definition(&mut self, symbol: Arc<str>, column: u32) -> Result<Definition> {
+        self.advance();
+        let rhs = self.expect_ident()?;
+        self.expect(Token::EqEq)?;
+        let body = self.parse_definition_body(column)?;
+        Ok(Definition::Infix { symbol, rhs, body })
+    }
+
+    fn parse_definition(&mut self, name: &Arc<str>, column: u32) -> Result<Definition> {
+        let params = if *self.peek() == Token::LParen {
+            self.advance();
+            let params = self.parse_var_list()?;
+            self.expect(Token::RParen)?;
+            Some(params)
+        } else {
+            None
+        };
+        self.expect(Token::EqEq)?;
+        if *self.peek() == Token::Instance {
+            self.advance();
+            let inst = self.parse_instance(Some(name.clone()), params.unwrap_or_default())?;
+            return Ok(Definition::Instance(inst));
+        }
+        let body = self.parse_definition_body(column)?;
+        Ok(Definition::Operator { params, body })
+    }
+
+    /// A definition's body, which must end where the next definition or
+    /// declaration starts, possibly after separators the top level skips: a body
+    /// the expression parser stops inside, at a token right of `column`, the
+    /// definition's own, is a failure of this definition. A token at or left of
+    /// `column` starts the next unit, and the top level reports it when it is not one.
+    fn parse_definition_body(&mut self, column: u32) -> Result<Expr> {
+        let body = self.parse_expr()?;
+        let end = self.pos;
+        while Self::is_separator(self.peek()) {
+            self.advance();
+        }
+        let ends_at_unit =
+            self.at_unit_start() || self.column_of(self.current_span().start) <= column;
+        self.pos = end;
+        if ends_at_unit {
+            return Ok(body);
+        }
+        let tok = self.peek().clone();
+        Err(ParseError::new(format!("unexpected {tok}")).with_span(self.current_span()))
+    }
+
+    /// The body standing in for the definition `name` that failed with `error`.
+    fn unparsed(
+        &mut self,
+        name: &Arc<str>,
+        label: &str,
+        name_span: Span,
+        error: ParseError,
+    ) -> Expr {
+        let span = error.span.unwrap_or(name_span);
+        let (line, column) = self.source.line_char_col(span.start);
+        let message = error.to_string();
+        self.warnings.push(crate::span::Spanned::new(
+            format!("failed to parse {label}: {message}"),
+            span,
+        ));
+        Expr::Unparsed(Arc::new(UnparsedDefinition {
+            name: name.clone(),
+            file: None,
+            line,
+            column,
+            message,
+        }))
+    }
+
+    /// The definition that failed with `error`, with a body that fails with it, and
+    /// the position moved past its text.
+    fn recover_definition(
+        &mut self,
+        name: &Arc<str>,
+        name_pos: usize,
+        name_span: Span,
+        infix: Option<(Arc<str>, Arc<str>)>,
+        error: ParseError,
+    ) -> Definition {
+        self.pos = name_pos + 1;
+        let definition = match infix {
+            Some((symbol, rhs)) => {
+                let shown: Arc<str> = format!("\\{symbol}").into();
+                let label = format!("infix operator '{shown}'");
+                let body = self.unparsed(&shown, &label, name_span, error);
+                Definition::Infix { symbol, rhs, body }
+            }
+            None => {
+                let label = format!("operator '{name}'");
+                let body = self.unparsed(name, &label, name_span, error);
+                let params = self.header_params();
+                Definition::Operator { params, body }
+            }
+        };
+        self.pos = name_pos + 1;
+        self.skip_failed_definition(self.column_of(name_span.start));
+        definition
+    }
+
+    /// The parameters of the definition header at the current position, the token
+    /// after its name, when it has them: the names between its parentheses, read
+    /// without requiring them to be well formed.
+    fn header_params(&mut self) -> Option<Vec<Arc<str>>> {
+        if *self.peek() != Token::LParen {
+            return None;
+        }
+        self.advance();
+        let mut params = Vec::new();
+        while !matches!(self.peek(), Token::RParen | Token::EqEq | Token::Eof) {
+            match self.advance() {
+                Token::Ident(param) => params.push(param),
+                Token::Underscore => params.push("_".into()),
+                _ => {}
+            }
+        }
+        Some(params)
     }
 
     fn extract_fairness_and_liveness(&mut self, name: &Arc<str>, expr: &Expr) {

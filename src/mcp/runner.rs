@@ -54,7 +54,8 @@ pub fn prepare(
             .and_then(|s| (!s.is_empty()).then(|| SourceSpan::from_span(s, &source)));
         StructuredError::parse(err.message.clone(), span)
     })?;
-    crate::modules::merge_extended_declarations(&mut spec, &path);
+    crate::modules::merge_extended_declarations(&mut spec, &path)
+        .map_err(|message| StructuredError::parse(message, None))?;
     let mut warnings: Vec<ParseWarning> = parser_warnings
         .iter()
         .map(|w| ParseWarning::from_spanned(w, &source))
@@ -512,6 +513,9 @@ fn map_prepare_error(err: PrepareSpecError, source: &Source) -> CheckOutcome {
         PrepareSpecError::RefinementConfigError(message) => {
             (ErrorPhase::Config, StructuredError::internal(message))
         }
+        PrepareSpecError::ModuleParse(message) => {
+            (ErrorPhase::Parse, StructuredError::parse(message, None))
+        }
         PrepareSpecError::LivenessProperty(message)
         | PrepareSpecError::ConstantSubstitution(message) => {
             (ErrorPhase::Config, StructuredError::config(message))
@@ -940,16 +944,31 @@ mod tests {
     }
 
     #[test]
-    fn check_spec_surfaces_parse_warning_for_dropped_invariant() {
-        let dir_name = "tlc_test_check_spec_warnings";
-        let spec = "---- MODULE Dropped ----\nVARIABLES x\nInit == x = 0\nNext == x' = x\nInvBad == IF x\nInvType == x = 0\n====\n";
+    fn check_spec_fails_an_invariant_that_did_not_parse_and_not_an_unused_definition() {
+        let dir_name = "tlc_test_check_spec_unparsed_definition";
+        let spec = "---- MODULE Dropped ----\nVARIABLES x\nInit == x = 0\nNext == x' = x\nInvBad == IF x\nInvType == x = 0\nUnused == [a |-> ]\n====\n";
         let path = write_spec(dir_name, spec);
         let out = check_spec(&check_input(&path));
+        let _ = std::fs::remove_dir_all(std::env::temp_dir().join(dir_name));
         assert!(
-            !out.warnings.is_empty(),
-            "check_spec must surface the dropped-invariant parse warning; got {:?}",
+            out.warnings.iter().any(|w| w.message.contains("'InvBad'")),
+            "{:?}",
             out.warnings
         );
-        let _ = std::fs::remove_dir_all(std::env::temp_dir().join(dir_name));
+        assert!(
+            out.warnings.iter().any(|w| w.message.contains("'Unused'")),
+            "{:?}",
+            out.warnings
+        );
+        match &out.outcome {
+            CheckOutcome::Error { error, .. } => assert!(
+                error
+                    .message
+                    .starts_with("`InvBad` is defined, but its definition did not parse: line 6"),
+                "{}",
+                error.message
+            ),
+            other => panic!("the invariant InvBad must fail with its parse error: {other:?}"),
+        }
     }
 }

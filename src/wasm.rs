@@ -494,6 +494,9 @@ fn result_to_wasm(
         CheckResult::PrepareError(PrepareSpecError::ConstantSubstitution(message)) => {
             WasmCheckResult::err("ConfigError", message, warnings)
         }
+        CheckResult::PrepareError(PrepareSpecError::ModuleParse(message)) => {
+            WasmCheckResult::err("ParseError", message, warnings)
+        }
     }
 }
 

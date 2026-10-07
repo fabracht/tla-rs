@@ -837,7 +837,15 @@ fn main() -> ExitCode {
         }
     };
 
-    tla_checker::modules::merge_extended_declarations(&mut spec, Path::new(&spec_path));
+    if let Err(message) =
+        tla_checker::modules::merge_extended_declarations(&mut spec, Path::new(&spec_path))
+    {
+        eprintln!(
+            "{}",
+            Diagnostic::error(message).render_colored(&source, &colors)
+        );
+        return ExitCode::FAILURE;
+    }
 
     let mut domains = Env::new();
 
@@ -1545,6 +1553,7 @@ fn main() -> ExitCode {
         }
         CheckResult::PrepareError(
             PrepareSpecError::RefinementConfigError(message)
+            | PrepareSpecError::ModuleParse(message)
             | PrepareSpecError::LivenessProperty(message)
             | PrepareSpecError::ConstantSubstitution(message),
         ) => {

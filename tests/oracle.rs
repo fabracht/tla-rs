@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tla_checker::ast::{Env, Value};
 use tla_checker::checker::{CheckResult, CheckerConfig, PrepareSpecError, check};
 use tla_checker::config::{apply_config, parse_cfg};
-use tla_checker::parser::{parse, parse_with_warnings};
+use tla_checker::parser::parse;
 
 /// The suite runs under the walker by default; `TLA_ENGINE=inference` runs the
 /// whole suite under the legacy engine so both can be exercised in CI.
@@ -42,7 +42,9 @@ fn check_loaded(path: &Path, mut config: CheckerConfig) -> CheckResult {
         Ok(s) => s,
         Err(e) => panic!("parse error in {}: {}", path.display(), e.message),
     };
-    tla_checker::modules::merge_extended_declarations(&mut spec, path);
+    if let Err(message) = tla_checker::modules::merge_extended_declarations(&mut spec, path) {
+        return CheckResult::PrepareError(PrepareSpecError::ModuleParse(message));
+    }
     config.spec_path = Some(path.to_path_buf());
     let mut domains = Env::new();
     let cfg_path = path.with_extension("cfg");
@@ -1389,12 +1391,12 @@ Pairs == {<<1, 2>>}
 Init == x = 0
 Next == \E <<a, a>> \in Pairs : x' = a
 ===="#;
-    let (_, warnings) = parse_with_warnings(input).expect("spec should parse with warning");
-    assert!(
-        warnings.iter().any(|w| w.value.contains("duplicate name")),
-        "expected duplicate-name warning, got: {:?}",
-        warnings.iter().map(|w| &w.value).collect::<Vec<_>>()
-    );
+    let spec = parse(input).expect("a definition that fails to parse does not fail the module");
+    let next = spec
+        .unparsed_definition("Next")
+        .expect("Next is recorded as unparsed");
+    assert!(next.message.contains("duplicate name 'a'"), "{next:?}");
+    assert_eq!((next.line, next.column), (5, 12), "points at the binder");
 }
 
 #[test]
@@ -2124,20 +2126,256 @@ fn test_should_pass_extends_multiple() {
 #[test]
 fn test_should_error_extends_parse_error() {
     let path = Path::new("test_cases/should_error/extends_parse_error/extends_parse_error.tla");
-    let result = check_spec_file(path);
-    match result {
-        CheckResult::PrepareError(PrepareSpecError::InstanceError(e)) => {
-            let msg = format!("{:?}", e);
+    match check_spec_file(path) {
+        CheckResult::PrepareError(PrepareSpecError::ModuleParse(message)) => {
+            assert!(message.contains("module Broken"), "{message}");
+            assert!(message.contains("Broken.tla:2:6"), "{message}");
+        }
+        other => panic!("expected PrepareSpecError::ModuleParse, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_definition_parse_error() {
+    let path = Path::new("test_cases/should_error/definition_parse_error.tla");
+    match check_spec_file(path) {
+        CheckResult::PrepareError(PrepareSpecError::ConstantSubstitution(message)) => {
             assert!(
-                msg.contains("Broken"),
-                "error should mention the broken module name, got: {}",
-                msg
+                message.contains(
+                    "`Bad` is defined, but its definition did not parse: line 5, column 13: unexpected `|->`"
+                ),
+                "{message}"
+            );
+            assert!(!message.contains("did you mean"), "{message}");
+        }
+        other => {
+            panic!("expected the substitution to report why Bad did not parse, got: {other:?}")
+        }
+    }
+}
+
+#[test]
+fn test_should_error_instance_definition_parse_error() {
+    let path = Path::new(
+        "test_cases/should_error/instance_definition_parse_error/instance_definition_parse_error.tla",
+    );
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
+    match check_loaded(path, config) {
+        CheckResult::InitError(e) => {
+            let msg = e.to_string();
+            assert!(msg.contains("`Bad` is defined"), "{msg}");
+            assert!(msg.contains("Helpers.tla:4:13"), "{msg}");
+        }
+        other => panic!("expected an Init error naming Bad, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_instance_definition_is_not_blamed_for_a_root_name() {
+    let path =
+        Path::new("test_cases/should_error/instance_definition_parse_error/instance_root_name.tla");
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
+    match check_loaded(path, config) {
+        CheckResult::InitError(e) => {
+            let msg = e.to_string();
+            assert!(msg.contains("undefined variable 'Bad'"), "{msg}");
+            assert!(!msg.contains("Helpers.tla"), "{msg}");
+        }
+        other => panic!("expected an undefined-variable Init error, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_instance_definition_used_inside_its_module() {
+    let path = Path::new(
+        "test_cases/should_error/instance_definition_parse_error/instance_sibling_use.tla",
+    );
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
+    match check_loaded(path, config) {
+        CheckResult::InitError(e) => {
+            let msg = e.to_string();
+            assert!(msg.contains("`Bad` is defined"), "{msg}");
+            assert!(msg.contains("Helpers.tla:4:13"), "{msg}");
+        }
+        other => panic!("expected an Init error naming Bad, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_infix_operator_that_did_not_parse() {
+    let spec = parse(
+        "VARIABLE x\na \\prec b == a < ]\nInit == x = 0\nNext == x' = IF 1 \\prec 2 THEN 1 ELSE 0",
+    )
+    .expect("spec parses");
+    match check(&spec, &Env::new(), &CheckerConfig::default()) {
+        CheckResult::NextError(e, _, _) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("`\\prec` is defined, but its definition did not parse: line 2"),
+                "{msg}"
             );
         }
-        other => panic!(
-            "extends_parse_error.tla should produce PrepareSpecError::InstanceError, got: {:?}",
-            other
-        ),
+        other => panic!("expected a Next error naming \\prec, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_symmetry_that_did_not_parse() {
+    let mut spec = parse(
+        "EXTENDS TLC\nCONSTANT P\nVARIABLE x\nPerms == Permutations(P) \\cup [a |-> ]\nInit == x \\in P\nNext == x' \\in P",
+    )
+    .expect("spec parses");
+    let cfg = parse_cfg("CONSTANT P = {p1, p2}\nINIT Init\nNEXT Next\nSYMMETRY Perms\n")
+        .expect("cfg parses");
+    let Err(message) = apply_config(
+        &cfg,
+        &mut spec,
+        &mut Env::new(),
+        &mut CheckerConfig::default(),
+        &[],
+        &[],
+        false,
+    ) else {
+        panic!("SYMMETRY Perms must report why Perms did not parse");
+    };
+    assert!(
+        message.contains("SYMMETRY `Perms` is defined, but its definition did not parse: line 4"),
+        "{message}"
+    );
+}
+
+#[test]
+fn test_should_pass_definition_followed_by_a_stray_separator() {
+    let spec = parse("VARIABLE x\nInit == x = 0\nNext == x' = 1 - x ;\nInvRange == x \\in {0, 1}")
+        .expect("spec parses");
+    match check(&spec, &Env::new(), &CheckerConfig::default()) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 2),
+        other => panic!("a separator after Next must not fail it, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_pass_proofs_with_assume_prove() {
+    let spec = parse(
+        "EXTENDS Naturals\nVARIABLE x\nInit == x = 0\nNext == x' = 1 - x\nTHEOREM Lem == ASSUME NEW S, NEW y \\in S PROVE y \\in S\n  <1>1. ASSUME NEW z PROVE z = z\n    OBVIOUS\n  <1>2. QED BY <1>1\nInvRange == x \\in {0, 1}",
+    )
+    .expect("spec parses");
+    match check(&spec, &Env::new(), &CheckerConfig::default()) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 2),
+        other => panic!("proofs must not stop the check, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_invariant_that_did_not_parse() {
+    let spec = parse(
+        "VARIABLE x\nInit == x = 0\nNext == x' = 1 - x\nInvBounded == x < 3 /\\ \\EE y : y = 1",
+    )
+    .expect("spec parses");
+    match check(&spec, &Env::new(), &CheckerConfig::default()) {
+        CheckResult::InvariantError(e, _, _) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("`InvBounded` is defined, but its definition did not parse: line 4"),
+                "{msg}"
+            );
+        }
+        other => panic!("expected InvBounded to fail with its parse error, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_assume_before_a_proof_is_checked() {
+    let spec = parse(
+        "EXTENDS Naturals\nCONSTANT N\nVARIABLE x\nInit == x = 0\nNext == x' = (x + 1) % N\nASSUME N \\in Nat \\ {0, 1, 2, 3}\nUSE DEF Init",
+    )
+    .expect("spec parses");
+    let mut domains = Env::new();
+    domains.insert("N".into(), Value::Int(2));
+    match check(&spec, &domains, &CheckerConfig::default()) {
+        CheckResult::PrepareError(PrepareSpecError::AssumeViolation(_)) => {}
+        other => panic!("the ASSUME must be checked and fail for N = 2, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_instance_that_did_not_parse() {
+    let spec =
+        parse("VARIABLE x\nM == INSTANCE Foo WITH p <- [a |-> ]\nInit == x = M!Op\nNext == x' = x")
+            .expect("spec parses");
+    match check(&spec, &Env::new(), &CheckerConfig::default()) {
+        CheckResult::InitError(e) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("`M` is defined, but its definition did not parse: line 2"),
+                "{msg}"
+            );
+        }
+        other => panic!("expected M!Op to fail with M's parse error, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_prefixed_init_that_did_not_parse() {
+    let spec = parse("VARIABLE x\nTPInit == x = ]\nTPNext == x' = x").expect("spec parses");
+    match check(&spec, &Env::new(), &CheckerConfig::default()) {
+        CheckResult::InitError(e) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("`TPInit` is defined, but its definition did not parse: line 2"),
+                "{msg}"
+            );
+        }
+        other => panic!("expected an Init error naming TPInit, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_extends_definition_parse_error_named_by_cfg() {
+    let path = Path::new(
+        "test_cases/should_error/extends_definition_parse_error/extends_definition_parse_error.tla",
+    );
+    let input = fs::read_to_string(path).expect("read spec");
+    let mut spec = parse(&input).expect("spec parses");
+    tla_checker::modules::merge_extended_declarations(&mut spec, path).expect("Base parses");
+    let cfg = parse_cfg(&fs::read_to_string(path.with_extension("cfg")).expect("read cfg"))
+        .expect("cfg parses");
+    let mut config = CheckerConfig::default();
+    let Err(message) = apply_config(
+        &cfg,
+        &mut spec,
+        &mut Env::new(),
+        &mut config,
+        &[],
+        &[],
+        false,
+    ) else {
+        panic!("INVARIANT InvBase must report why InvBase did not parse");
+    };
+    assert!(
+        message.contains("INVARIANT `InvBase` is defined, but its definition did not parse"),
+        "{message}"
+    );
+    assert!(message.contains("Base.tla:3:23"), "{message}");
+}
+
+#[test]
+fn test_should_pass_unused_unsupported_definitions() {
+    let path = Path::new("test_cases/should_pass/unused_unsupported_definitions.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 2),
+        other => {
+            panic!("unused definitions that do not parse must not stop the check, got: {other:?}")
+        }
     }
 }
 

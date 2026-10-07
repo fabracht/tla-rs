@@ -39,6 +39,16 @@ impl Source {
         (line + 1, col + 1)
     }
 
+    pub fn line_char_col(&self, offset: u32) -> (usize, usize) {
+        let (line, _) = self.line_col(offset);
+        let line_start = self.line_starts.get(line - 1).copied().unwrap_or(0) as usize;
+        let column = self
+            .text
+            .get(line_start..offset as usize)
+            .map_or(0, |prefix| prefix.chars().count());
+        (line, column + 1)
+    }
+
     pub fn line_text(&self, line: usize) -> &str {
         if line == 0 || line > self.line_starts.len() {
             return "";

@@ -675,6 +675,30 @@ fn expect_ident(tokens: &[Token], pos: &mut usize) -> Result<String, String> {
     }
 }
 
+/// The error for the first cfg directive naming a definition that did not parse.
+fn unparsed_directive<'a>(cfg: &'a TlcConfig, spec: &Spec) -> Option<String> {
+    let tagged = |directive: &'static str, names: &'a [Arc<str>]| {
+        names.iter().map(move |name| (directive, name))
+    };
+    let mut named = tagged("INIT", cfg.init.as_slice())
+        .chain(tagged("NEXT", cfg.next.as_slice()))
+        .chain(tagged("SPECIFICATION", cfg.specification.as_slice()))
+        .chain(tagged("INVARIANT", &cfg.invariants))
+        .chain(tagged("PROPERTY", &cfg.properties))
+        .chain(tagged("CONSTRAINT", &cfg.constraints))
+        .chain(tagged("VIEW", cfg.view.as_slice()))
+        .chain(tagged("SYMMETRY", cfg.symmetry.as_slice()))
+        .chain(
+            cfg.substitutions
+                .iter()
+                .map(|(_, target)| ("CONSTANT", target)),
+        );
+    named.find_map(|(directive, name)| {
+        spec.unparsed_definition(name)
+            .map(|unparsed| format!("{directive} {unparsed}"))
+    })
+}
+
 pub fn apply_config(
     cfg: &TlcConfig,
     spec: &mut Spec,
@@ -684,6 +708,10 @@ pub fn apply_config(
     cli_symmetry: &[Arc<str>],
     cli_allow_deadlock: bool,
 ) -> Result<Vec<String>, String> {
+    if let Some(error) = unparsed_directive(cfg, spec) {
+        return Err(error);
+    }
+
     let mut warnings = Vec::new();
 
     let mut seen_constants: Vec<&Arc<str>> = Vec::new();

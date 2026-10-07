@@ -922,6 +922,7 @@ impl Parser {
             Prime(v) => Prime(v.clone()),
             Lit(x) => Lit(x.clone()),
             OldValue => OldValue,
+            Unparsed(unparsed) => Unparsed(unparsed.clone()),
             JavaTime => JavaTime,
             SystemTime => SystemTime,
             Any => Any,

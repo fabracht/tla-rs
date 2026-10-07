@@ -55,6 +55,7 @@ fn prime_expr(expr: &Expr) -> Expr {
         Expr::Lit(_)
         | Expr::Prime(_)
         | Expr::OldValue
+        | Expr::Unparsed(_)
         | Expr::JavaTime
         | Expr::SystemTime
         | Expr::Any
@@ -652,6 +653,7 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
 
         Expr::Lit(_)
         | Expr::OldValue
+        | Expr::Unparsed(_)
         | Expr::JavaTime
         | Expr::SystemTime
         | Expr::Any
