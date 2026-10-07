@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use crate::ast::{Expr, FairnessConstraint, InstanceDecl, LivenessProperty, UnparsedDefinition};
+use crate::ast::{Expr, FairnessConstraint, InstanceDecl, LivenessProperty, UnparsedDefinitions};
 use crate::lexer::{Lexer, Token};
 use crate::source::Source;
 use crate::span::{Span, Spanned};
@@ -48,7 +48,7 @@ pub struct Parser {
     /// from `a \oplus b == ...`). A use of such a symbol resolves to the user
     /// definition instead of the built-in, shadowing it within the module.
     pub(super) user_infix_ops: BTreeSet<Arc<str>>,
-    pub(super) unparsed: BTreeMap<Arc<str>, UnparsedDefinition>,
+    pub(super) unparsed: UnparsedDefinitions,
 }
 
 impl Parser {
@@ -144,6 +144,12 @@ impl Parser {
         !s.is_empty() && (s.chars().all(|c| c.is_ascii_uppercase()) || s.ends_with('_'))
     }
 
+    /// Whether `name` is detected as the spec's `role` (`Init` or `Next`): the
+    /// name itself or a module prefix followed by it (`TPInit`, `M_Next`).
+    pub(crate) fn is_behavior_name(name: &str, role: &str) -> bool {
+        name == role || name.strip_suffix(role).is_some_and(Self::is_module_prefix)
+    }
+
     pub(super) fn is_invariant_name(name: &str) -> bool {
         for suffix in ["TypeOK", "Inv"] {
             if name.starts_with(suffix) {
@@ -190,6 +196,18 @@ impl Parser {
 
     pub(super) fn skip_to_next_definition(&mut self) {
         while !self.at_unit_start() {
+            self.advance();
+        }
+    }
+
+    /// Skips the rest of a definition that did not parse. A definition starting
+    /// right of `column`, the failed definition's own, belongs to it (a `LET`
+    /// definition in its body) and is skipped too.
+    pub(super) fn skip_failed_definition(&mut self, column: u32) {
+        while !(self.at_unit_start()
+            && (!matches!(self.peek(), Token::Ident(_))
+                || self.column_of(self.current_span().start) <= column))
+        {
             self.advance();
         }
     }

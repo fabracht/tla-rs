@@ -77,43 +77,7 @@ impl Parser {
                 }
                 Token::Theorem => {
                     self.advance();
-                    while *self.peek() != Token::Eof
-                        && !matches!(
-                            self.peek(),
-                            Token::Variables
-                                | Token::Constants
-                                | Token::Module
-                                | Token::Extends
-                                | Token::Theorem
-                        )
-                    {
-                        if let Token::Ident(_) = self.peek() {
-                            let start = self.pos;
-                            self.advance();
-                            if *self.peek() == Token::EqEq {
-                                self.pos = start;
-                                break;
-                            }
-                            if *self.peek() == Token::LParen {
-                                self.advance();
-                                let mut depth = 1;
-                                while depth > 0 && *self.peek() != Token::Eof {
-                                    match self.peek() {
-                                        Token::LParen => depth += 1,
-                                        Token::RParen => depth -= 1,
-                                        _ => {}
-                                    }
-                                    self.advance();
-                                }
-                                if *self.peek() == Token::EqEq {
-                                    self.pos = start;
-                                    break;
-                                }
-                            }
-                        } else {
-                            self.advance();
-                        }
-                    }
+                    self.skip_to_next_definition();
                 }
                 Token::Recursive => {
                     self.advance();
@@ -153,6 +117,7 @@ impl Parser {
                 Token::Ident(name) => {
                     let name = name.clone();
                     let name_span = self.current_span();
+                    let name_pos = self.pos;
                     let has_definition_header = self.at_unit_start();
                     self.advance();
                     let infix_symbol = Self::infix_op_name(self.peek()).filter(|_| {
@@ -174,20 +139,14 @@ impl Parser {
                         }
                         Ok(Definition::Instance(inst)) => self.instances.push(inst),
                         Ok(Definition::Operator { params, body }) => {
-                            if name.as_ref() == "Spec" || name.ends_with("Spec") {
+                            let is_zero_arg = params.is_none();
+                            if is_zero_arg && name.ends_with("Spec") {
                                 self.extract_fairness_and_liveness(&name, &body);
                                 self.definitions.insert(name, body);
                                 continue;
                             }
-                            let is_zero_arg = params.is_none();
-                            let is_init_name = is_zero_arg
-                                && (name.as_ref() == "Init"
-                                    || (name.ends_with("Init")
-                                        && Self::is_module_prefix(&name[..name.len() - 4])));
-                            let is_next_name = is_zero_arg
-                                && (name.as_ref() == "Next"
-                                    || (name.ends_with("Next")
-                                        && Self::is_module_prefix(&name[..name.len() - 4])));
+                            let is_init_name = is_zero_arg && Self::is_behavior_name(&name, "Init");
+                            let is_next_name = is_zero_arg && Self::is_behavior_name(&name, "Next");
 
                             if is_init_name {
                                 init = Some(body.clone());
@@ -211,7 +170,8 @@ impl Parser {
                                 self.user_infix_ops.insert(key.clone());
                             }
                             self.record_unparsed(key, &label, name_span, error);
-                            self.skip_to_next_definition();
+                            self.pos = name_pos + 1;
+                            self.skip_failed_definition(self.column_of(name_span.start));
                         }
                     }
                 }

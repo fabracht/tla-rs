@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::ast::{DefinitionMap, Spec, UnparsedDefinition};
+use crate::ast::{DefinitionMap, Spec, UnparsedDefinitions};
 use crate::eval::{Definitions, ParameterizedInstance, ParameterizedInstances};
 use crate::parser;
 use crate::substitution::apply_substitutions;
@@ -140,7 +140,7 @@ struct Declarations {
     vars: Vec<Arc<str>>,
     constants: Vec<Arc<str>>,
     definitions: DefinitionMap,
-    unparsed_definitions: BTreeMap<Arc<str>, UnparsedDefinition>,
+    unparsed_definitions: UnparsedDefinitions,
 }
 
 impl Declarations {

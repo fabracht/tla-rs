@@ -1713,7 +1713,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 })?;
 
                 let (params, body) = instance_defs.get(op).ok_or_else(|| {
-                    EvalError::missing(op, || {
+                    EvalError::missing_in_instance(instance_name, op, || {
                         EvalError::domain_error(format!(
                             "operator {} not found in instance {}",
                             op, instance_name
@@ -1787,7 +1787,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                         super::resolve_parameterized_defs(param_inst, inst_arg_vals);
 
                     let (params, body) = instance_defs.get(op).ok_or_else(|| {
-                        EvalError::missing(op, || {
+                        EvalError::missing_in_instance(instance_name, op, || {
                             EvalError::domain_error(format!(
                                 "operator {} not found in instance {}",
                                 op, instance_name

@@ -68,6 +68,20 @@ impl EvalError {
         }
     }
 
+    /// The error for an operator `name` the instance `instance` does not have: the
+    /// parse failure when it is a definition of the instantiated module that did
+    /// not parse, `fallback` otherwise.
+    pub fn missing_in_instance(
+        instance: &str,
+        name: &str,
+        fallback: impl FnOnce() -> Self,
+    ) -> Self {
+        match super::global_state::unparsed_instance_definition(instance, name) {
+            Some(unparsed) => Self::domain_error(unparsed.use_error(name)),
+            None => fallback(),
+        }
+    }
+
     pub fn undefined_var(name: Arc<str>) -> Self {
         Self::missing(&name.clone(), || Self::UndefinedVar {
             name,

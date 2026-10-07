@@ -463,8 +463,10 @@ pub struct Spec {
     /// Definitions whose text did not parse, by name. They are left out of
     /// `definitions`; a use of one reports why it did not parse instead of an
     /// undefined name.
-    pub unparsed_definitions: BTreeMap<Arc<str>, UnparsedDefinition>,
+    pub unparsed_definitions: UnparsedDefinitions,
 }
+
+pub type UnparsedDefinitions = BTreeMap<Arc<str>, UnparsedDefinition>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnparsedDefinition {
@@ -501,6 +503,16 @@ impl Spec {
             Some(unparsed) => format!("{directive} {}", unparsed.use_error(name)),
             None => format!("{directive} definition '{name}' not found in spec"),
         }
+    }
+
+    /// The error for a spec without an `Init` or `Next` (`role`): the parse failure
+    /// of a definition that would have been detected as it, if one did not parse.
+    pub fn missing_behavior_error(&self, role: &str) -> String {
+        self.unparsed_definitions
+            .iter()
+            .find(|(name, _)| crate::parser::Parser::is_behavior_name(name, role))
+            .map(|(name, unparsed)| unparsed.use_error(name))
+            .unwrap_or_else(|| format!("missing {role} definition"))
     }
 
     /// The declared constants that neither have a value in `domains` nor are

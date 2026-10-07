@@ -408,9 +408,7 @@ impl<'a> Lexer<'a> {
                     while self.peek_char().is_some_and(|c| c != '\n') {
                         self.advance();
                     }
-                    if self.input[rest_start..self.pos]
-                        .split_whitespace()
-                        .any(|word| word == "MODULE")
+                    if self.input[rest_start..self.pos].split_whitespace().next() == Some("MODULE")
                     {
                         self.open_modules += 1;
                     }

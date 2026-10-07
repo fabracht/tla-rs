@@ -581,6 +581,51 @@ mod tests {
     }
 
     #[test]
+    fn a_let_definition_in_a_failed_body_does_not_replace_a_top_level_one() {
+        let (spec, _) = unparsed(
+            "VARIABLE x\nb == 100\nBad == LET a == ]\n           b == 2\n           c == 3\n       IN a + b\nInit == x = b",
+            "Bad",
+        );
+        let (_, b) = spec.definitions.get("b").expect("b stays defined");
+        assert!(
+            matches!(b.as_ref(), Expr::Lit(crate::ast::Value::Int(100))),
+            "{b:?}"
+        );
+        assert!(!spec.definitions.contains_key("c"));
+        assert!(spec.init.is_some());
+    }
+
+    #[test]
+    fn an_empty_body_does_not_take_the_next_definition_with_it() {
+        let (spec, bad) = unparsed("VARIABLE x\nBad ==\nInit == x = 0\nNext == x' = x", "Bad");
+        assert_eq!(bad.line, 3);
+        assert!(spec.init.is_some() && spec.next.is_some());
+    }
+
+    #[test]
+    fn a_parameterized_spec_named_operator_keeps_its_parameters() {
+        let spec = parse("VARIABLE x\nMySpec(a) == a + 1\nInit == x = MySpec(1)").unwrap();
+        let (params, _) = spec.definitions.get("MySpec").expect("MySpec is defined");
+        assert_eq!(params, &[Arc::from("a")]);
+    }
+
+    #[test]
+    fn a_theorem_does_not_swallow_the_unit_after_it() {
+        let spec =
+            parse("VARIABLE x\nTHEOREM x = x\nASSUME TRUE\nINSTANCE Naturals\nInit == x = 0")
+                .unwrap();
+        assert_eq!(spec.assumes.len(), 1);
+        assert_eq!(spec.instances.len(), 1);
+    }
+
+    #[test]
+    fn a_separator_mentioning_module_does_not_open_one() {
+        let spec = parse("---- MODULE M ----\nVARIABLE x\n---- helpers used by MODULE M ----\nInit == x = 0\n====\nnot TLA+\n")
+            .expect("text after ==== is ignored");
+        assert!(spec.init.is_some());
+    }
+
+    #[test]
     fn a_top_level_name_without_a_definition_header_is_an_error() {
         let Err(error) = parse("VARIABLE x\nthis is not a definition\nInit == x = 0") else {
             panic!("text that is not a definition must not parse");

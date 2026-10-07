@@ -267,7 +267,7 @@ fn load_module_extends(
     registry: &mut ModuleRegistry,
     domains: &mut crate::ast::Env,
     extended_defs: &mut Definitions,
-    unparsed: &mut BTreeMap<Arc<str>, crate::ast::UnparsedDefinition>,
+    unparsed: &mut crate::ast::UnparsedDefinitions,
     ancestors: &mut Vec<Arc<str>>,
 ) -> Result<(), PrepareSpecError> {
     if ancestors.iter().any(|a| a == name) {
@@ -324,13 +324,6 @@ fn load_module_extends(
     Ok(())
 }
 
-fn missing_behavior_definition(spec: &Spec, name: &str) -> String {
-    match spec.unparsed_definitions.get(name) {
-        Some(unparsed) => unparsed.use_error(name),
-        None => format!("missing {name} definition"),
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 fn module_load_error(name: &str, error: ModuleError) -> PrepareSpecError {
     let message = match error {
@@ -354,7 +347,7 @@ fn module_load_error(name: &str, error: ModuleError) -> PrepareSpecError {
 /// Adds the definitions of `module` that did not parse to `unparsed`, keeping an
 /// entry already there: the loading spec's own definitions take precedence.
 #[cfg(not(target_arch = "wasm32"))]
-fn add_unparsed(unparsed: &mut BTreeMap<Arc<str>, crate::ast::UnparsedDefinition>, module: &Spec) {
+fn add_unparsed(unparsed: &mut crate::ast::UnparsedDefinitions, module: &Spec) {
     for (name, definition) in &module.unparsed_definitions {
         unparsed
             .entry(name.clone())
@@ -482,17 +475,25 @@ pub fn prepare_spec(
         }
     }
 
+    crate::eval::set_unparsed_instance_definitions(BTreeMap::new());
     #[cfg(not(target_arch = "wasm32"))]
     if !spec.instances.is_empty()
         && let Some(spec_path) = spec_path
     {
         let mut registry = ModuleRegistry::new();
+        let mut instance_unparsed = BTreeMap::new();
         for inst in &spec.instances {
             if stdlib::is_stdlib_module(&inst.module_name) {
                 continue;
             }
             match registry.load(&inst.module_name, spec_path) {
-                Ok(module) => add_unparsed(&mut unparsed, module),
+                Ok(module) => {
+                    let alias = inst
+                        .alias
+                        .clone()
+                        .unwrap_or_else(|| inst.module_name.clone());
+                    instance_unparsed.insert(alias, module.unparsed_definitions.clone());
+                }
                 Err(ModuleError::NotFound(_)) => {
                     if !quiet {
                         eprintln!(
@@ -504,6 +505,7 @@ pub fn prepare_spec(
                 Err(error) => return Err(module_load_error(&inst.module_name, error)),
             }
         }
+        crate::eval::set_unparsed_instance_definitions(instance_unparsed);
         match resolve_instances(spec, &registry) {
             Ok((static_instances, param_instances, instance_vars)) => {
                 let total = static_instances.len() + param_instances.len();
@@ -660,16 +662,16 @@ fn check_with_state_vars(spec: &Spec, domains: &Env, config: &CheckerConfig) -> 
     let init_expr = match spec.init.as_ref() {
         Some(e) => e,
         None => {
-            return CheckResult::InitError(EvalError::domain_error(missing_behavior_definition(
-                spec, "Init",
-            )));
+            return CheckResult::InitError(EvalError::domain_error(
+                spec.missing_behavior_error("Init"),
+            ));
         }
     };
     let next_expr = match spec.next.as_ref() {
         Some(e) => e,
         None => {
             return CheckResult::NextError(
-                EvalError::domain_error(missing_behavior_definition(spec, "Next")),
+                EvalError::domain_error(spec.missing_behavior_error("Next")),
                 vec![],
                 None,
             );

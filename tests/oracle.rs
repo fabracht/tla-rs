@@ -2175,6 +2175,39 @@ fn test_should_error_instance_definition_parse_error() {
 }
 
 #[test]
+fn test_should_error_instance_definition_is_not_blamed_for_a_root_name() {
+    let path =
+        Path::new("test_cases/should_error/instance_definition_parse_error/instance_root_name.tla");
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
+    match check_loaded(path, config) {
+        CheckResult::InitError(e) => {
+            let msg = e.to_string();
+            assert!(msg.contains("undefined variable 'Bad'"), "{msg}");
+            assert!(!msg.contains("Helpers.tla"), "{msg}");
+        }
+        other => panic!("expected an undefined-variable Init error, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_prefixed_init_that_did_not_parse() {
+    let spec = parse("VARIABLE x\nTPInit == x = ]\nTPNext == x' = x").expect("spec parses");
+    match check(&spec, &Env::new(), &CheckerConfig::default()) {
+        CheckResult::InitError(e) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("`TPInit` is defined, but its definition did not parse: line 2"),
+                "{msg}"
+            );
+        }
+        other => panic!("expected an Init error naming TPInit, got: {other:?}"),
+    }
+}
+
+#[test]
 fn test_should_error_extends_definition_parse_error_named_by_cfg() {
     let path = Path::new(
         "test_cases/should_error/extends_definition_parse_error/extends_definition_parse_error.tla",
