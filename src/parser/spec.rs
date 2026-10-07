@@ -126,9 +126,10 @@ impl Parser {
                         }
                         _ => None,
                     };
+                    let column = self.column_of(name_span.start);
                     let definition = match &infix {
-                        Some((symbol, _)) => self.parse_infix_definition(symbol.clone()),
-                        None => self.parse_definition(&name),
+                        Some((symbol, _)) => self.parse_infix_definition(symbol.clone(), column),
+                        None => self.parse_definition(&name, column),
                     };
                     let definition = match definition {
                         Ok(definition) => definition,
@@ -222,15 +223,15 @@ impl Parser {
         })
     }
 
-    fn parse_infix_definition(&mut self, symbol: Arc<str>) -> Result<Definition> {
+    fn parse_infix_definition(&mut self, symbol: Arc<str>, column: u32) -> Result<Definition> {
         self.advance();
         let rhs = self.expect_ident()?;
         self.expect(Token::EqEq)?;
-        let body = self.parse_definition_body()?;
+        let body = self.parse_definition_body(column)?;
         Ok(Definition::Infix { symbol, rhs, body })
     }
 
-    fn parse_definition(&mut self, name: &Arc<str>) -> Result<Definition> {
+    fn parse_definition(&mut self, name: &Arc<str>, column: u32) -> Result<Definition> {
         let params = if *self.peek() == Token::LParen {
             self.advance();
             let params = self.parse_var_list()?;
@@ -245,21 +246,23 @@ impl Parser {
             let inst = self.parse_instance(Some(name.clone()), params.unwrap_or_default())?;
             return Ok(Definition::Instance(inst));
         }
-        let body = self.parse_definition_body()?;
+        let body = self.parse_definition_body(column)?;
         Ok(Definition::Operator { params, body })
     }
 
     /// A definition's body, which must end where the next definition or
     /// declaration starts, possibly after separators the top level skips: a body
-    /// the expression parser stops inside is a failure of this definition, not an
-    /// error at the top level.
-    fn parse_definition_body(&mut self) -> Result<Expr> {
+    /// the expression parser stops inside, at a token right of `column`, the
+    /// definition's own, is a failure of this definition. A token at or left of
+    /// `column` starts the next unit, and the top level reports it when it is not one.
+    fn parse_definition_body(&mut self, column: u32) -> Result<Expr> {
         let body = self.parse_expr()?;
         let end = self.pos;
         while Self::is_separator(self.peek()) {
             self.advance();
         }
-        let ends_at_unit = self.at_unit_start();
+        let ends_at_unit =
+            self.at_unit_start() || self.column_of(self.current_span().start) <= column;
         self.pos = end;
         if ends_at_unit {
             return Ok(body);

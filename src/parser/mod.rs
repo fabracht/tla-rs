@@ -631,6 +631,32 @@ mod tests {
     }
 
     #[test]
+    fn a_proof_define_or_let_is_not_a_definition() {
+        let spec = parse(
+            "VARIABLE x\nInit == x = 0\nTHEOREM T == LET InvL == x = 7 IN InvL\n<1> DEFINE InvX == x = 5\n           TypeOKY == x = 6\n<1>1. LET InvZ == x = 8 IN InvZ\n  OBVIOUS\n<1> QED BY DEF Init\nNext == x' = x",
+        )
+        .expect("the proof is skipped");
+        for name in ["InvL", "InvX", "TypeOKY", "InvZ"] {
+            assert!(!spec.definitions.contains_key(name), "{name}");
+        }
+        assert!(spec.invariants.is_empty());
+        assert!(spec.next.is_some());
+    }
+
+    #[test]
+    fn text_after_a_definition_that_is_not_a_unit_is_an_error() {
+        for junk in ["InvSmall = x <= 1", "this is junk text", "a ^+ == a"] {
+            let input = format!("VARIABLE x\nInit == x = 0\nMax == 3\n{junk}\nInv == x <= 2");
+            let Err(error) = parse(&input) else {
+                panic!("`{junk}` after a definition must not parse");
+            };
+            let (line, _) = crate::source::Source::new("t", input.as_str())
+                .line_col(error.span.map_or(0, |s| s.start));
+            assert_eq!(line, 4, "{junk}: {}", error.message);
+        }
+    }
+
+    #[test]
     fn a_recursive_declaration_inside_a_failed_let_stays_inside_it() {
         let (spec, _) = unparsed(
             "VARIABLE x\nb(n) == n\nBad == LET RECURSIVE b(_)\n           b(n) == ]\n       IN b(1)\nInit == x = b(0)",

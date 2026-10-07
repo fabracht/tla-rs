@@ -193,10 +193,23 @@ impl Parser {
     }
 
     /// Skips a theorem or proof up to the next unit. An `ASSUME ... PROVE` in it is
-    /// part of the proof, not a module `ASSUME`.
+    /// part of the proof, not a module `ASSUME`, and a definition in a `LET` it
+    /// opened or after a proof step's `DEFINE` is local to it.
     pub(super) fn skip_to_next_definition(&mut self) {
-        while !self.at_unit_start() || (*self.peek() == Token::Assume && self.assume_has_prove()) {
-            self.advance();
+        let mut open_lets = 0usize;
+        let mut defining = false;
+        loop {
+            let proof_local = (open_lets > 0 || defining) && matches!(self.peek(), Token::Ident(_));
+            let proof_assume = *self.peek() == Token::Assume && self.assume_has_prove();
+            if self.at_unit_start() && !proof_local && !proof_assume {
+                return;
+            }
+            match self.advance() {
+                Token::Let => open_lets += 1,
+                Token::Def => open_lets = open_lets.saturating_sub(1),
+                Token::Define => defining = true,
+                _ => {}
+            }
         }
     }
 
