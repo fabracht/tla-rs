@@ -1,7 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::ast::{Env, Expr, Value};
+use crate::ast::{Env, Value};
 use crate::diagnostic::find_similar;
 use crate::span::Span;
 
@@ -62,9 +62,9 @@ impl EvalError {
     /// The error for an instance `name` that was not loaded: the parse failure of
     /// its `name == INSTANCE ...` definition, when that did not parse.
     pub fn missing_instance(name: &str, defs: &Definitions, kind: &str) -> Self {
-        match defs.get(name).map(|(_, body)| body.as_ref()) {
-            Some(Expr::Unparsed(unparsed)) => Self::domain_error(unparsed.to_string()),
-            _ => Self::domain_error(format!("{kind} {name} not found")),
+        match crate::ast::unparsed_definition(defs, name) {
+            Some(unparsed) => Self::domain_error(unparsed.to_string()),
+            None => Self::domain_error(format!("{kind} {name} not found")),
         }
     }
 

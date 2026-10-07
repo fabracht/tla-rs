@@ -198,16 +198,77 @@ impl Parser {
         }
     }
 
-    /// Skips the rest of a definition that did not parse. A definition starting
-    /// right of `column`, the failed definition's own, belongs to it (a `LET`
-    /// definition in its body) and is skipped too.
+    /// Skips the rest of a definition that did not parse, from the token after its
+    /// name. A `Name ==` inside a `LET` the failed body opened belongs to it, unless
+    /// it starts at or left of `column`, the failed definition's own (a body whose
+    /// `IN` is missing).
     pub(super) fn skip_failed_definition(&mut self, column: u32) {
-        while !(self.at_unit_start()
-            && (!matches!(self.peek(), Token::Ident(_))
-                || self.column_of(self.current_span().start) <= column))
-        {
+        while !matches!(self.peek(), Token::EqEq | Token::Eof) {
             self.advance();
         }
+        self.advance();
+        if *self.peek() == Token::Instance {
+            self.advance();
+        }
+        let mut open_lets = 0usize;
+        loop {
+            let at_unit = self.at_unit_start();
+            let belongs_to_body = matches!(self.peek(), Token::Ident(_))
+                && open_lets > 0
+                && self.column_of(self.current_span().start) > column;
+            if at_unit && !belongs_to_body {
+                return;
+            }
+            match self.advance() {
+                Token::Let => open_lets += 1,
+                Token::Def => open_lets = open_lets.saturating_sub(1),
+                _ => {}
+            }
+        }
+    }
+
+    /// A separator the top level skips between units.
+    pub(super) fn is_separator(token: &Token) -> bool {
+        matches!(
+            token,
+            Token::Semicolon | Token::Dollar | Token::Pipe | Token::Caret | Token::Ampersand
+        )
+    }
+
+    /// Whether the `ASSUME` at the current position is part of a proof statement
+    /// (`ASSUME NEW x PROVE ...`): a `NEW`, `PROVE` or `BY` follows it before the
+    /// next unit.
+    fn assume_is_proof_statement(&self) -> bool {
+        for (index, token) in self.tokens.iter().enumerate().skip(self.pos + 1) {
+            match &token.value {
+                Token::By => return true,
+                Token::Eof
+                | Token::Module
+                | Token::Extends
+                | Token::Variables
+                | Token::Constants
+                | Token::Assume
+                | Token::Theorem
+                | Token::Lemma
+                | Token::ProofStep
+                | Token::Qed
+                | Token::ProofDef
+                | Token::Recursive
+                | Token::Local
+                | Token::Instance
+                | Token::Invariant => return false,
+                Token::Ident(_)
+                    if matches!(
+                        self.tokens.get(index + 1).map(|next| &next.value),
+                        Some(Token::EqEq)
+                    ) =>
+                {
+                    return false;
+                }
+                _ => {}
+            }
+        }
+        false
     }
 
     /// Whether the next token starts a module unit: a declaration, an `ASSUME`,
@@ -220,7 +281,6 @@ impl Parser {
             | Token::Extends
             | Token::Variables
             | Token::Constants
-            | Token::Assume
             | Token::Theorem
             | Token::Recursive
             | Token::Local
@@ -231,6 +291,7 @@ impl Parser {
             | Token::Qed
             | Token::ProofDef
             | Token::Invariant => true,
+            Token::Assume => !self.assume_is_proof_statement(),
             Token::Ident(_) => match self.peek_n(1) {
                 Token::EqEq => true,
                 Token::LParen => self.group_then_eqeq(self.pos + 1, &Token::LParen, &Token::RParen),

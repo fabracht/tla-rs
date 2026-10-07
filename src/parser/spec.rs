@@ -107,11 +107,7 @@ impl Parser {
                     self.advance();
                     self.skip_to_next_definition();
                 }
-                Token::Semicolon
-                | Token::Dollar
-                | Token::Pipe
-                | Token::Caret
-                | Token::Ampersand => {
+                tok if Self::is_separator(tok) => {
                     self.advance();
                 }
                 Token::Ident(name) => {
@@ -130,13 +126,20 @@ impl Parser {
                         Some((symbol, _)) => self.parse_infix_definition(symbol.clone()),
                         None => self.parse_definition(&name),
                     };
+                    let definition = match definition {
+                        Ok(definition) => definition,
+                        Err(error) if !has_definition_header => return Err(error),
+                        Err(error) => {
+                            self.recover_definition(&name, name_pos, name_span, infix, error)
+                        }
+                    };
                     match definition {
-                        Ok(Definition::Infix { symbol, rhs, body }) => {
+                        Definition::Infix { symbol, rhs, body } => {
                             self.user_infix_ops.insert(symbol.clone());
                             self.fn_definitions.insert(symbol, (vec![name, rhs], body));
                         }
-                        Ok(Definition::Instance(inst)) => self.instances.push(inst),
-                        Ok(Definition::Operator { params, body }) => {
+                        Definition::Instance(inst) => self.instances.push(inst),
+                        Definition::Operator { params, body } => {
                             let is_zero_arg = params.is_none();
                             if is_zero_arg && name.ends_with("Spec") {
                                 self.extract_fairness_and_liveness(&name, &body);
@@ -161,38 +164,6 @@ impl Parser {
                             } else {
                                 self.definitions.insert(name, body);
                             }
-                        }
-                        Err(error) if !has_definition_header => return Err(error),
-                        Err(error) => {
-                            self.pos = name_pos + 1;
-                            match infix {
-                                Some((symbol, rhs)) => {
-                                    let shown: Arc<str> = format!("\\{symbol}").into();
-                                    let label = format!("infix operator '{shown}'");
-                                    let body = self.unparsed(&shown, &label, name_span, error);
-                                    self.user_infix_ops.insert(symbol.clone());
-                                    self.fn_definitions.insert(symbol, (vec![name, rhs], body));
-                                }
-                                None => {
-                                    let label = format!("operator '{name}'");
-                                    let body = self.unparsed(&name, &label, name_span, error);
-                                    match self.header_params() {
-                                        Some(params) => {
-                                            self.fn_definitions.insert(name, (params, body));
-                                        }
-                                        None => {
-                                            if Self::is_behavior_name(&name, "Init") {
-                                                init = Some(body.clone());
-                                            } else if Self::is_behavior_name(&name, "Next") {
-                                                next = Some(body.clone());
-                                            }
-                                            self.definitions.insert(name, body);
-                                        }
-                                    }
-                                }
-                            }
-                            self.pos = name_pos + 1;
-                            self.skip_failed_definition(self.column_of(name_span.start));
                         }
                     }
                 }
@@ -281,10 +252,7 @@ impl Parser {
     fn parse_definition_body(&mut self) -> Result<Expr> {
         let body = self.parse_expr()?;
         let end = self.pos;
-        while matches!(
-            self.peek(),
-            Token::Semicolon | Token::Dollar | Token::Pipe | Token::Caret | Token::Ampersand
-        ) {
+        while Self::is_separator(self.peek()) {
             self.advance();
         }
         let ends_at_unit = self.at_unit_start();
@@ -320,18 +288,64 @@ impl Parser {
         }))
     }
 
+    /// The definition that failed with `error`, with a body that fails with it, and
+    /// the position moved past its text.
+    fn recover_definition(
+        &mut self,
+        name: &Arc<str>,
+        name_pos: usize,
+        name_span: Span,
+        infix: Option<(Arc<str>, Arc<str>)>,
+        error: ParseError,
+    ) -> Definition {
+        self.pos = name_pos + 1;
+        let definition = match infix {
+            Some((symbol, rhs)) => {
+                let shown: Arc<str> = format!("\\{symbol}").into();
+                let label = format!("infix operator '{shown}'");
+                let body = self.unparsed(&shown, &label, name_span, error);
+                Definition::Infix { symbol, rhs, body }
+            }
+            None => {
+                let label = format!("operator '{name}'");
+                let body = self.unparsed(name, &label, name_span, error);
+                let params = self.header_params();
+                Definition::Operator { params, body }
+            }
+        };
+        self.pos = name_pos + 1;
+        self.skip_failed_definition(self.column_of(name_span.start));
+        definition
+    }
+
     /// The parameters of the definition header at the current position, the token
-    /// after its name, when it has them.
+    /// after its name, when it has them: the names between its parentheses, read
+    /// without requiring them to be well formed.
     fn header_params(&mut self) -> Option<Vec<Arc<str>>> {
         if *self.peek() != Token::LParen {
             return None;
         }
         self.advance();
-        let params = self.parse_var_list().ok()?;
-        (*self.peek() == Token::RParen).then_some(params)
+        let mut params = Vec::new();
+        while !matches!(self.peek(), Token::RParen | Token::EqEq | Token::Eof) {
+            match self.advance() {
+                Token::Ident(param) => params.push(param),
+                Token::Underscore => params.push("_".into()),
+                _ => {}
+            }
+        }
+        Some(params)
     }
 
     fn extract_fairness_and_liveness(&mut self, name: &Arc<str>, expr: &Expr) {
+        if let Expr::Unparsed(_) = expr {
+            self.liveness_properties.push(LivenessProperty {
+                name: name.clone(),
+                formula: expr.clone(),
+                from_specification: true,
+            });
+            return;
+        }
         let mut liveness = Vec::new();
         let mut warnings = Vec::new();
         crate::ast::collect_temporal(

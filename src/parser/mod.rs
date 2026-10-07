@@ -561,6 +561,69 @@ mod tests {
     }
 
     #[test]
+    fn a_proof_assume_is_not_a_module_assume() {
+        let spec = parse(
+            "VARIABLE x\nInit == x = 0\nTHEOREM Lem == ASSUME NEW S, NEW y \\in S PROVE y \\in S\n  <1>1. ASSUME NEW z PROVE z = z\n    OBVIOUS\n  <1>2. QED BY <1>1\nASSUME TRUE\nNext == x' = x",
+        )
+        .expect("the proofs are skipped");
+        assert_eq!(spec.assumes.len(), 1);
+        assert!(spec.init.is_some() && spec.next.is_some());
+    }
+
+    #[test]
+    fn definitions_indented_right_of_a_failed_one_are_kept() {
+        let (spec, _) = unparsed(
+            "VARIABLE x\n  Bad == [i \\in 1..2, j \\in 1..2 |-> i]\n    Init == x = 0\n    Next == x' = 1 - x",
+            "Bad",
+        );
+        assert!(matches!(spec.init, Some(Expr::Eq(_, _))), "{:?}", spec.init);
+        assert!(spec.next.is_some());
+    }
+
+    #[test]
+    fn a_failed_instance_definition_does_not_become_an_unnamed_instance() {
+        let (spec, _) = unparsed(
+            "VARIABLE x\nM == INSTANCE Foo WITH p <- [a |-> ]\nInit == x = 0",
+            "M",
+        );
+        assert!(spec.instances.is_empty(), "{:?}", spec.instances);
+        let (spec, _) = unparsed("VARIABLE x\nM(a,) == INSTANCE Foo\nInit == x = 0", "M");
+        assert!(spec.instances.is_empty(), "{:?}", spec.instances);
+        assert!(spec.init.is_some());
+    }
+
+    #[test]
+    fn an_invariant_that_does_not_parse_is_still_an_invariant() {
+        let (spec, _) = unparsed("VARIABLE x\nInvBad == x = ]\nInit == x = 0", "InvBad");
+        assert_eq!(spec.invariant_names, vec![Some(Arc::from("InvBad"))]);
+        assert!(matches!(spec.invariants.as_slice(), [Expr::Unparsed(_)]));
+    }
+
+    #[test]
+    fn a_spec_that_does_not_parse_is_a_liveness_obligation() {
+        let (spec, _) = unparsed("VARIABLE x\nSpec == Init /\\ ]\nInit == x = 0", "Spec");
+        assert!(
+            matches!(
+                spec.liveness_properties.as_slice(),
+                [property] if matches!(property.formula, Expr::Unparsed(_))
+            ),
+            "{:?}",
+            spec.liveness_properties
+        );
+    }
+
+    #[test]
+    fn a_malformed_parameter_list_keeps_its_names_and_is_not_the_init() {
+        let (spec, _) = unparsed("VARIABLE x\nInit(a b) == x = ]\nNext == x' = x", "Init");
+        assert!(spec.init.is_none());
+        let (params, _) = spec
+            .definitions
+            .get("Init")
+            .expect("Init(a b) stays defined");
+        assert_eq!(params, &[Arc::from("a"), Arc::from("b")]);
+    }
+
+    #[test]
     fn a_stray_separator_after_a_body_does_not_fail_the_definition() {
         let spec = parse("VARIABLE x\nInit == x = 0\nNext == x' = 1 - x ;\nInv == x \\in {0, 1}")
             .expect("the spec parses");

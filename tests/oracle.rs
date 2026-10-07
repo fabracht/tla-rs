@@ -2264,6 +2264,71 @@ fn test_should_pass_definition_followed_by_a_stray_separator() {
 }
 
 #[test]
+fn test_should_pass_proofs_with_assume_prove() {
+    let spec = parse(
+        "EXTENDS Naturals\nVARIABLE x\nInit == x = 0\nNext == x' = 1 - x\nTHEOREM Lem == ASSUME NEW S, NEW y \\in S PROVE y \\in S\n  <1>1. ASSUME NEW z PROVE z = z\n    OBVIOUS\n  <1>2. QED BY <1>1\nInvRange == x \\in {0, 1}",
+    )
+    .expect("spec parses");
+    match check(&spec, &Env::new(), &CheckerConfig::default()) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 2),
+        other => panic!("proofs must not stop the check, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_invariant_that_did_not_parse() {
+    let spec = parse(
+        "VARIABLE x\nInit == x = 0\nNext == x' = 1 - x\nInvBounded == x < 3 /\\ \\EE y : y = 1",
+    )
+    .expect("spec parses");
+    match check(&spec, &Env::new(), &CheckerConfig::default()) {
+        CheckResult::InvariantError(e, _, _) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("`InvBounded` is defined, but its definition did not parse: line 4"),
+                "{msg}"
+            );
+        }
+        other => panic!("expected InvBounded to fail with its parse error, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_spec_that_did_not_parse_checked_for_liveness() {
+    let spec = parse(
+        "VARIABLE x\nvars == x\nInit == x = 0\nNext == x' = 1 - x\nSpec == Init /\\ [][Next]_vars /\\ WF_vars(Next) /\\ \\EE y : y",
+    )
+    .expect("spec parses");
+    let config = CheckerConfig {
+        check_liveness: true,
+        ..Default::default()
+    };
+    let result = check(&spec, &Env::new(), &config);
+    let message = format!("{result:?}");
+    assert!(
+        message.contains("`Spec` is defined, but its definition did not parse"),
+        "{message}"
+    );
+}
+
+#[test]
+fn test_should_error_instance_that_did_not_parse() {
+    let spec =
+        parse("VARIABLE x\nM == INSTANCE Foo WITH p <- [a |-> ]\nInit == x = M!Op\nNext == x' = x")
+            .expect("spec parses");
+    match check(&spec, &Env::new(), &CheckerConfig::default()) {
+        CheckResult::InitError(e) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("`M` is defined, but its definition did not parse: line 2"),
+                "{msg}"
+            );
+        }
+        other => panic!("expected M!Op to fail with M's parse error, got: {other:?}"),
+    }
+}
+
+#[test]
 fn test_should_error_prefixed_init_that_did_not_parse() {
     let spec = parse("VARIABLE x\nTPInit == x = ]\nTPNext == x' = x").expect("spec parses");
     match check(&spec, &Env::new(), &CheckerConfig::default()) {

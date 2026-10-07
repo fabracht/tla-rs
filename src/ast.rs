@@ -485,13 +485,21 @@ impl std::fmt::Display for UnparsedDefinition {
     }
 }
 
+/// Why the definition `name` in `definitions` did not parse, when it did not.
+pub fn unparsed_definition<'a>(
+    definitions: &'a DefinitionMap,
+    name: &str,
+) -> Option<&'a UnparsedDefinition> {
+    match definitions.get(name).map(|(_, body)| body.as_ref()) {
+        Some(Expr::Unparsed(unparsed)) => Some(unparsed),
+        _ => None,
+    }
+}
+
 impl Spec {
     /// Why the definition `name` did not parse, when it did not.
     pub fn unparsed_definition(&self, name: &str) -> Option<&UnparsedDefinition> {
-        match self.definitions.get(name).map(|(_, body)| body.as_ref()) {
-            Some(Expr::Unparsed(unparsed)) => Some(unparsed),
-            _ => None,
-        }
+        unparsed_definition(&self.definitions, name)
     }
 
     /// The declared constants that neither have a value in `domains` nor are

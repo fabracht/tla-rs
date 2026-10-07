@@ -944,7 +944,7 @@ mod tests {
     }
 
     #[test]
-    fn check_spec_reports_a_used_definition_that_failed_to_parse() {
+    fn check_spec_fails_an_invariant_that_did_not_parse_and_not_an_unused_definition() {
         let dir_name = "tlc_test_check_spec_unparsed_definition";
         let spec = "---- MODULE Dropped ----\nVARIABLES x\nInit == x = 0\nNext == x' = x\nInvBad == IF x\nInvType == x = 0\nUnused == [a |-> ]\n====\n";
         let path = write_spec(dir_name, spec);
@@ -960,10 +960,15 @@ mod tests {
             "{:?}",
             out.warnings
         );
-        assert!(
-            matches!(out.outcome, CheckOutcome::Ok { .. }),
-            "definitions that did not parse and are not used do not stop the check: {:?}",
-            out.outcome
-        );
+        match &out.outcome {
+            CheckOutcome::Error { error, .. } => assert!(
+                error
+                    .message
+                    .starts_with("`InvBad` is defined, but its definition did not parse: line 6"),
+                "{}",
+                error.message
+            ),
+            other => panic!("the invariant InvBad must fail with its parse error: {other:?}"),
+        }
     }
 }

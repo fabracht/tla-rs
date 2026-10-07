@@ -12,10 +12,16 @@ pub fn eval_with_instances(
 ) -> Result<Value> {
     match expr {
         Expr::QualifiedCall(instance_expr, op, args) => {
-            let Expr::Var(instance_name) = instance_expr.as_ref() else {
-                return Err(EvalError::domain_error(
-                    "eval_with_instances only supports static instance names",
-                ));
+            let instance_name = match instance_expr.as_ref() {
+                Expr::Var(instance_name) => instance_name,
+                Expr::Unparsed(unparsed) => {
+                    return Err(EvalError::domain_error(unparsed.to_string()));
+                }
+                _ => {
+                    return Err(EvalError::domain_error(
+                        "eval_with_instances only supports static instance names",
+                    ));
+                }
             };
             let instance_defs = instances
                 .get(instance_name)
