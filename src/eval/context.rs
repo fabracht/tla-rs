@@ -15,7 +15,7 @@ pub fn eval_with_instances(
             let instance_name = match instance_expr.as_ref() {
                 Expr::Var(instance_name) => instance_name,
                 Expr::Unparsed(unparsed) => {
-                    return Err(EvalError::domain_error(unparsed.to_string()));
+                    return Err(EvalError::unparsed(unparsed));
                 }
                 _ => {
                     return Err(EvalError::domain_error(

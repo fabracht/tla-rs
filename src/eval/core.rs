@@ -972,7 +972,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             Ok(result)
         }
 
-        Expr::Unparsed(unparsed) => Err(EvalError::domain_error(unparsed.to_string())),
+        Expr::Unparsed(unparsed) => Err(EvalError::unparsed(unparsed)),
 
         Expr::OldValue => {
             let at_key: Arc<str> = "@".into();
@@ -1821,7 +1821,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     result
                 })
             }
-            Expr::Unparsed(unparsed) => Err(EvalError::domain_error(unparsed.to_string())),
+            Expr::Unparsed(unparsed) => Err(EvalError::unparsed(unparsed)),
             _ => Err(EvalError::domain_error(format!(
                 "qualified call requires instance name or parameterized instance call, got {:?}",
                 instance_expr

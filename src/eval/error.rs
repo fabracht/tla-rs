@@ -59,11 +59,16 @@ impl EvalError {
         }
     }
 
+    /// The error for a use of a definition that did not parse.
+    pub fn unparsed(unparsed: &crate::ast::UnparsedDefinition) -> Self {
+        Self::domain_error(unparsed.to_string())
+    }
+
     /// The error for an instance `name` that was not loaded: the parse failure of
     /// its `name == INSTANCE ...` definition, when that did not parse.
     pub fn missing_instance(name: &str, defs: &Definitions, kind: &str) -> Self {
         match crate::ast::unparsed_definition(defs, name) {
-            Some(unparsed) => Self::domain_error(unparsed.to_string()),
+            Some(unparsed) => Self::unparsed(unparsed),
             None => Self::domain_error(format!("{kind} {name} not found")),
         }
     }

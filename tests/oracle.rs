@@ -2294,21 +2294,17 @@ fn test_should_error_invariant_that_did_not_parse() {
 }
 
 #[test]
-fn test_should_error_spec_that_did_not_parse_checked_for_liveness() {
+fn test_should_error_assume_before_a_proof_is_checked() {
     let spec = parse(
-        "VARIABLE x\nvars == x\nInit == x = 0\nNext == x' = 1 - x\nSpec == Init /\\ [][Next]_vars /\\ WF_vars(Next) /\\ \\EE y : y",
+        "EXTENDS Naturals\nCONSTANT N\nVARIABLE x\nInit == x = 0\nNext == x' = (x + 1) % N\nASSUME N \\in Nat \\ {0, 1, 2, 3}\nUSE DEF Init",
     )
     .expect("spec parses");
-    let config = CheckerConfig {
-        check_liveness: true,
-        ..Default::default()
-    };
-    let result = check(&spec, &Env::new(), &config);
-    let message = format!("{result:?}");
-    assert!(
-        message.contains("`Spec` is defined, but its definition did not parse"),
-        "{message}"
-    );
+    let mut domains = Env::new();
+    domains.insert("N".into(), Value::Int(2));
+    match check(&spec, &domains, &CheckerConfig::default()) {
+        CheckResult::PrepareError(PrepareSpecError::AssumeViolation(_)) => {}
+        other => panic!("the ASSUME must be checked and fail for N = 2, got: {other:?}"),
+    }
 }
 
 #[test]

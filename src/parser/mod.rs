@@ -600,16 +600,45 @@ mod tests {
     }
 
     #[test]
-    fn a_spec_that_does_not_parse_is_a_liveness_obligation() {
-        let (spec, _) = unparsed("VARIABLE x\nSpec == Init /\\ ]\nInit == x = 0", "Spec");
-        assert!(
-            matches!(
-                spec.liveness_properties.as_slice(),
-                [property] if matches!(property.formula, Expr::Unparsed(_))
-            ),
-            "{:?}",
-            spec.liveness_properties
+    fn a_spec_that_does_not_parse_adds_no_temporal_parts() {
+        let (spec, _) = unparsed(
+            "VARIABLE x\nHelperSpec == x \\in {0, 1} /\\ ]\nInit == x = 0",
+            "HelperSpec",
         );
+        assert!(spec.liveness_properties.is_empty() && spec.fairness.is_empty());
+    }
+
+    #[test]
+    fn a_module_assume_ends_a_body_even_when_a_proof_follows() {
+        let spec = parse(
+            "CONSTANT N\nVARIABLE x\nInit == x = 0\nNext == x' = (x + 1) % N\nASSUME N \\in Nat \\ {0, 1, 2, 3}\nUSE DEF Init",
+        )
+        .expect("the spec parses");
+        assert!(matches!(spec.next, Some(Expr::Eq(_, _))), "{:?}", spec.next);
+        assert_eq!(spec.assumes.len(), 1);
+    }
+
+    #[test]
+    fn a_theorem_name_is_not_a_definition() {
+        let spec = parse(
+            "VARIABLE x\nInit == x = 0\nLEMMA TypeOKInductive == ASSUME NEW y \\in {0, 1} PROVE y \\in {0, 1}\nTHEOREM InvT == x = x\nNext == x' = x",
+        )
+        .expect("the spec parses");
+        assert!(!spec.definitions.contains_key("TypeOKInductive"));
+        assert!(!spec.definitions.contains_key("InvT"));
+        assert!(spec.invariants.is_empty());
+        assert!(spec.next.is_some());
+    }
+
+    #[test]
+    fn a_recursive_declaration_inside_a_failed_let_stays_inside_it() {
+        let (spec, _) = unparsed(
+            "VARIABLE x\nb(n) == n\nBad == LET RECURSIVE b(_)\n           b(n) == ]\n       IN b(1)\nInit == x = b(0)",
+            "Bad",
+        );
+        let (_, body) = spec.definitions.get("b").expect("b stays defined");
+        assert!(matches!(body.as_ref(), Expr::Var(_)), "{body:?}");
+        assert!(spec.init.is_some());
     }
 
     #[test]

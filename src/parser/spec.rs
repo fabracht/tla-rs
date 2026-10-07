@@ -75,8 +75,12 @@ impl Parser {
                     let expr = self.parse_expr()?;
                     self.assumes.push(expr);
                 }
-                Token::Theorem => {
+                Token::Theorem | Token::Lemma => {
                     self.advance();
+                    if matches!(self.peek(), Token::Ident(_)) && *self.peek_n(1) == Token::EqEq {
+                        self.advance();
+                        self.advance();
+                    }
                     self.skip_to_next_definition();
                 }
                 Token::Recursive => {
@@ -98,9 +102,9 @@ impl Parser {
                     let inst = self.parse_instance(None, Vec::new())?;
                     self.instances.push(inst);
                 }
-                Token::Lemma
-                | Token::ProofStep
+                Token::ProofStep
                 | Token::By
+                | Token::Prove
                 | Token::Qed
                 | Token::ProofDef
                 | Token::Enabled => {
@@ -338,14 +342,6 @@ impl Parser {
     }
 
     fn extract_fairness_and_liveness(&mut self, name: &Arc<str>, expr: &Expr) {
-        if let Expr::Unparsed(_) = expr {
-            self.liveness_properties.push(LivenessProperty {
-                name: name.clone(),
-                formula: expr.clone(),
-                from_specification: true,
-            });
-            return;
-        }
         let mut liveness = Vec::new();
         let mut warnings = Vec::new();
         crate::ast::collect_temporal(

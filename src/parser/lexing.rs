@@ -192,16 +192,18 @@ impl Parser {
         }
     }
 
+    /// Skips a theorem or proof up to the next unit. An `ASSUME ... PROVE` in it is
+    /// part of the proof, not a module `ASSUME`.
     pub(super) fn skip_to_next_definition(&mut self) {
-        while !self.at_unit_start() {
+        while !self.at_unit_start() || (*self.peek() == Token::Assume && self.assume_has_prove()) {
             self.advance();
         }
     }
 
     /// Skips the rest of a definition that did not parse, from the token after its
-    /// name. A `Name ==` inside a `LET` the failed body opened belongs to it, unless
-    /// it starts at or left of `column`, the failed definition's own (a body whose
-    /// `IN` is missing).
+    /// name. While a `LET` the failed body opened is open, what starts right of
+    /// `column`, the failed definition's own, belongs to it; a unit at or left of it
+    /// ends the skip even then (a body whose `IN` is missing).
     pub(super) fn skip_failed_definition(&mut self, column: u32) {
         while !matches!(self.peek(), Token::EqEq | Token::Eof) {
             self.advance();
@@ -212,11 +214,9 @@ impl Parser {
         }
         let mut open_lets = 0usize;
         loop {
-            let at_unit = self.at_unit_start();
-            let belongs_to_body = matches!(self.peek(), Token::Ident(_))
-                && open_lets > 0
-                && self.column_of(self.current_span().start) > column;
-            if at_unit && !belongs_to_body {
+            let belongs_to_body =
+                open_lets > 0 && self.column_of(self.current_span().start) > column;
+            if *self.peek() == Token::Eof || (self.at_unit_start() && !belongs_to_body) {
                 return;
             }
             match self.advance() {
@@ -235,13 +235,12 @@ impl Parser {
         )
     }
 
-    /// Whether the `ASSUME` at the current position is part of a proof statement
-    /// (`ASSUME NEW x PROVE ...`): a `NEW`, `PROVE` or `BY` follows it before the
-    /// next unit.
-    fn assume_is_proof_statement(&self) -> bool {
+    /// Whether a `PROVE` follows the `ASSUME` at the current position before the
+    /// next unit, making it an `ASSUME ... PROVE` statement of a proof.
+    fn assume_has_prove(&self) -> bool {
         for (index, token) in self.tokens.iter().enumerate().skip(self.pos + 1) {
             match &token.value {
-                Token::By => return true,
+                Token::Prove => return true,
                 Token::Eof
                 | Token::Module
                 | Token::Extends
@@ -281,6 +280,7 @@ impl Parser {
             | Token::Extends
             | Token::Variables
             | Token::Constants
+            | Token::Assume
             | Token::Theorem
             | Token::Recursive
             | Token::Local
@@ -288,10 +288,10 @@ impl Parser {
             | Token::Lemma
             | Token::ProofStep
             | Token::By
+            | Token::Prove
             | Token::Qed
             | Token::ProofDef
             | Token::Invariant => true,
-            Token::Assume => !self.assume_is_proof_statement(),
             Token::Ident(_) => match self.peek_n(1) {
                 Token::EqEq => true,
                 Token::LParen => self.group_then_eqeq(self.pos + 1, &Token::LParen, &Token::RParen),
