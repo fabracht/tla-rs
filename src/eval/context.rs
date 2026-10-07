@@ -18,14 +18,18 @@ pub fn eval_with_instances(
                 ));
             };
             let instance_defs = instances.get(instance_name).ok_or_else(|| {
-                EvalError::domain_error(format!("instance {} not found", instance_name))
+                EvalError::missing(instance_name, || {
+                    EvalError::domain_error(format!("instance {} not found", instance_name))
+                })
             })?;
 
             let (params, body) = instance_defs.get(op).ok_or_else(|| {
-                EvalError::domain_error(format!(
-                    "operator {} not found in instance {}",
-                    op, instance_name
-                ))
+                EvalError::missing(op, || {
+                    EvalError::domain_error(format!(
+                        "operator {} not found in instance {}",
+                        op, instance_name
+                    ))
+                })
             })?;
 
             if args.len() != params.len() {

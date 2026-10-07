@@ -460,9 +460,49 @@ pub struct Spec {
     /// value of the zero-parameter `Definition`, evaluated once the modules the spec
     /// extends and instantiates are loaded.
     pub constant_substitutions: Vec<(Arc<str>, Arc<str>)>,
+    /// Definitions whose text did not parse, by name. They are left out of
+    /// `definitions`; a use of one reports why it did not parse instead of an
+    /// undefined name.
+    pub unparsed_definitions: BTreeMap<Arc<str>, UnparsedDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnparsedDefinition {
+    pub file: Option<Arc<str>>,
+    pub line: usize,
+    pub column: usize,
+    pub message: String,
+}
+
+impl UnparsedDefinition {
+    pub fn use_error(&self, name: &str) -> String {
+        format!("`{name}` is defined, but its definition did not parse: {self}")
+    }
+}
+
+impl std::fmt::Display for UnparsedDefinition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.file {
+            Some(file) => write!(f, "{file}:{}:{}: {}", self.line, self.column, self.message),
+            None => write!(
+                f,
+                "line {}, column {}: {}",
+                self.line, self.column, self.message
+            ),
+        }
+    }
 }
 
 impl Spec {
+    /// The error for a cfg directive (`INIT`, `INVARIANT`, ...) naming a definition
+    /// the spec does not have.
+    pub fn missing_definition_error(&self, directive: &str, name: &str) -> String {
+        match self.unparsed_definitions.get(name) {
+            Some(unparsed) => format!("{directive} {}", unparsed.use_error(name)),
+            None => format!("{directive} definition '{name}' not found in spec"),
+        }
+    }
+
     /// The declared constants that neither have a value in `domains` nor are
     /// substituted by the cfg.
     pub fn unassigned_constants<'a>(&'a self, domains: &Env) -> Vec<&'a Arc<str>> {

@@ -42,7 +42,9 @@ fn check_loaded(path: &Path, mut config: CheckerConfig) -> CheckResult {
         Ok(s) => s,
         Err(e) => panic!("parse error in {}: {}", path.display(), e.message),
     };
-    tla_checker::modules::merge_extended_declarations(&mut spec, path);
+    if let Err(message) = tla_checker::modules::merge_extended_declarations(&mut spec, path) {
+        return CheckResult::PrepareError(PrepareSpecError::ModuleParse(message));
+    }
     config.spec_path = Some(path.to_path_buf());
     let mut domains = Env::new();
     let cfg_path = path.with_extension("cfg");
@@ -1389,13 +1391,13 @@ Pairs == {<<1, 2>>}
 Init == x = 0
 Next == \E <<a, a>> \in Pairs : x' = a
 ===="#;
-    let Err(err) = parse(input) else {
-        panic!("a duplicate name in a tuple binder must not parse");
-    };
-    assert!(err.message.contains("operator 'Next'"), "{err:?}");
-    assert!(err.message.contains("duplicate name 'a'"), "{err:?}");
-    let span = err.span.expect("the error points at the definition");
-    assert_eq!(&input[span.start as usize..span.end as usize], "Next");
+    let spec = parse(input).expect("a definition that fails to parse is left out");
+    let next = spec
+        .unparsed_definitions
+        .get("Next")
+        .expect("Next is recorded as unparsed");
+    assert!(next.message.contains("duplicate name 'a'"), "{next:?}");
+    assert_eq!((next.line, next.column), (5, 12), "points at the binder");
 }
 
 #[test]
@@ -2125,33 +2127,32 @@ fn test_should_pass_extends_multiple() {
 #[test]
 fn test_should_error_extends_parse_error() {
     let path = Path::new("test_cases/should_error/extends_parse_error/extends_parse_error.tla");
-    let result = check_spec_file(path);
-    match result {
-        CheckResult::PrepareError(PrepareSpecError::InstanceError(e)) => {
-            let msg = format!("{:?}", e);
-            assert!(
-                msg.contains("Broken"),
-                "error should mention the broken module name, got: {}",
-                msg
-            );
+    match check_spec_file(path) {
+        CheckResult::PrepareError(PrepareSpecError::ModuleParse(message)) => {
+            assert!(message.contains("module Broken"), "{message}");
+            assert!(message.contains("Broken.tla:2:6"), "{message}");
         }
-        other => panic!(
-            "extends_parse_error.tla should produce PrepareSpecError::InstanceError, got: {:?}",
-            other
-        ),
+        other => panic!("expected PrepareSpecError::ModuleParse, got: {other:?}"),
     }
 }
 
 #[test]
 fn test_should_error_definition_parse_error() {
-    let input = fs::read_to_string("test_cases/should_error/definition_parse_error.tla")
-        .expect("read spec");
-    let Err(err) = parse(&input) else {
-        panic!("a definition that fails to parse must be an error");
-    };
-    assert!(err.message.contains("'Bad'"), "{err:?}");
-    let span = err.span.expect("the error points at the offending token");
-    assert_eq!(&input[span.start as usize..span.end as usize], "|->");
+    let path = Path::new("test_cases/should_error/definition_parse_error.tla");
+    match check_spec_file(path) {
+        CheckResult::PrepareError(PrepareSpecError::ConstantSubstitution(message)) => {
+            assert!(
+                message.contains(
+                    "`Bad` is defined, but its definition did not parse: line 5, column 13: unexpected `|->`"
+                ),
+                "{message}"
+            );
+            assert!(!message.contains("did you mean"), "{message}");
+        }
+        other => {
+            panic!("expected the substitution to report why Bad did not parse, got: {other:?}")
+        }
+    }
 }
 
 #[test]
@@ -2159,13 +2160,57 @@ fn test_should_error_instance_definition_parse_error() {
     let path = Path::new(
         "test_cases/should_error/instance_definition_parse_error/instance_definition_parse_error.tla",
     );
-    match check_spec_file_allow_deadlock(path) {
-        CheckResult::PrepareError(PrepareSpecError::InstanceError(e)) => {
-            let msg = format!("{e:?}");
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
+    match check_loaded(path, config) {
+        CheckResult::InitError(e) => {
+            let msg = e.to_string();
+            assert!(msg.contains("`Bad` is defined"), "{msg}");
             assert!(msg.contains("Helpers.tla:4:13"), "{msg}");
-            assert!(msg.contains("'Bad'"), "{msg}");
         }
-        other => panic!("expected PrepareSpecError::InstanceError, got: {other:?}"),
+        other => panic!("expected an Init error naming Bad, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_extends_definition_parse_error_named_by_cfg() {
+    let path = Path::new(
+        "test_cases/should_error/extends_definition_parse_error/extends_definition_parse_error.tla",
+    );
+    let input = fs::read_to_string(path).expect("read spec");
+    let mut spec = parse(&input).expect("spec parses");
+    tla_checker::modules::merge_extended_declarations(&mut spec, path).expect("Base parses");
+    let cfg = parse_cfg(&fs::read_to_string(path.with_extension("cfg")).expect("read cfg"))
+        .expect("cfg parses");
+    let mut config = CheckerConfig::default();
+    let Err(message) = apply_config(
+        &cfg,
+        &mut spec,
+        &mut Env::new(),
+        &mut config,
+        &[],
+        &[],
+        false,
+    ) else {
+        panic!("INVARIANT InvBase must report why InvBase did not parse");
+    };
+    assert!(
+        message.contains("INVARIANT `InvBase` is defined, but its definition did not parse"),
+        "{message}"
+    );
+    assert!(message.contains("Base.tla:3:23"), "{message}");
+}
+
+#[test]
+fn test_should_pass_unused_unsupported_definitions() {
+    let path = Path::new("test_cases/should_pass/unused_unsupported_definitions.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 2),
+        other => {
+            panic!("unused definitions that do not parse must not stop the check, got: {other:?}")
+        }
     }
 }
 

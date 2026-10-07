@@ -295,7 +295,7 @@ impl std::fmt::Display for Token {
 pub struct Lexer<'a> {
     input: &'a str,
     pos: usize,
-    seen_module: bool,
+    open_modules: usize,
     module_ended: bool,
 }
 
@@ -304,7 +304,7 @@ impl<'a> Lexer<'a> {
         Self {
             input,
             pos: 0,
-            seen_module: false,
+            open_modules: 0,
             module_ended: false,
         }
     }
@@ -404,8 +404,15 @@ impl<'a> Lexer<'a> {
                     self.advance();
                 }
                 if self.pos - start >= 4 {
+                    let rest_start = self.pos;
                     while self.peek_char().is_some_and(|c| c != '\n') {
                         self.advance();
+                    }
+                    if self.input[rest_start..self.pos]
+                        .split_whitespace()
+                        .any(|word| word == "MODULE")
+                    {
+                        self.open_modules += 1;
                     }
                 } else {
                     self.pos = start;
@@ -417,9 +424,12 @@ impl<'a> Lexer<'a> {
                     self.advance();
                 }
                 if self.pos - start >= 4 {
-                    if self.seen_module {
-                        self.module_ended = true;
-                        return;
+                    if self.open_modules > 0 {
+                        self.open_modules -= 1;
+                        if self.open_modules == 0 {
+                            self.module_ended = true;
+                            return;
+                        }
                     }
                     while self.peek_char().is_some_and(|c| c != '\n') {
                         self.advance();
@@ -816,7 +826,7 @@ impl<'a> Lexer<'a> {
                 "TRUE" => Token::True,
                 "FALSE" => Token::False,
                 "MODULE" => {
-                    self.seen_module = true;
+                    self.open_modules += 1;
                     Token::Module
                 }
                 "EXTENDS" => Token::Extends,
@@ -1289,7 +1299,7 @@ impl<'a> Lexer<'a> {
                 "TRUE" => Token::True,
                 "FALSE" => Token::False,
                 "MODULE" => {
-                    self.seen_module = true;
+                    self.open_modules += 1;
                     Token::Module
                 }
                 "EXTENDS" => Token::Extends,

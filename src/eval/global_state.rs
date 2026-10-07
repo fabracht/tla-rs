@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::{ParameterizedInstances, ResolvedInstances};
-use crate::ast::Value;
+use crate::ast::{UnparsedDefinition, Value};
 
 /// What [`eval_with_context`](super::eval_with_context) needs to evaluate `ENABLED`:
 /// the state variables, whose current values it reads from the environment.
@@ -110,6 +110,20 @@ pub(crate) fn with_state_vars<T>(vars: &[Arc<str>], body: impl FnOnce() -> T) ->
 /// The state variables `ENABLED` reads, inside [`with_state_vars`].
 pub(crate) fn state_vars_in_scope() -> Option<Vec<Arc<str>>> {
     STATE_VARS.with(|cell| cell.borrow().clone())
+}
+
+thread_local! {
+    static UNPARSED_DEFINITIONS: RefCell<BTreeMap<Arc<str>, UnparsedDefinition>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+/// The definitions of the spec and the modules it loads that did not parse, so a
+/// use of one reports the parse failure instead of an undefined name.
+pub fn set_unparsed_definitions(definitions: BTreeMap<Arc<str>, UnparsedDefinition>) {
+    UNPARSED_DEFINITIONS.with(|cell| *cell.borrow_mut() = definitions);
+}
+
+pub(crate) fn unparsed_definition(name: &str) -> Option<UnparsedDefinition> {
+    UNPARSED_DEFINITIONS.with(|cell| cell.borrow().get(name).cloned())
 }
 
 thread_local! {

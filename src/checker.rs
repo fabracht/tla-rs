@@ -246,6 +246,8 @@ impl LivenessError {
 #[derive(Debug)]
 pub enum PrepareSpecError {
     InstanceError(EvalError),
+    /// A module the spec extends or instantiates does not parse.
+    ModuleParse(String),
     MissingConstants(Vec<Arc<str>>),
     AssumeViolation(usize),
     AssumeError(usize, EvalError),
@@ -265,8 +267,9 @@ fn load_module_extends(
     registry: &mut ModuleRegistry,
     domains: &mut crate::ast::Env,
     extended_defs: &mut Definitions,
+    unparsed: &mut BTreeMap<Arc<str>, crate::ast::UnparsedDefinition>,
     ancestors: &mut Vec<Arc<str>>,
-) -> Result<(), EvalError> {
+) -> Result<(), PrepareSpecError> {
     if ancestors.iter().any(|a| a == name) {
         let mut cycle_path: Vec<String> = ancestors
             .iter()
@@ -274,48 +277,26 @@ fn load_module_extends(
             .map(|a| a.to_string())
             .collect();
         cycle_path.push(name.to_string());
-        return Err(EvalError::DomainError {
+        return Err(PrepareSpecError::InstanceError(EvalError::DomainError {
             message: format!("cyclic EXTENDS dependency: {}", cycle_path.join(" -> ")),
             span: None,
-        });
+        }));
     }
 
     if let Some(cached) = registry.get(name) {
         for (def_name, def) in &cached.definitions {
             extended_defs.insert(def_name.clone(), def.clone());
         }
+        add_unparsed(unparsed, cached);
         return Ok(());
     }
 
     let (child_extends, child_defs) = match registry.load(name, spec_path) {
-        Ok(loaded) => (loaded.extends.clone(), loaded.definitions.clone()),
-        Err(ModuleError::NotFound(_)) => {
-            return Err(EvalError::DomainError {
-                message: format!(
-                    "module {} not found (no file {}.tla in spec directory)",
-                    name, name
-                ),
-                span: None,
-            });
+        Ok(loaded) => {
+            add_unparsed(unparsed, loaded);
+            (loaded.extends.clone(), loaded.definitions.clone())
         }
-        Err(ModuleError::ParseError(msg)) => {
-            return Err(EvalError::DomainError {
-                message: format!("parse error in module {}: {}", name, msg),
-                span: None,
-            });
-        }
-        Err(ModuleError::CyclicDependency(dep)) => {
-            return Err(EvalError::DomainError {
-                message: format!("cyclic dependency loading module {}", dep),
-                span: None,
-            });
-        }
-        Err(ModuleError::IoError(msg)) => {
-            return Err(EvalError::DomainError {
-                message: format!("I/O error loading module {}: {}", name, msg),
-                span: None,
-            });
-        }
+        Err(error) => return Err(module_load_error(name, error)),
     };
 
     ancestors.push(name.clone());
@@ -323,7 +304,15 @@ fn load_module_extends(
         if stdlib::is_stdlib_module(ext) {
             stdlib::load_module(ext, domains);
         } else {
-            load_module_extends(ext, spec_path, registry, domains, extended_defs, ancestors)?;
+            load_module_extends(
+                ext,
+                spec_path,
+                registry,
+                domains,
+                extended_defs,
+                unparsed,
+                ancestors,
+            )?;
         }
     }
     ancestors.pop();
@@ -333,6 +322,44 @@ fn load_module_extends(
     }
 
     Ok(())
+}
+
+fn missing_behavior_definition(spec: &Spec, name: &str) -> String {
+    match spec.unparsed_definitions.get(name) {
+        Some(unparsed) => unparsed.use_error(name),
+        None => format!("missing {name} definition"),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn module_load_error(name: &str, error: ModuleError) -> PrepareSpecError {
+    let message = match error {
+        ModuleError::ParseError(message) => {
+            return PrepareSpecError::ModuleParse(format!(
+                "parse error in module {name}: {message}"
+            ));
+        }
+        ModuleError::NotFound(_) => {
+            format!("module {name} not found (no file {name}.tla in spec directory)")
+        }
+        ModuleError::CyclicDependency(dep) => format!("cyclic dependency loading module {dep}"),
+        ModuleError::IoError(message) => format!("I/O error loading module {name}: {message}"),
+    };
+    PrepareSpecError::InstanceError(EvalError::DomainError {
+        message,
+        span: None,
+    })
+}
+
+/// Adds the definitions of `module` that did not parse to `unparsed`, keeping an
+/// entry already there: the loading spec's own definitions take precedence.
+#[cfg(not(target_arch = "wasm32"))]
+fn add_unparsed(unparsed: &mut BTreeMap<Arc<str>, crate::ast::UnparsedDefinition>, module: &Spec) {
+    for (name, definition) in &module.unparsed_definitions {
+        unparsed
+            .entry(name.clone())
+            .or_insert_with(|| definition.clone());
+    }
 }
 
 fn substituted_value(
@@ -347,9 +374,12 @@ fn substituted_value(
         ));
     }
     match defs.get(target) {
-        None => Err(format!(
-            "substitution '{name} <- {target}': no definition '{target}'"
-        )),
+        None => {
+            let missing = EvalError::missing(target, || {
+                EvalError::domain_error(format!("no definition '{target}'"))
+            });
+            Err(format!("substitution '{name} <- {target}': {missing}"))
+        }
         Some((params, _)) if !params.is_empty() => Err(format!(
             "substitution '{name} <- {target}': '{target}' takes parameters, and a constant can only be replaced by a definition without them"
         )),
@@ -417,6 +447,10 @@ pub fn prepare_spec(
 
     let mut extended_defs: Definitions = BTreeMap::new();
     #[cfg(not(target_arch = "wasm32"))]
+    let mut unparsed = spec.unparsed_definitions.clone();
+    #[cfg(target_arch = "wasm32")]
+    let unparsed = spec.unparsed_definitions.clone();
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(spec_path) = spec_path {
         let mut registry = ModuleRegistry::new();
         let mut ancestors: Vec<Arc<str>> = Vec::new();
@@ -424,16 +458,15 @@ pub fn prepare_spec(
             if stdlib::is_stdlib_module(module) {
                 continue;
             }
-            if let Err(err) = load_module_extends(
+            load_module_extends(
                 module,
                 spec_path,
                 &mut registry,
                 &mut domains,
                 &mut extended_defs,
+                &mut unparsed,
                 &mut ancestors,
-            ) {
-                return Err(PrepareSpecError::InstanceError(err));
-            }
+            )?;
         }
     }
     for (name, def) in &spec.definitions {
@@ -459,21 +492,16 @@ pub fn prepare_spec(
                 continue;
             }
             match registry.load(&inst.module_name, spec_path) {
-                Ok(_) => {}
-                Err(ModuleError::ParseError(message)) => {
-                    return Err(PrepareSpecError::InstanceError(EvalError::DomainError {
-                        message: format!("parse error in module {}: {message}", inst.module_name),
-                        span: None,
-                    }));
-                }
-                Err(e) => {
+                Ok(module) => add_unparsed(&mut unparsed, module),
+                Err(ModuleError::NotFound(_)) => {
                     if !quiet {
                         eprintln!(
-                            "  Warning: could not load module {}: {:?}",
-                            inst.module_name, e
+                            "  Warning: could not load module {}: no file {}.tla in spec directory",
+                            inst.module_name, inst.module_name
                         );
                     }
                 }
+                Err(error) => return Err(module_load_error(&inst.module_name, error)),
             }
         }
         match resolve_instances(spec, &registry) {
@@ -493,6 +521,8 @@ pub fn prepare_spec(
             }
         }
     }
+
+    crate::eval::set_unparsed_definitions(unparsed);
 
     substitute_constants(spec, &mut domains, &defs)?;
 
@@ -630,20 +660,16 @@ fn check_with_state_vars(spec: &Spec, domains: &Env, config: &CheckerConfig) -> 
     let init_expr = match spec.init.as_ref() {
         Some(e) => e,
         None => {
-            return CheckResult::InitError(EvalError::DomainError {
-                message: "missing Init definition".to_string(),
-                span: None,
-            });
+            return CheckResult::InitError(EvalError::domain_error(missing_behavior_definition(
+                spec, "Init",
+            )));
         }
     };
     let next_expr = match spec.next.as_ref() {
         Some(e) => e,
         None => {
             return CheckResult::NextError(
-                EvalError::DomainError {
-                    message: "missing Next definition".to_string(),
-                    span: None,
-                },
+                EvalError::domain_error(missing_behavior_definition(spec, "Next")),
                 vec![],
                 None,
             );
@@ -2888,6 +2914,12 @@ pub fn check_result_to_json(result: &CheckResult, spec: &Spec) -> String {
                 json_string(&format_eval_error(e))
             )
         }
+        CheckResult::PrepareError(PrepareSpecError::ModuleParse(message)) => {
+            format!(
+                r#"{{"status": "parse_error", "error": {}}}"#,
+                json_string(message)
+            )
+        }
         CheckResult::PrepareError(PrepareSpecError::MissingConstants(missing)) => {
             let names: Vec<_> = missing.iter().map(|c| json_string(c)).collect();
             format!(
@@ -3032,6 +3064,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
         let result = CheckResult::InitError(EvalError::domain_error("line one\nline \"two\"\t"));
         let json = check_result_to_json(&result, &spec);
@@ -3125,6 +3158,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
 
         let domains = Env::new();
@@ -3165,6 +3199,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
 
         let domains = Env::new();
@@ -3211,6 +3246,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         }
     }
 
@@ -3270,6 +3306,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
         assert!(
             unchecked_predicate_warning(&spec, false).is_none(),
@@ -3306,6 +3343,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
         assert!(
             unchecked_predicate_warning(&spec, false).is_none(),
@@ -3335,6 +3373,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
 
         let domains = Env::new();
@@ -3381,6 +3420,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
 
         let domains = Env::new();
@@ -3425,6 +3465,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
 
         let domains = Env::new();
@@ -3482,6 +3523,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
 
         let domains = Env::new();
@@ -3520,6 +3562,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
 
         let domains = Env::new();
@@ -3560,6 +3603,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
 
         let result = check(&spec, &Env::new(), &CheckerConfig::default());
@@ -3618,6 +3662,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
 
         let result1 = check(&spec1, &Env::new(), &CheckerConfig::default());
@@ -3665,6 +3710,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
 
         let result2 = check(&spec2, &Env::new(), &CheckerConfig::default());

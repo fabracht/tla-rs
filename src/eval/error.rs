@@ -59,25 +59,36 @@ impl EvalError {
         }
     }
 
-    pub fn undefined_var(name: Arc<str>) -> Self {
-        Self::UndefinedVar {
-            name,
-            suggestion: None,
-            span: None,
+    /// The error for a name that is not defined: the parse failure when the name
+    /// is a definition that did not parse, `fallback` otherwise.
+    pub fn missing(name: &str, fallback: impl FnOnce() -> Self) -> Self {
+        match super::global_state::unparsed_definition(name) {
+            Some(unparsed) => Self::domain_error(unparsed.use_error(name)),
+            None => fallback(),
         }
     }
 
-    pub fn undefined_var_with_env(name: Arc<str>, env: &Env, defs: &Definitions) -> Self {
-        let candidates = env
-            .keys()
-            .map(|s| s.as_ref())
-            .chain(defs.keys().map(|s| s.as_ref()));
-        let suggestion = find_similar(&name, candidates, 2).map(|s| s.into());
-        Self::UndefinedVar {
+    pub fn undefined_var(name: Arc<str>) -> Self {
+        Self::missing(&name.clone(), || Self::UndefinedVar {
             name,
-            suggestion,
+            suggestion: None,
             span: None,
-        }
+        })
+    }
+
+    pub fn undefined_var_with_env(name: Arc<str>, env: &Env, defs: &Definitions) -> Self {
+        Self::missing(&name.clone(), || {
+            let candidates = env
+                .keys()
+                .map(|s| s.as_ref())
+                .chain(defs.keys().map(|s| s.as_ref()));
+            let suggestion = find_similar(&name, candidates, 2).map(|s| s.into());
+            Self::UndefinedVar {
+                name,
+                suggestion,
+                span: None,
+            }
+        })
     }
 
     pub fn type_mismatch(expected: &'static str, got: Value) -> Self {

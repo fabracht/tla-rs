@@ -2,9 +2,16 @@
 
 ## [0.24.0] - 2026-10-06
 
+### Fixed
+
+- A definition that did not parse was dropped with a warning, so each use of it failed with "undefined variable", often with a "did you mean" suggestion for another name, far from the real cause (#171). The definition is still left out, so a definition tla-rs cannot parse (`\EE`, a function definition `f[x \in S] == ...`) does not stop a spec that never uses it, but a use of it now reports that it is defined, with the line, column and parse error, instead of an undefined name. That holds wherever the name is used: in evaluation, in an `Instance!Op` call, as `Init`/`Next`, and in a cfg `INIT`, `NEXT`, `INVARIANT`, `PROPERTY`, `SPECIFICATION`, `CONSTRAINT`, `VIEW` or `Name <- Def`. Definitions in modules loaded through `EXTENDS` or `INSTANCE` are covered too, with the module's file. A broken `*Spec` definition, which used to be dropped without a warning, now gets one, and a body that ends before the next definition starts (`Op == x $$ 1`) is reported as a failure of that definition instead of a top-level error.
+- Text after the module's closing `====` was parsed, so a note after the end of a module (as in `CarTalkPuzzle.tla`) was a parse error. It is ignored, as in SANY.
+- A module loaded through `EXTENDS` or `INSTANCE` that does not parse is reported with its file, line and column, before the cfg is applied, and as a parse error in MCP. Through `INSTANCE` it used to be a warning followed by "instance not found"; a module that cannot be read or that extends itself is now an error there too, as through `EXTENDS`.
+- A duplicate name in a tuple binder (`\E <<a, a>> \in S : ...`) is reported at the binder.
+
 ### Changed
 
-- A definition whose body does not parse is an error, as in SANY (#171). It used to be a warning and the definition was dropped, so the spec failed later at each use with "undefined variable", often with a "did you mean" suggestion for another name, or passed when nothing used it. The error names the definition and points at the offending token (or at the definition's name when the parser has no position for it). This covers infix operator definitions and `*Spec` definitions, which were dropped without any warning. A module loaded through `EXTENDS` or `INSTANCE` that fails to parse reports its file, line and column; through `INSTANCE` it used to be a warning followed by "instance not found".
+- Library API: `Spec` has an `unparsed_definitions` field, `modules::merge_extended_declarations` returns an error for a module that does not parse, and `PrepareSpecError` has a `ModuleParse` variant.
 
 ## [0.23.3] - 2026-10-06
 

@@ -439,26 +439,55 @@ fn validate_spec_surfaces_parser_warnings() {
 }
 
 #[test]
-fn validate_spec_reports_a_definition_that_fails_to_parse() {
+fn a_definition_that_fails_to_parse_is_a_warning_until_it_is_used() {
     let path = std::env::temp_dir().join("tla_mcp_bad_definition_spec.tla");
     std::fs::write(
         &path,
-        "---- MODULE BadDef ----\nVARIABLE x\nInit == x = 0\nNext == x' = x + 1\nBadOp == [a |-> ]\n====\n",
+        "---- MODULE BadDef ----\nVARIABLE x\nInit == x = 0\nNext == x' = BadOp\nBadOp == [a |-> ]\n====\n",
     )
     .unwrap();
-    let input = ValidateSpecInput {
+    let validated = runner::validate_spec(&ValidateSpecInput {
         spec_path: path.to_string_lossy().into_owned(),
         constants: BTreeMap::new(),
         config_path: None,
         liveness_engine: None,
-    };
-    let out = runner::validate_spec(&input);
+    });
+    let checked = runner::check_spec(&CheckSpecInput {
+        spec_path: path.to_string_lossy().into_owned(),
+        max_states: 10,
+        max_depth: 10,
+        max_seconds: 30,
+        constants: BTreeMap::new(),
+        symmetry: None,
+        allow_deadlock: None,
+        check_liveness: None,
+        symbolic_integers: None,
+        count_satisfying: vec![],
+        continue_on_violation: false,
+        state_constraint: None,
+        liveness_engine: None,
+        config_path: None,
+    });
     let _ = std::fs::remove_file(&path);
 
-    assert!(matches!(out.status, ValidationStatus::Error));
-    let error = out.error.expect("a parse error");
-    assert!(error.message.contains("'BadOp'"), "{error:?}");
-    assert_eq!(error.span.map(|span| span.start_line), Some(5), "{error:?}");
+    assert!(matches!(validated.status, ValidationStatus::Ok));
+    assert!(
+        validated
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("'BadOp'")),
+        "{:?}",
+        validated.warnings
+    );
+    match checked.outcome {
+        CheckOutcome::Error { error, .. } => assert!(
+            error.message.contains(
+                "`BadOp` is defined, but its definition did not parse: line 5, column 17"
+            ),
+            "{error:?}"
+        ),
+        other => panic!("using BadOp must report why it did not parse, got {other:?}"),
+    }
 }
 
 #[test]

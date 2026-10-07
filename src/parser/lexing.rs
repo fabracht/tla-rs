@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use crate::ast::{Expr, FairnessConstraint, InstanceDecl, LivenessProperty};
+use crate::ast::{Expr, FairnessConstraint, InstanceDecl, LivenessProperty, UnparsedDefinition};
 use crate::lexer::{Lexer, Token};
 use crate::source::Source;
 use crate::span::{Span, Spanned};
@@ -48,6 +48,7 @@ pub struct Parser {
     /// from `a \oplus b == ...`). A use of such a symbol resolves to the user
     /// definition instead of the built-in, shadowing it within the module.
     pub(super) user_infix_ops: BTreeSet<Arc<str>>,
+    pub(super) unparsed: BTreeMap<Arc<str>, UnparsedDefinition>,
 }
 
 impl Parser {
@@ -75,6 +76,7 @@ impl Parser {
             list_col_stack: Vec::new(),
             warned_slash: false,
             user_infix_ops: BTreeSet::new(),
+            unparsed: BTreeMap::new(),
         })
     }
 
@@ -187,43 +189,65 @@ impl Parser {
     }
 
     pub(super) fn skip_to_next_definition(&mut self) {
-        loop {
-            match self.peek() {
-                Token::Eof => break,
-                Token::Variables
-                | Token::Constants
-                | Token::Module
-                | Token::Extends
-                | Token::Theorem => break,
-                Token::Invariant => break,
-                Token::Ident(_) => {
-                    let start = self.pos;
-                    self.advance();
-                    if *self.peek() == Token::EqEq {
-                        self.pos = start;
-                        break;
-                    }
-                    if *self.peek() == Token::LParen {
-                        self.advance();
-                        let mut depth = 1;
-                        while depth > 0 && *self.peek() != Token::Eof {
-                            match self.peek() {
-                                Token::LParen => depth += 1,
-                                Token::RParen => depth -= 1,
-                                _ => {}
-                            }
-                            self.advance();
-                        }
-                        if *self.peek() == Token::EqEq {
-                            self.pos = start;
-                            break;
-                        }
-                    }
+        while !self.at_unit_start() {
+            self.advance();
+        }
+    }
+
+    /// Whether the next token starts a module unit: a declaration, an `ASSUME`,
+    /// `THEOREM` or proof step, or a definition (`Name ==`, `Name(...) ==`,
+    /// `f[...] ==` or `a \op b ==`).
+    pub(super) fn at_unit_start(&self) -> bool {
+        match self.peek() {
+            Token::Eof
+            | Token::Module
+            | Token::Extends
+            | Token::Variables
+            | Token::Constants
+            | Token::Assume
+            | Token::Theorem
+            | Token::Recursive
+            | Token::Local
+            | Token::Instance
+            | Token::Lemma
+            | Token::ProofStep
+            | Token::By
+            | Token::Qed
+            | Token::ProofDef
+            | Token::Invariant => true,
+            Token::Ident(_) => match self.peek_n(1) {
+                Token::EqEq => true,
+                Token::LParen => self.group_then_eqeq(self.pos + 1, &Token::LParen, &Token::RParen),
+                Token::LBracket => {
+                    self.group_then_eqeq(self.pos + 1, &Token::LBracket, &Token::RBracket)
                 }
-                _ => {
-                    self.advance();
+                tok => {
+                    Self::infix_op_name(tok).is_some()
+                        && matches!(self.peek_n(2), Token::Ident(_))
+                        && *self.peek_n(3) == Token::EqEq
                 }
+            },
+            _ => false,
+        }
+    }
+
+    fn group_then_eqeq(&self, open: usize, opening: &Token, closing: &Token) -> bool {
+        let mut depth = 0usize;
+        for (index, token) in self.tokens.iter().enumerate().skip(open) {
+            if token.value == *opening {
+                depth += 1;
+            } else if token.value == *closing {
+                depth -= 1;
+                if depth == 0 {
+                    return self
+                        .tokens
+                        .get(index + 1)
+                        .is_some_and(|next| next.value == Token::EqEq);
+                }
+            } else if token.value == Token::Eof {
+                return false;
             }
         }
+        false
     }
 }

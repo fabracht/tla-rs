@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::ast::{DefinitionMap, Spec};
+use crate::ast::{DefinitionMap, Spec, UnparsedDefinition};
 use crate::eval::{Definitions, ParameterizedInstance, ParameterizedInstances};
 use crate::parser;
 use crate::substitution::apply_substitutions;
@@ -51,20 +51,24 @@ impl ModuleRegistry {
 
         self.loading_stack.push(name.clone());
 
+        let file: Arc<str> = file_path.display().to_string().into();
         let parsed = parser::parse(&content).map_err(|e| {
             let location = match e.span {
                 Some(span) => {
                     let (line, column) = crate::source::Source::new(name.clone(), content.as_str())
-                        .line_col(span.start);
-                    format!("{}:{line}:{column}", file_path.display())
+                        .line_char_col(span.start);
+                    format!("{file}:{line}:{column}")
                 }
-                None => file_path.display().to_string(),
+                None => file.to_string(),
             };
-            ModuleError::ParseError(format!("{location}: {}", e.message))
+            ModuleError::ParseError(format!("{location}: {e}"))
         });
 
         self.loading_stack.pop();
-        let spec = parsed?;
+        let mut spec = parsed?;
+        for unparsed in spec.unparsed_definitions.values_mut() {
+            unparsed.file = Some(file.clone());
+        }
         self.modules.insert(name.clone(), spec);
         self.modules.get(&name).ok_or(ModuleError::NotFound(name))
     }
@@ -103,10 +107,12 @@ impl Default for ModuleRegistry {
 /// variables and constants ahead of its own, definitions under its own (a module's
 /// definition overrides one it extends, the root's override all). A state is
 /// indexed by `spec.vars`, and the cfg names definitions, so both must be complete
-/// before the cfg is applied and the spec is checked. A module that cannot be
-/// loaded is skipped here; [`crate::checker::prepare_spec`] loads the same modules
-/// and reports why.
-pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) {
+/// before the cfg is applied and the spec is checked. The extended modules'
+/// definitions that did not parse are added to `spec.unparsed_definitions`, under
+/// the spec's own. A module that does not parse is an error, so it is reported
+/// before the cfg names a definition it was to provide; a module that cannot be
+/// found or read is skipped here, and [`crate::checker::prepare_spec`] reports why.
+pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<(), String> {
     let mut registry = ModuleRegistry::new();
     let mut visited = Vec::new();
     let mut declarations = Declarations::default();
@@ -117,12 +123,16 @@ pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) {
             &mut registry,
             &mut visited,
             &mut declarations,
-        );
+        )?;
     }
     declarations.add(&spec.vars, &spec.constants, &spec.definitions);
     spec.vars = declarations.vars;
     spec.constants = declarations.constants;
     spec.definitions = declarations.definitions;
+    for (name, unparsed) in declarations.unparsed_definitions {
+        spec.unparsed_definitions.entry(name).or_insert(unparsed);
+    }
+    Ok(())
 }
 
 #[derive(Default)]
@@ -130,6 +140,7 @@ struct Declarations {
     vars: Vec<Arc<str>>,
     constants: Vec<Arc<str>>,
     definitions: DefinitionMap,
+    unparsed_definitions: BTreeMap<Arc<str>, UnparsedDefinition>,
 }
 
 impl Declarations {
@@ -156,24 +167,33 @@ fn collect_declarations(
     registry: &mut ModuleRegistry,
     visited: &mut Vec<Arc<str>>,
     declarations: &mut Declarations,
-) {
+) -> Result<(), String> {
     if crate::stdlib::is_stdlib_module(name) || visited.contains(name) {
-        return;
+        return Ok(());
     }
     visited.push(name.clone());
-    let Ok(module) = registry.load(name, spec_path) else {
-        return;
+    let module = match registry.load(name, spec_path) {
+        Ok(module) => module,
+        Err(ModuleError::ParseError(message)) => {
+            return Err(format!("parse error in module {name}: {message}"));
+        }
+        Err(_) => return Ok(()),
     };
-    let (extends, vars, constants, definitions) = (
+    let (extends, vars, constants, definitions, unparsed_definitions) = (
         module.extends.clone(),
         module.vars.clone(),
         module.constants.clone(),
         module.definitions.clone(),
+        module.unparsed_definitions.clone(),
     );
     for inner in &extends {
-        collect_declarations(inner, spec_path, registry, visited, declarations);
+        collect_declarations(inner, spec_path, registry, visited, declarations)?;
     }
     declarations.add(&vars, &constants, &definitions);
+    declarations
+        .unparsed_definitions
+        .extend(unparsed_definitions);
+    Ok(())
 }
 
 type InstanceVars = BTreeMap<Arc<str>, Vec<Arc<str>>>;
@@ -303,8 +323,8 @@ mod tests {
     }
 
     #[test]
-    fn a_module_that_fails_to_parse_reports_its_file_and_line() {
-        let dir = std::env::temp_dir().join("tlc_test_module_parse_error");
+    fn a_module_definition_that_fails_to_parse_is_recorded_with_its_file() {
+        let dir = std::env::temp_dir().join("tlc_test_module_unparsed_definition");
         let _ = std::fs::create_dir_all(&dir);
         let tla_path = dir.join("BrokenDef.tla");
         std::fs::write(
@@ -313,17 +333,43 @@ mod tests {
         )
         .expect("write module");
 
-        let base = dir.join("base.tla");
         let mut reg = ModuleRegistry::new();
-        let first = reg.load("BrokenDef", &base).map(|_| ());
-        let second = reg.load("BrokenDef", &base).map(|_| ());
+        let loaded = reg
+            .load("BrokenDef", &dir.join("base.tla"))
+            .map(|module| module.unparsed_definitions.get("Bad").cloned());
         let _ = std::fs::remove_dir_all(&dir);
 
-        let expected_location = format!("{}:3:13", tla_path.display());
+        let bad = match loaded {
+            Ok(Some(bad)) => bad,
+            Ok(None) => panic!("`Bad` should be recorded as unparsed"),
+            Err(error) => panic!("the module should load: {error:?}"),
+        };
+        let file = tla_path.display().to_string();
+        assert_eq!(bad.file.as_deref(), Some(file.as_str()));
+        assert_eq!((bad.line, bad.column), (3, 13));
+    }
+
+    #[test]
+    fn a_module_that_does_not_parse_reports_its_file_and_line() {
+        let dir = std::env::temp_dir().join("tlc_test_module_parse_error");
+        let _ = std::fs::create_dir_all(&dir);
+        let tla_path = dir.join("Garbage.tla");
+        std::fs::write(
+            &tla_path,
+            "---- MODULE Garbage ----\nthis is not TLA+\nGood == 1\n====\n",
+        )
+        .expect("write module");
+
+        let base = dir.join("base.tla");
+        let mut reg = ModuleRegistry::new();
+        let first = reg.load("Garbage", &base).map(|_| ());
+        let second = reg.load("Garbage", &base).map(|_| ());
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let expected_location = format!("{}:2:6", tla_path.display());
         match first {
             Err(ModuleError::ParseError(message)) => {
                 assert!(message.starts_with(&expected_location), "{message}");
-                assert!(message.contains("'Bad'"), "{message}");
             }
             other => panic!("expected a parse error, got {other:?}"),
         }
@@ -379,6 +425,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
 
         let mut registry = ModuleRegistry::new();
@@ -414,6 +461,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            unparsed_definitions: Default::default(),
         };
 
         let (resolved, parameterized, _vars) = resolve_instances(&spec, &registry).unwrap();

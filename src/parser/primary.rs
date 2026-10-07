@@ -89,6 +89,7 @@ fn wrap_tuple_lets(
 impl Parser {
     pub(super) fn parse_binder(&mut self) -> Result<Binder> {
         if *self.peek() == Token::LAngle {
+            let opening = self.current_span();
             self.advance();
             if *self.peek() == Token::RAngle {
                 return Err(ParseError::new("empty tuple binder").with_span(self.current_span()));
@@ -98,8 +99,12 @@ impl Parser {
                 self.advance();
                 parts.push(self.parse_binder()?);
             }
+            let closing = self.current_span();
             self.expect(Token::RAngle)?;
-            Ok(Binder::Tuple(parts))
+            let binder = Binder::Tuple(parts);
+            check_binder_unique(&binder, &mut Vec::new())
+                .map_err(|error| error.with_span(opening.merge(closing)))?;
+            Ok(binder)
         } else {
             Ok(Binder::Name(self.expect_ident()?))
         }

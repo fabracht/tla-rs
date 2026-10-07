@@ -751,7 +751,7 @@ pub fn apply_config(
                 ));
             }
             None => {
-                return Err(format!("INIT definition '{}' not found in spec", init_name));
+                return Err(spec.missing_definition_error("INIT", init_name));
             }
         }
     }
@@ -768,7 +768,7 @@ pub fn apply_config(
                 ));
             }
             None => {
-                return Err(format!("NEXT definition '{}' not found in spec", next_name));
+                return Err(spec.missing_definition_error("NEXT", next_name));
             }
         }
     }
@@ -815,10 +815,7 @@ pub fn apply_config(
                     ));
                 }
                 None => {
-                    return Err(format!(
-                        "INVARIANT definition '{}' not found in spec",
-                        inv_name
-                    ));
+                    return Err(spec.missing_definition_error("INVARIANT", inv_name));
                 }
             }
         }
@@ -863,10 +860,7 @@ pub fn apply_config(
                     ));
                 }
                 None => {
-                    return Err(format!(
-                        "PROPERTY definition '{}' not found in spec",
-                        prop_name
-                    ));
+                    return Err(spec.missing_definition_error("PROPERTY", prop_name));
                 }
             }
         }
@@ -917,7 +911,7 @@ pub fn apply_config(
                 ));
             }
             None => {
-                return Err(format!("CONSTRAINT definition '{}' not found in spec", c));
+                return Err(spec.missing_definition_error("CONSTRAINT", c));
             }
         }
     }
@@ -933,7 +927,7 @@ pub fn apply_config(
                 ));
             }
             None => {
-                return Err(format!("VIEW definition '{view_name}' not found in spec"));
+                return Err(spec.missing_definition_error("VIEW", view_name));
             }
         }
     }
@@ -1080,10 +1074,7 @@ fn resolve_specification(
             ));
         }
         None => {
-            return Err(format!(
-                "SPECIFICATION definition '{}' not found in spec",
-                spec_name
-            ));
+            return Err(spec.missing_definition_error("SPECIFICATION", spec_name));
         }
     };
     let inlined =
@@ -1635,6 +1626,7 @@ mod tests {
             temporal_assumptions: vec![],
             constants: vec![],
             constant_substitutions: vec![],
+            unparsed_definitions: Default::default(),
         };
         spec.definitions.insert(
             Arc::from("Perms"),
@@ -1681,6 +1673,7 @@ mod tests {
             temporal_assumptions: vec![],
             constants: vec![],
             constant_substitutions: vec![],
+            unparsed_definitions: Default::default(),
         };
 
         let inner = Expr::Eq(
@@ -1735,6 +1728,7 @@ mod tests {
             temporal_assumptions: vec![],
             constants: vec![],
             constant_substitutions: vec![],
+            unparsed_definitions: Default::default(),
         };
 
         let p = Box::new(Expr::Eq(
@@ -1791,6 +1785,7 @@ mod tests {
             temporal_assumptions: vec![],
             constants: vec![],
             constant_substitutions: vec![],
+            unparsed_definitions: Default::default(),
         };
 
         let init_expr = Expr::Var(Arc::from("MyInit"));
@@ -1849,6 +1844,7 @@ mod tests {
             temporal_assumptions: vec![],
             constants: vec![],
             constant_substitutions: vec![],
+            unparsed_definitions: Default::default(),
         };
 
         let init_part_1 = Expr::In(
@@ -1953,6 +1949,7 @@ mod tests {
             temporal_assumptions: vec![],
             constants: vec![],
             constant_substitutions: vec![],
+            unparsed_definitions: Default::default(),
         };
 
         spec.definitions.insert(

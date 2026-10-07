@@ -54,7 +54,8 @@ pub fn prepare(
             .and_then(|s| (!s.is_empty()).then(|| SourceSpan::from_span(s, &source)));
         StructuredError::parse(err.message.clone(), span)
     })?;
-    crate::modules::merge_extended_declarations(&mut spec, &path);
+    crate::modules::merge_extended_declarations(&mut spec, &path)
+        .map_err(|message| StructuredError::parse(message, None))?;
     let mut warnings: Vec<ParseWarning> = parser_warnings
         .iter()
         .map(|w| ParseWarning::from_spanned(w, &source))
@@ -512,6 +513,9 @@ fn map_prepare_error(err: PrepareSpecError, source: &Source) -> CheckOutcome {
         PrepareSpecError::RefinementConfigError(message) => {
             (ErrorPhase::Config, StructuredError::internal(message))
         }
+        PrepareSpecError::ModuleParse(message) => {
+            (ErrorPhase::Parse, StructuredError::parse(message, None))
+        }
         PrepareSpecError::LivenessProperty(message)
         | PrepareSpecError::ConstantSubstitution(message) => {
             (ErrorPhase::Config, StructuredError::config(message))
@@ -940,23 +944,26 @@ mod tests {
     }
 
     #[test]
-    fn check_spec_reports_a_definition_that_fails_to_parse() {
-        let dir_name = "tlc_test_check_spec_definition_parse_error";
-        let spec = "---- MODULE Dropped ----\nVARIABLES x\nInit == x = 0\nNext == x' = x\nInvBad == IF x\nInvType == x = 0\n====\n";
+    fn check_spec_reports_a_used_definition_that_failed_to_parse() {
+        let dir_name = "tlc_test_check_spec_unparsed_definition";
+        let spec = "---- MODULE Dropped ----\nVARIABLES x\nInit == x = 0\nNext == x' = x\nInvBad == IF x\nInvType == x = 0\nUnused == [a |-> ]\n====\n";
         let path = write_spec(dir_name, spec);
         let out = check_spec(&check_input(&path));
         let _ = std::fs::remove_dir_all(std::env::temp_dir().join(dir_name));
-        let CheckOutcome::Error { error, .. } = out.outcome else {
-            panic!(
-                "a definition that fails to parse must be an error, got {:?}",
-                out.outcome
-            );
-        };
         assert!(
-            matches!(error.kind, crate::mcp::schema::ErrorKind::Parse),
-            "{error:?}"
+            out.warnings.iter().any(|w| w.message.contains("'InvBad'")),
+            "{:?}",
+            out.warnings
         );
-        assert!(error.message.contains("'InvBad'"), "{error:?}");
-        assert_eq!(error.span.map(|span| span.start_line), Some(6), "{error:?}");
+        assert!(
+            out.warnings.iter().any(|w| w.message.contains("'Unused'")),
+            "{:?}",
+            out.warnings
+        );
+        assert!(
+            matches!(out.outcome, CheckOutcome::Ok { .. }),
+            "definitions that did not parse and are not used do not stop the check: {:?}",
+            out.outcome
+        );
     }
 }
