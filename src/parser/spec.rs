@@ -120,16 +120,14 @@ impl Parser {
                     let name_pos = self.pos;
                     let has_definition_header = self.at_unit_start();
                     self.advance();
-                    let infix_symbol = Self::infix_op_name(self.peek()).filter(|_| {
-                        matches!(self.peek_n(1), Token::Ident(_)) && *self.peek_n(2) == Token::EqEq
-                    });
-                    let (key, label) = match &infix_symbol {
-                        Some(symbol) => (symbol.clone(), format!("infix operator '\\{symbol}'")),
-                        None => (name.clone(), format!("operator '{name}'")),
+                    let infix = match (Self::infix_op_name(self.peek()), self.peek_n(1)) {
+                        (Some(symbol), Token::Ident(rhs)) if *self.peek_n(2) == Token::EqEq => {
+                            Some((symbol, rhs.clone()))
+                        }
+                        _ => None,
                     };
-                    let is_infix = infix_symbol.is_some();
-                    let definition = match infix_symbol {
-                        Some(symbol) => self.parse_infix_definition(symbol),
+                    let definition = match &infix {
+                        Some((symbol, _)) => self.parse_infix_definition(symbol.clone()),
                         None => self.parse_definition(&name),
                     };
                     match definition {
@@ -166,10 +164,33 @@ impl Parser {
                         }
                         Err(error) if !has_definition_header => return Err(error),
                         Err(error) => {
-                            if is_infix {
-                                self.user_infix_ops.insert(key.clone());
+                            self.pos = name_pos + 1;
+                            match infix {
+                                Some((symbol, rhs)) => {
+                                    let shown: Arc<str> = format!("\\{symbol}").into();
+                                    let label = format!("infix operator '{shown}'");
+                                    let body = self.unparsed(&shown, &label, name_span, error);
+                                    self.user_infix_ops.insert(symbol.clone());
+                                    self.fn_definitions.insert(symbol, (vec![name, rhs], body));
+                                }
+                                None => {
+                                    let label = format!("operator '{name}'");
+                                    let body = self.unparsed(&name, &label, name_span, error);
+                                    match self.header_params() {
+                                        Some(params) => {
+                                            self.fn_definitions.insert(name, (params, body));
+                                        }
+                                        None => {
+                                            if Self::is_behavior_name(&name, "Init") {
+                                                init = Some(body.clone());
+                                            } else if Self::is_behavior_name(&name, "Next") {
+                                                next = Some(body.clone());
+                                            }
+                                            self.definitions.insert(name, body);
+                                        }
+                                    }
+                                }
                             }
-                            self.record_unparsed(key, &label, name_span, error);
                             self.pos = name_pos + 1;
                             self.skip_failed_definition(self.column_of(name_span.start));
                         }
@@ -223,7 +244,6 @@ impl Parser {
             safety_properties: Vec::new(),
             temporal_assumptions: Vec::new(),
             constant_substitutions: Vec::new(),
-            unparsed_definitions: std::mem::take(&mut self.unparsed),
         })
     }
 
@@ -255,18 +275,35 @@ impl Parser {
     }
 
     /// A definition's body, which must end where the next definition or
-    /// declaration starts: a body the expression parser stops inside is a failure
-    /// of this definition, not an error at the top level.
+    /// declaration starts, possibly after separators the top level skips: a body
+    /// the expression parser stops inside is a failure of this definition, not an
+    /// error at the top level.
     fn parse_definition_body(&mut self) -> Result<Expr> {
         let body = self.parse_expr()?;
-        if self.at_unit_start() {
+        let end = self.pos;
+        while matches!(
+            self.peek(),
+            Token::Semicolon | Token::Dollar | Token::Pipe | Token::Caret | Token::Ampersand
+        ) {
+            self.advance();
+        }
+        let ends_at_unit = self.at_unit_start();
+        self.pos = end;
+        if ends_at_unit {
             return Ok(body);
         }
         let tok = self.peek().clone();
         Err(ParseError::new(format!("unexpected {tok}")).with_span(self.current_span()))
     }
 
-    fn record_unparsed(&mut self, name: Arc<str>, label: &str, name_span: Span, error: ParseError) {
+    /// The body standing in for the definition `name` that failed with `error`.
+    fn unparsed(
+        &mut self,
+        name: &Arc<str>,
+        label: &str,
+        name_span: Span,
+        error: ParseError,
+    ) -> Expr {
         let span = error.span.unwrap_or(name_span);
         let (line, column) = self.source.line_char_col(span.start);
         let message = error.to_string();
@@ -274,15 +311,24 @@ impl Parser {
             format!("failed to parse {label}: {message}"),
             span,
         ));
-        self.unparsed.insert(
-            name,
-            UnparsedDefinition {
-                file: None,
-                line,
-                column,
-                message,
-            },
-        );
+        Expr::Unparsed(Arc::new(UnparsedDefinition {
+            name: name.clone(),
+            file: None,
+            line,
+            column,
+            message,
+        }))
+    }
+
+    /// The parameters of the definition header at the current position, the token
+    /// after its name, when it has them.
+    fn header_params(&mut self) -> Option<Vec<Arc<str>>> {
+        if *self.peek() != Token::LParen {
+            return None;
+        }
+        self.advance();
+        let params = self.parse_var_list().ok()?;
+        (*self.peek() == Token::RParen).then_some(params)
     }
 
     fn extract_fairness_and_liveness(&mut self, name: &Arc<str>, expr: &Expr) {

@@ -972,6 +972,8 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             Ok(result)
         }
 
+        Expr::Unparsed(unparsed) => Err(EvalError::domain_error(unparsed.to_string())),
+
         Expr::OldValue => {
             let at_key: Arc<str> = "@".into();
             env.get(&at_key)
@@ -1706,19 +1708,14 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         Expr::QualifiedCall(instance_expr, op, args) => match instance_expr.as_ref() {
             Expr::Var(instance_name) => RESOLVED_INSTANCES.with(|inst_ref| {
                 let instances = inst_ref.borrow();
-                let instance_defs = instances.get(instance_name).ok_or_else(|| {
-                    EvalError::missing(instance_name, || {
-                        EvalError::domain_error(format!("instance {} not found", instance_name))
-                    })
-                })?;
+                let instance_defs = instances
+                    .get(instance_name)
+                    .ok_or_else(|| EvalError::missing_instance(instance_name, defs, "instance"))?;
 
                 let (params, body) = instance_defs.get(op).ok_or_else(|| {
-                    EvalError::missing_in_instance(instance_name, op, || {
-                        EvalError::domain_error(format!(
-                            "operator {} not found in instance {}",
-                            op, instance_name
-                        ))
-                    })
+                    EvalError::domain_error(format!(
+                        "operator {op} not found in instance {instance_name}"
+                    ))
                 })?;
 
                 if args.len() != params.len() {
@@ -1761,12 +1758,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 PARAMETERIZED_INSTANCES.with(|inst_ref| {
                     let instances = inst_ref.borrow();
                     let param_inst = instances.get(instance_name).ok_or_else(|| {
-                        EvalError::missing(instance_name, || {
-                            EvalError::domain_error(format!(
-                                "parameterized instance {} not found",
-                                instance_name
-                            ))
-                        })
+                        EvalError::missing_instance(instance_name, defs, "parameterized instance")
                     })?;
 
                     if instance_args.len() != param_inst.params.len() {
@@ -1787,12 +1779,9 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                         super::resolve_parameterized_defs(param_inst, inst_arg_vals);
 
                     let (params, body) = instance_defs.get(op).ok_or_else(|| {
-                        EvalError::missing_in_instance(instance_name, op, || {
-                            EvalError::domain_error(format!(
-                                "operator {} not found in instance {}",
-                                op, instance_name
-                            ))
-                        })
+                        EvalError::domain_error(format!(
+                            "operator {op} not found in instance {instance_name}"
+                        ))
                     })?;
 
                     if args.len() != params.len() {

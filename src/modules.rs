@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::ast::{DefinitionMap, Spec, UnparsedDefinitions};
+use crate::ast::{DefinitionMap, Expr, Spec, UnparsedDefinition};
 use crate::eval::{Definitions, ParameterizedInstance, ParameterizedInstances};
 use crate::parser;
 use crate::substitution::apply_substitutions;
@@ -66,8 +66,14 @@ impl ModuleRegistry {
 
         self.loading_stack.pop();
         let mut spec = parsed?;
-        for unparsed in spec.unparsed_definitions.values_mut() {
-            unparsed.file = Some(file.clone());
+        for (_, body) in spec.definitions.values_mut() {
+            if let Expr::Unparsed(unparsed) = body.as_ref() {
+                let located = UnparsedDefinition {
+                    file: Some(file.clone()),
+                    ..unparsed.as_ref().clone()
+                };
+                *body = Arc::new(Expr::Unparsed(Arc::new(located)));
+            }
         }
         self.modules.insert(name.clone(), spec);
         self.modules.get(&name).ok_or(ModuleError::NotFound(name))
@@ -107,9 +113,7 @@ impl Default for ModuleRegistry {
 /// variables and constants ahead of its own, definitions under its own (a module's
 /// definition overrides one it extends, the root's override all). A state is
 /// indexed by `spec.vars`, and the cfg names definitions, so both must be complete
-/// before the cfg is applied and the spec is checked. The extended modules'
-/// definitions that did not parse are added to `spec.unparsed_definitions`, under
-/// the spec's own. A module that does not parse is an error, so it is reported
+/// before the cfg is applied and the spec is checked. A module that does not parse is an error, so it is reported
 /// before the cfg names a definition it was to provide; a module that cannot be
 /// found or read is skipped here, and [`crate::checker::prepare_spec`] reports why.
 pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<(), String> {
@@ -129,9 +133,6 @@ pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<
     spec.vars = declarations.vars;
     spec.constants = declarations.constants;
     spec.definitions = declarations.definitions;
-    for (name, unparsed) in declarations.unparsed_definitions {
-        spec.unparsed_definitions.entry(name).or_insert(unparsed);
-    }
     Ok(())
 }
 
@@ -140,7 +141,6 @@ struct Declarations {
     vars: Vec<Arc<str>>,
     constants: Vec<Arc<str>>,
     definitions: DefinitionMap,
-    unparsed_definitions: UnparsedDefinitions,
 }
 
 impl Declarations {
@@ -179,20 +179,16 @@ fn collect_declarations(
         }
         Err(_) => return Ok(()),
     };
-    let (extends, vars, constants, definitions, unparsed_definitions) = (
+    let (extends, vars, constants, definitions) = (
         module.extends.clone(),
         module.vars.clone(),
         module.constants.clone(),
         module.definitions.clone(),
-        module.unparsed_definitions.clone(),
     );
     for inner in &extends {
         collect_declarations(inner, spec_path, registry, visited, declarations)?;
     }
     declarations.add(&vars, &constants, &definitions);
-    declarations
-        .unparsed_definitions
-        .extend(unparsed_definitions);
     Ok(())
 }
 
@@ -336,7 +332,7 @@ mod tests {
         let mut reg = ModuleRegistry::new();
         let loaded = reg
             .load("BrokenDef", &dir.join("base.tla"))
-            .map(|module| module.unparsed_definitions.get("Bad").cloned());
+            .map(|module| module.unparsed_definition("Bad").cloned());
         let _ = std::fs::remove_dir_all(&dir);
 
         let bad = match loaded {
@@ -425,7 +421,6 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
-            unparsed_definitions: Default::default(),
         };
 
         let mut registry = ModuleRegistry::new();
@@ -461,7 +456,6 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
-            unparsed_definitions: Default::default(),
         };
 
         let (resolved, parameterized, _vars) = resolve_instances(&spec, &registry).unwrap();

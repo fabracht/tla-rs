@@ -17,19 +17,14 @@ pub fn eval_with_instances(
                     "eval_with_instances only supports static instance names",
                 ));
             };
-            let instance_defs = instances.get(instance_name).ok_or_else(|| {
-                EvalError::missing(instance_name, || {
-                    EvalError::domain_error(format!("instance {} not found", instance_name))
-                })
-            })?;
+            let instance_defs = instances
+                .get(instance_name)
+                .ok_or_else(|| EvalError::missing_instance(instance_name, defs, "instance"))?;
 
             let (params, body) = instance_defs.get(op).ok_or_else(|| {
-                EvalError::missing_in_instance(instance_name, op, || {
-                    EvalError::domain_error(format!(
-                        "operator {} not found in instance {}",
-                        op, instance_name
-                    ))
-                })
+                EvalError::domain_error(format!(
+                    "operator {op} not found in instance {instance_name}"
+                ))
             })?;
 
             if args.len() != params.len() {

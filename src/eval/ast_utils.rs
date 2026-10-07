@@ -359,6 +359,7 @@ fn refers_through_defs(
         },
         Expr::Lit(_)
         | Expr::OldValue
+        | Expr::Unparsed(_)
         | Expr::Any
         | Expr::EmptyBag
         | Expr::JavaTime
@@ -610,6 +611,7 @@ pub(crate) fn expr_references(expr: &Expr, name: &Arc<str>) -> bool {
         Expr::Lit(_)
         | Expr::Prime(_)
         | Expr::OldValue
+        | Expr::Unparsed(_)
         | Expr::Any
         | Expr::EmptyBag
         | Expr::JavaTime
@@ -740,6 +742,7 @@ pub(crate) fn expr_contains(haystack: &Expr, needle: &Expr) -> bool {
         | Expr::Var(_)
         | Expr::Prime(_)
         | Expr::OldValue
+        | Expr::Unparsed(_)
         | Expr::Any
         | Expr::EmptyBag
         | Expr::JavaTime

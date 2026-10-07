@@ -1391,10 +1391,9 @@ Pairs == {<<1, 2>>}
 Init == x = 0
 Next == \E <<a, a>> \in Pairs : x' = a
 ===="#;
-    let spec = parse(input).expect("a definition that fails to parse is left out");
+    let spec = parse(input).expect("a definition that fails to parse does not fail the module");
     let next = spec
-        .unparsed_definitions
-        .get("Next")
+        .unparsed_definition("Next")
         .expect("Next is recorded as unparsed");
     assert!(next.message.contains("duplicate name 'a'"), "{next:?}");
     assert_eq!((next.line, next.column), (5, 12), "points at the binder");
@@ -2189,6 +2188,78 @@ fn test_should_error_instance_definition_is_not_blamed_for_a_root_name() {
             assert!(!msg.contains("Helpers.tla"), "{msg}");
         }
         other => panic!("expected an undefined-variable Init error, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_instance_definition_used_inside_its_module() {
+    let path = Path::new(
+        "test_cases/should_error/instance_definition_parse_error/instance_sibling_use.tla",
+    );
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        ..Default::default()
+    };
+    match check_loaded(path, config) {
+        CheckResult::InitError(e) => {
+            let msg = e.to_string();
+            assert!(msg.contains("`Bad` is defined"), "{msg}");
+            assert!(msg.contains("Helpers.tla:4:13"), "{msg}");
+        }
+        other => panic!("expected an Init error naming Bad, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_infix_operator_that_did_not_parse() {
+    let spec = parse(
+        "VARIABLE x\na \\prec b == a < ]\nInit == x = 0\nNext == x' = IF 1 \\prec 2 THEN 1 ELSE 0",
+    )
+    .expect("spec parses");
+    match check(&spec, &Env::new(), &CheckerConfig::default()) {
+        CheckResult::NextError(e, _, _) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("`\\prec` is defined, but its definition did not parse: line 2"),
+                "{msg}"
+            );
+        }
+        other => panic!("expected a Next error naming \\prec, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_symmetry_that_did_not_parse() {
+    let mut spec = parse(
+        "EXTENDS TLC\nCONSTANT P\nVARIABLE x\nPerms == Permutations(P) \\cup [a |-> ]\nInit == x \\in P\nNext == x' \\in P",
+    )
+    .expect("spec parses");
+    let cfg = parse_cfg("CONSTANT P = {p1, p2}\nINIT Init\nNEXT Next\nSYMMETRY Perms\n")
+        .expect("cfg parses");
+    let Err(message) = apply_config(
+        &cfg,
+        &mut spec,
+        &mut Env::new(),
+        &mut CheckerConfig::default(),
+        &[],
+        &[],
+        false,
+    ) else {
+        panic!("SYMMETRY Perms must report why Perms did not parse");
+    };
+    assert!(
+        message.contains("SYMMETRY `Perms` is defined, but its definition did not parse: line 4"),
+        "{message}"
+    );
+}
+
+#[test]
+fn test_should_pass_definition_followed_by_a_stray_separator() {
+    let spec = parse("VARIABLE x\nInit == x = 0\nNext == x' = 1 - x ;\nInvRange == x \\in {0, 1}")
+        .expect("spec parses");
+    match check(&spec, &Env::new(), &CheckerConfig::default()) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 2),
+        other => panic!("a separator after Next must not fail it, got: {other:?}"),
     }
 }
 

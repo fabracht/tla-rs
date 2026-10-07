@@ -525,8 +525,7 @@ mod tests {
     fn unparsed(input: &str, name: &str) -> (Spec, crate::ast::UnparsedDefinition) {
         let (spec, warnings) = parse_with_warnings(input).expect("the module parses");
         let unparsed = spec
-            .unparsed_definitions
-            .get(name)
+            .unparsed_definition(name)
             .cloned()
             .unwrap_or_else(|| panic!("`{name}` should be recorded as unparsed: {warnings:?}"));
         assert!(
@@ -537,12 +536,35 @@ mod tests {
     }
 
     #[test]
-    fn a_definition_whose_body_does_not_parse_is_recorded_and_left_out() {
+    fn a_definition_whose_body_does_not_parse_stays_defined_with_its_parse_error() {
         let (spec, bad) = unparsed("VARIABLE x\nBad == [a |-> ]\nInit == x = 0", "Bad");
         assert_eq!((bad.line, bad.column), (2, 15));
         assert!(bad.message.contains("unexpected `]`"), "{}", bad.message);
-        assert!(!spec.definitions.contains_key("Bad"));
         assert!(spec.init.is_some(), "the next definition still parses");
+    }
+
+    #[test]
+    fn a_parameterized_definition_that_does_not_parse_keeps_its_parameters() {
+        let (spec, _) = unparsed("VARIABLE x\nBad(a, b) == [a |-> ]\nInit == x = 0", "Bad");
+        let (params, _) = spec.definitions.get("Bad").expect("Bad stays defined");
+        assert_eq!(params, &[Arc::from("a"), Arc::from("b")]);
+    }
+
+    #[test]
+    fn an_init_that_does_not_parse_is_the_init_and_fails_when_used() {
+        let (spec, _) = unparsed("VARIABLE x\nInit == x = [a |-> ]\nNext == x' = x", "Init");
+        assert!(
+            matches!(spec.init, Some(Expr::Unparsed(_))),
+            "{:?}",
+            spec.init
+        );
+    }
+
+    #[test]
+    fn a_stray_separator_after_a_body_does_not_fail_the_definition() {
+        let spec = parse("VARIABLE x\nInit == x = 0\nNext == x' = 1 - x ;\nInv == x \\in {0, 1}")
+            .expect("the spec parses");
+        assert!(matches!(spec.next, Some(Expr::Eq(_, _))), "{:?}", spec.next);
     }
 
     #[test]
@@ -638,7 +660,11 @@ mod tests {
         let spec = parse("---- MODULE M ----\nVARIABLE x\nInit == x = 0\nNext == x' = x\n====\nnot TLA+ at all\n")
             .expect("text after ==== is not part of the module");
         assert!(spec.next.is_some());
-        assert!(spec.unparsed_definitions.is_empty());
+        assert!(
+            spec.definitions
+                .values()
+                .all(|(_, body)| !matches!(body.as_ref(), Expr::Unparsed(_)))
+        );
     }
 
     #[test]

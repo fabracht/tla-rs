@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use crate::ast::{Expr, FairnessConstraint, InstanceDecl, LivenessProperty, UnparsedDefinitions};
+use crate::ast::{Expr, FairnessConstraint, InstanceDecl, LivenessProperty};
 use crate::lexer::{Lexer, Token};
 use crate::source::Source;
 use crate::span::{Span, Spanned};
@@ -48,7 +48,6 @@ pub struct Parser {
     /// from `a \oplus b == ...`). A use of such a symbol resolves to the user
     /// definition instead of the built-in, shadowing it within the module.
     pub(super) user_infix_ops: BTreeSet<Arc<str>>,
-    pub(super) unparsed: UnparsedDefinitions,
 }
 
 impl Parser {
@@ -76,7 +75,6 @@ impl Parser {
             list_col_stack: Vec::new(),
             warned_slash: false,
             user_infix_ops: BTreeSet::new(),
-            unparsed: BTreeMap::new(),
         })
     }
 

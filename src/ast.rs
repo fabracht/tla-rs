@@ -144,6 +144,7 @@ fn is_rec_domain(m: &BTreeMap<Value, Value>) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     Lit(Value),
+    Unparsed(Arc<UnparsedDefinition>),
     Var(Arc<str>),
     Prime(Arc<str>),
     OldValue,
@@ -460,59 +461,37 @@ pub struct Spec {
     /// value of the zero-parameter `Definition`, evaluated once the modules the spec
     /// extends and instantiates are loaded.
     pub constant_substitutions: Vec<(Arc<str>, Arc<str>)>,
-    /// Definitions whose text did not parse, by name. They are left out of
-    /// `definitions`; a use of one reports why it did not parse instead of an
-    /// undefined name.
-    pub unparsed_definitions: UnparsedDefinitions,
 }
 
-pub type UnparsedDefinitions = BTreeMap<Arc<str>, UnparsedDefinition>;
-
-#[derive(Debug, Clone, PartialEq)]
+/// A definition whose text did not parse. It stays defined, with this as its body,
+/// so a use of it fails with why it did not parse.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnparsedDefinition {
+    pub name: Arc<str>,
     pub file: Option<Arc<str>>,
     pub line: usize,
     pub column: usize,
     pub message: String,
 }
 
-impl UnparsedDefinition {
-    pub fn use_error(&self, name: &str) -> String {
-        format!("`{name}` is defined, but its definition did not parse: {self}")
-    }
-}
-
 impl std::fmt::Display for UnparsedDefinition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (name, line, column, message) = (&self.name, self.line, self.column, &self.message);
+        write!(f, "`{name}` is defined, but its definition did not parse: ")?;
         match &self.file {
-            Some(file) => write!(f, "{file}:{}:{}: {}", self.line, self.column, self.message),
-            None => write!(
-                f,
-                "line {}, column {}: {}",
-                self.line, self.column, self.message
-            ),
+            Some(file) => write!(f, "{file}:{line}:{column}: {message}"),
+            None => write!(f, "line {line}, column {column}: {message}"),
         }
     }
 }
 
 impl Spec {
-    /// The error for a cfg directive (`INIT`, `INVARIANT`, ...) naming a definition
-    /// the spec does not have.
-    pub fn missing_definition_error(&self, directive: &str, name: &str) -> String {
-        match self.unparsed_definitions.get(name) {
-            Some(unparsed) => format!("{directive} {}", unparsed.use_error(name)),
-            None => format!("{directive} definition '{name}' not found in spec"),
+    /// Why the definition `name` did not parse, when it did not.
+    pub fn unparsed_definition(&self, name: &str) -> Option<&UnparsedDefinition> {
+        match self.definitions.get(name).map(|(_, body)| body.as_ref()) {
+            Some(Expr::Unparsed(unparsed)) => Some(unparsed),
+            _ => None,
         }
-    }
-
-    /// The error for a spec without an `Init` or `Next` (`role`): the parse failure
-    /// of a definition that would have been detected as it, if one did not parse.
-    pub fn missing_behavior_error(&self, role: &str) -> String {
-        self.unparsed_definitions
-            .iter()
-            .find(|(name, _)| crate::parser::Parser::is_behavior_name(name, role))
-            .map(|(name, unparsed)| unparsed.use_error(name))
-            .unwrap_or_else(|| format!("missing {role} definition"))
     }
 
     /// The declared constants that neither have a value in `domains` nor are

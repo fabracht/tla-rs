@@ -88,6 +88,7 @@ impl<'a> LevelAnalysis<'a> {
             Expr::Var(name) => self.name_levels(name, locals),
             Expr::Lit(_)
             | Expr::OldValue
+            | Expr::Unparsed(_)
             | Expr::Any
             | Expr::EmptyBag
             | Expr::JavaTime
