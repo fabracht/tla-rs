@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1] - 2026-10-07
+
+### Fixed
+
+- A backslash followed by a name was read as one operator, so `S\used` lost the identifier and failed to parse (#178), and a predefined operator was matched by its shortest prefix, so `\intersect` was read as `\in` before `tersect` and `\exists` as `\E` before `xists`. A backslash now takes the longest predefined operator name, as in SANY, and before any other name it is set difference. `\equiv` is equivalence.
+- An operator called inside a function constructor `[j \in S |-> ...]` saw its caller's value for a parameter both name the same (`SeqToSet(seq)` called from `Refs(seq)`), a silent wrong value (#179). The argument is now bound to the callee's parameter, as elsewhere; a `LET` whose definition cannot be evaluated is still evaluated only where it is used.
+
 ## [0.24.0] - 2026-10-06
 
 ### Fixed

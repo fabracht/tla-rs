@@ -98,9 +98,43 @@ fn eval_with_memo_inner(
         }
 
         Expr::Let(var, binding, body) => {
+            let binds_operator = super::ast_utils::parameterized_let_op(binding).is_some()
+                || matches!(binding.as_ref(), Expr::FnDef(..))
+                || super::ast_utils::is_operator_reference(binding, env, defs);
+            if !binds_operator
+                && let Ok(value) =
+                    eval_with_memo(binding, env, defs, fn_name, fn_param, fn_domain, memo)
+            {
+                let prev = env.insert(var.clone(), value);
+                let result = eval_with_memo(body, env, defs, fn_name, fn_param, fn_domain, memo);
+                match prev {
+                    Some(old) => {
+                        env.insert(var.clone(), old);
+                    }
+                    None => {
+                        env.remove(var);
+                    }
+                }
+                return result;
+            }
+            let (name, body) = if env.contains_key(var) {
+                let fresh = crate::substitution::fresh_name(var, |candidate| {
+                    env.contains_key(candidate)
+                        || defs.contains_key(candidate)
+                        || super::ast_utils::expr_references(body, candidate)
+                        || super::ast_utils::expr_references(binding, candidate)
+                });
+                let renamed = crate::substitution::substitute_expr(
+                    body,
+                    &[(var.clone(), Expr::Var(fresh.clone()))],
+                );
+                (fresh, std::borrow::Cow::Owned(renamed))
+            } else {
+                (var.clone(), std::borrow::Cow::Borrowed(body.as_ref()))
+            };
             let mut local_defs = defs.clone();
-            local_defs.insert(var.clone(), (vec![], Arc::new((**binding).clone())));
-            eval_with_memo(body, env, &local_defs, fn_name, fn_param, fn_domain, memo)
+            local_defs.insert(name, (vec![], Arc::new((**binding).clone())));
+            eval_with_memo(&body, env, &local_defs, fn_name, fn_param, fn_domain, memo)
         }
 
         Expr::If(cond, then_br, else_br) => {

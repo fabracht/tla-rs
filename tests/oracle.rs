@@ -77,6 +77,26 @@ fn test_should_pass_counter() {
 }
 
 #[test]
+fn test_should_pass_set_difference_identifier() {
+    let path = Path::new("test_cases/should_pass/set_difference_identifier.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "a backslash before a name that is no predefined operator is set difference, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_should_pass_fn_constructor_shadowed_parameter() {
+    let path = Path::new("test_cases/should_pass/fn_constructor_shadowed_parameter.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "an operator argument inside a function constructor must not be captured by a same-named caller parameter, got: {result:?}"
+    );
+}
+
+#[test]
 fn test_should_pass_user_infix_ops() {
     let path = Path::new("test_cases/should_pass/user_infix_ops.tla");
     let result = check_spec_file_allow_deadlock(path);
