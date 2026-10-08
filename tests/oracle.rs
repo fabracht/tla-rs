@@ -87,6 +87,16 @@ fn test_should_pass_set_difference_identifier() {
 }
 
 #[test]
+fn test_should_pass_fn_constructor_let_binding() {
+    let path = Path::new("test_cases/should_pass/fn_constructor_let_binding.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "a LET inside a function constructor must be lazy and capture-free, got: {result:?}"
+    );
+}
+
+#[test]
 fn test_should_pass_fn_constructor_shadowed_parameter() {
     let path = Path::new("test_cases/should_pass/fn_constructor_shadowed_parameter.tla");
     let result = check_spec_file_allow_deadlock(path);

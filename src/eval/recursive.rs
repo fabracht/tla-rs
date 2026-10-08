@@ -25,7 +25,7 @@ pub(crate) fn eval_fn_def_recursive(
             continue;
         }
         env.insert(param.clone(), val.clone());
-        let result = eval_with_memo(body, env, defs, fn_name, param, domain, &memo)?;
+        let result = eval_with_memo(body, env, defs, fn_name, &memo)?;
         memo.borrow_mut().insert(val.clone(), result);
     }
     match prev {
@@ -45,23 +45,18 @@ pub(crate) fn eval_with_memo(
     env: &mut Env,
     defs: &Definitions,
     fn_name: &Arc<str>,
-    fn_param: &Arc<str>,
-    fn_domain: &[Value],
     memo: &RefCell<BTreeMap<Value, Value>>,
 ) -> Result<Value> {
     stacker::maybe_grow(STACK_RED_ZONE, STACK_GROWTH, || {
-        eval_with_memo_inner(expr, env, defs, fn_name, fn_param, fn_domain, memo)
+        eval_with_memo_inner(expr, env, defs, fn_name, memo)
     })
 }
 
-#[allow(clippy::only_used_in_recursion)]
 fn eval_with_memo_inner(
     expr: &Expr,
     env: &mut Env,
     defs: &Definitions,
     fn_name: &Arc<str>,
-    fn_param: &Arc<str>,
-    fn_domain: &[Value],
     memo: &RefCell<BTreeMap<Value, Value>>,
 ) -> Result<Value> {
     match expr {
@@ -69,7 +64,7 @@ fn eval_with_memo_inner(
             if let Expr::Var(name) = f.as_ref()
                 && name == fn_name
             {
-                let av = eval_with_memo(arg, env, defs, fn_name, fn_param, fn_domain, memo)?;
+                let av = eval_with_memo(arg, env, defs, fn_name, memo)?;
                 if let Some(v) = memo.borrow().get(&av) {
                     return Ok(v.clone());
                 }
@@ -78,8 +73,7 @@ fn eval_with_memo_inner(
                     && let Expr::FnDef(p, _, body) = fn_body.as_ref()
                 {
                     let prev_p = env.insert(p.clone(), av.clone());
-                    let result =
-                        eval_with_memo(body, env, defs, fn_name, fn_param, fn_domain, memo)?;
+                    let result = eval_with_memo(body, env, defs, fn_name, memo)?;
                     match prev_p {
                         Some(old) => {
                             env.insert(p.clone(), old);
@@ -92,67 +86,41 @@ fn eval_with_memo_inner(
                     return Ok(result);
                 }
             }
-            let fval = eval_with_memo(f, env, defs, fn_name, fn_param, fn_domain, memo)?;
-            let av = eval_with_memo(arg, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            let fval = eval_with_memo(f, env, defs, fn_name, memo)?;
+            let av = eval_with_memo(arg, env, defs, fn_name, memo)?;
             apply_fn_value(fval, av)
         }
 
         Expr::Let(var, binding, body) => {
-            let binds_operator = super::ast_utils::parameterized_let_op(binding).is_some()
-                || matches!(binding.as_ref(), Expr::FnDef(..))
-                || super::ast_utils::is_operator_reference(binding, env, defs);
-            if !binds_operator
-                && let Ok(value) =
-                    eval_with_memo(binding, env, defs, fn_name, fn_param, fn_domain, memo)
-            {
-                let prev = env.insert(var.clone(), value);
-                let result = eval_with_memo(body, env, defs, fn_name, fn_param, fn_domain, memo);
-                match prev {
-                    Some(old) => {
-                        env.insert(var.clone(), old);
-                    }
-                    None => {
-                        env.remove(var);
-                    }
-                }
-                return result;
+            if let Some((params, op_body)) = super::ast_utils::parameterized_let_op(binding) {
+                let mut local_defs = defs.clone();
+                local_defs.insert(var.clone(), (params, Arc::new(op_body.clone())));
+                return eval_with_memo(body, env, &local_defs, fn_name, memo);
             }
-            let (name, body) = if env.contains_key(var) {
-                let fresh = crate::substitution::fresh_name(var, |candidate| {
-                    env.contains_key(candidate)
-                        || defs.contains_key(candidate)
-                        || super::ast_utils::expr_references(body, candidate)
-                        || super::ast_utils::expr_references(binding, candidate)
-                });
-                let renamed = crate::substitution::substitute_expr(
-                    body,
-                    &[(var.clone(), Expr::Var(fresh.clone()))],
-                );
-                (fresh, std::borrow::Cow::Owned(renamed))
-            } else {
-                (var.clone(), std::borrow::Cow::Borrowed(body.as_ref()))
-            };
-            let mut local_defs = defs.clone();
-            local_defs.insert(name, (vec![], Arc::new((**binding).clone())));
-            eval_with_memo(&body, env, &local_defs, fn_name, fn_param, fn_domain, memo)
+            if matches!(binding.as_ref(), Expr::FnDef(..))
+                || super::ast_utils::is_operator_reference(binding, env, defs)
+            {
+                let mut local_defs = defs.clone();
+                local_defs.insert(var.clone(), (vec![], Arc::new((**binding).clone())));
+                return eval_with_memo(body, env, &local_defs, fn_name, memo);
+            }
+            let substituted =
+                crate::substitution::substitute_expr(body, &[(var.clone(), (**binding).clone())]);
+            eval_with_memo(&substituted, env, defs, fn_name, memo)
         }
 
         Expr::If(cond, then_br, else_br) => {
-            let cv = eval_with_memo(cond, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            let cv = eval_with_memo(cond, env, defs, fn_name, memo)?;
             match cv {
-                Value::Bool(true) => {
-                    eval_with_memo(then_br, env, defs, fn_name, fn_param, fn_domain, memo)
-                }
-                Value::Bool(false) => {
-                    eval_with_memo(else_br, env, defs, fn_name, fn_param, fn_domain, memo)
-                }
+                Value::Bool(true) => eval_with_memo(then_br, env, defs, fn_name, memo),
+                Value::Bool(false) => eval_with_memo(else_br, env, defs, fn_name, memo),
                 _ => Err(EvalError::type_mismatch_ctx("Bool", cv, "IF condition")),
             }
         }
 
         Expr::Add(l, r) => {
-            let lv = eval_with_memo(l, env, defs, fn_name, fn_param, fn_domain, memo)?;
-            let rv = eval_with_memo(r, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            let lv = eval_with_memo(l, env, defs, fn_name, memo)?;
+            let rv = eval_with_memo(r, env, defs, fn_name, memo)?;
             match (lv, rv) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
                 (a, b) => Err(EvalError::domain_error(format!(
@@ -164,14 +132,14 @@ fn eval_with_memo_inner(
         }
 
         Expr::Eq(l, r) => {
-            let lv = eval_with_memo(l, env, defs, fn_name, fn_param, fn_domain, memo)?;
-            let rv = eval_with_memo(r, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            let lv = eval_with_memo(l, env, defs, fn_name, memo)?;
+            let rv = eval_with_memo(r, env, defs, fn_name, memo)?;
             Ok(Value::Bool(lv == rv))
         }
 
         Expr::SetMinus(l, r) => {
-            let lv = eval_with_memo(l, env, defs, fn_name, fn_param, fn_domain, memo)?;
-            let rv = eval_with_memo(r, env, defs, fn_name, fn_param, fn_domain, memo)?;
+            let lv = eval_with_memo(l, env, defs, fn_name, memo)?;
+            let rv = eval_with_memo(r, env, defs, fn_name, memo)?;
             match (lv, rv) {
                 (Value::Set(a), Value::Set(b)) => {
                     Ok(Value::set(a.difference(&b).cloned().collect()))
@@ -187,9 +155,7 @@ fn eval_with_memo_inner(
         Expr::SetEnum(elems) => {
             let mut result = BTreeSet::new();
             for e in elems {
-                result.insert(eval_with_memo(
-                    e, env, defs, fn_name, fn_param, fn_domain, memo,
-                )?);
+                result.insert(eval_with_memo(e, env, defs, fn_name, memo)?);
             }
             Ok(Value::set(result))
         }
@@ -201,7 +167,7 @@ fn eval_with_memo_inner(
             if let Some((params, body)) = defs.get(name)
                 && params.is_empty()
             {
-                return eval_with_memo(body, env, defs, fn_name, fn_param, fn_domain, memo);
+                return eval_with_memo(body, env, defs, fn_name, memo);
             }
             Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
         }

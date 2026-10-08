@@ -515,22 +515,8 @@ impl<'a> Lexer<'a> {
         self.input[self.pos..].starts_with(s)
     }
 
-    /// The predefined operator spelled `\` and letters at the current position,
-    /// taking the longest predefined name as SANY does: `\intersect` is one
-    /// operator, `\inner` is `\in` before `ner`, and `\used` is no operator, so it
-    /// lexes as set difference before the identifier `used`.
     fn backslash_operator(&mut self) -> Option<Token> {
         let rest = self.input[self.pos..].strip_prefix('\\')?;
-        let mut chars = rest.chars();
-        let is_number = match (chars.next()?, chars.next()) {
-            ('b', Some(digit)) => digit == '0' || digit == '1',
-            ('o', Some(digit)) => digit.is_digit(8),
-            ('h' | 'H', Some(digit)) => digit.is_ascii_hexdigit(),
-            _ => false,
-        };
-        if is_number {
-            return None;
-        }
         let name = BACKSLASH_OPERATORS
             .iter()
             .filter(|name| rest.starts_with(**name))
