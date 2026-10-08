@@ -296,6 +296,67 @@ impl std::fmt::Display for Token {
     }
 }
 
+const BACKSLASH_OPERATORS: [&str; 58] = [
+    "A",
+    "AA",
+    "E",
+    "EE",
+    "X",
+    "approx",
+    "asymp",
+    "bigcirc",
+    "bullet",
+    "cap",
+    "cdot",
+    "circ",
+    "cong",
+    "cup",
+    "div",
+    "doteq",
+    "equiv",
+    "exists",
+    "forall",
+    "geq",
+    "gg",
+    "in",
+    "intersect",
+    "land",
+    "leq",
+    "ll",
+    "lnot",
+    "lor",
+    "neg",
+    "notin",
+    "o",
+    "odot",
+    "ominus",
+    "oplus",
+    "oslash",
+    "otimes",
+    "prec",
+    "preceq",
+    "propto",
+    "sim",
+    "simeq",
+    "sqcap",
+    "sqcup",
+    "sqsubset",
+    "sqsubseteq",
+    "sqsupset",
+    "sqsupseteq",
+    "star",
+    "subset",
+    "subseteq",
+    "succ",
+    "succeq",
+    "supset",
+    "supseteq",
+    "times",
+    "union",
+    "uplus",
+    "wr",
+];
+
 pub struct Lexer<'a> {
     input: &'a str,
     pos: usize,
@@ -454,6 +515,41 @@ impl<'a> Lexer<'a> {
         self.input[self.pos..].starts_with(s)
     }
 
+    fn backslash_operator(&mut self) -> Option<Token> {
+        let rest = self.input[self.pos..].strip_prefix('\\')?;
+        let name = BACKSLASH_OPERATORS
+            .iter()
+            .filter(|name| rest.starts_with(**name))
+            .max_by_key(|name| name.len())?;
+        self.pos += 1 + name.len();
+        Some(match *name {
+            "leq" => Token::Le,
+            "geq" => Token::Ge,
+            "land" => Token::And,
+            "lor" => Token::Or,
+            "notin" => Token::NotIn,
+            "in" => Token::In,
+            "union" | "cup" => Token::Union,
+            "intersect" | "cap" => Token::Intersect,
+            "subseteq" => Token::Subseteq,
+            "subset" => Token::ProperSubset,
+            "supseteq" => Token::Supseteq,
+            "supset" => Token::ProperSupset,
+            "times" | "X" => Token::Times,
+            "oplus" => Token::BagAdd,
+            "ominus" => Token::BagSub,
+            "sqsubseteq" => Token::SqSubseteq,
+            "div" => Token::Div,
+            "cdot" => Token::ActionCompose,
+            "E" | "exists" => Token::Exists,
+            "A" | "forall" => Token::Forall,
+            "lnot" | "neg" => Token::Not,
+            "equiv" => Token::Equiv,
+            "o" => Token::Concat,
+            other => Token::CustomOp(other.into()),
+        })
+    }
+
     fn consume(&mut self, s: &str) -> bool {
         if self.starts_with(s) {
             self.pos += s.len();
@@ -534,62 +630,58 @@ impl<'a> Lexer<'a> {
         if self.consume("#") || self.consume("/=") || self.consume("\\#") || self.consume("≠") {
             return Ok(Token::Neq);
         }
-        if self.consume("<=") || self.consume("=<") || self.consume("\\leq") || self.consume("≤")
-        {
+        if self.consume("<=") || self.consume("=<") || self.consume("≤") {
             return Ok(Token::Le);
         }
-        if self.consume(">=") || self.consume("\\geq") || self.consume("≥") {
+        if self.consume(">=") || self.consume("≥") {
             return Ok(Token::Ge);
         }
-        if self.consume("/\\") || self.consume("\\land") || self.consume("∧") {
+        if self.consume("/\\") || self.consume("∧") {
             return Ok(Token::And);
         }
-        if self.consume("\\/") || self.consume("\\lor") || self.consume("∨") {
+        if self.consume("\\/") || self.consume("∨") {
             return Ok(Token::Or);
         }
         if self.consume("=>") || self.consume("⟹") || self.consume("⇒") {
             return Ok(Token::Implies);
         }
-        if self.consume("\\notin") || self.consume("∉") {
+        if self.consume("∉") {
             return Ok(Token::NotIn);
         }
-        if self.consume("\\in") || self.consume("∈") {
+        if self.consume("∈") {
             return Ok(Token::In);
         }
-        if self.consume("\\union") || self.consume("\\cup") || self.consume("∪") {
+        if self.consume("∪") {
             return Ok(Token::Union);
         }
-        if self.consume("\\intersect") || self.consume("\\cap") || self.consume("∩") {
+        if self.consume("∩") {
             return Ok(Token::Intersect);
         }
-        if self.consume("\\subseteq") || self.consume("⊆") {
+        if self.consume("⊆") {
             return Ok(Token::Subseteq);
         }
-        if self.consume("\\subset") || self.consume("⊂") {
+        if self.consume("⊂") {
             return Ok(Token::ProperSubset);
         }
-        if self.consume("\\supseteq") || self.consume("⊇") {
+        if self.consume("⊇") {
             return Ok(Token::Supseteq);
         }
-        if self.consume("\\supset") || self.consume("⊃") {
+        if self.consume("⊃") {
             return Ok(Token::ProperSupset);
         }
-        if self.consume("\\times") || self.consume("\\X") || self.consume("×") {
+        if self.consume("×") {
             return Ok(Token::Times);
         }
-        if self.consume("\\oplus") || self.consume("(+)") || self.consume("⊕") {
+        if self.consume("(+)") || self.consume("⊕") {
             return Ok(Token::BagAdd);
         }
-        if self.consume("\\ominus") || self.consume("(-)") || self.consume("⊖") {
+        if self.consume("(-)") || self.consume("⊖") {
             return Ok(Token::BagSub);
         }
-        if self.consume("\\sqsubseteq") || self.consume("⊑") {
+        if self.consume("⊑") {
             return Ok(Token::SqSubseteq);
         }
-        if self.consume("\\div") {
-            return Ok(Token::Div);
-        }
-        if self.consume("\\cdot") || self.consume("⋅") {
+        if self.consume("⋅") {
             return Ok(Token::ActionCompose);
         }
         if self.starts_with("\\b") {
@@ -641,41 +733,17 @@ impl<'a> Lexer<'a> {
                 return Ok(Token::Int(n));
             }
         }
-        if self.consume("\\E") || self.consume("\\exists") || self.consume("∃") {
+        if self.consume("∃") {
             return Ok(Token::Exists);
         }
-        if self.consume("\\A") || self.consume("\\forall") || self.consume("∀") {
+        if self.consume("∀") {
             return Ok(Token::Forall);
         }
-        if self.consume("~") || self.consume("\\lnot") || self.consume("\\neg") || self.consume("¬")
-        {
+        if self.consume("~") || self.consume("¬") {
             return Ok(Token::Not);
         }
-        if self.starts_with("\\o")
-            && !self.input[self.pos + 2..]
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_alphanumeric())
-        {
-            self.pos += 2;
-            return Ok(Token::Concat);
-        }
-        if self.starts_with("\\")
-            && self.input[self.pos + 1..]
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_alphabetic())
-        {
-            self.advance();
-            let start = self.pos;
-            while self
-                .peek_char()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_')
-            {
-                self.advance();
-            }
-            let name: Arc<str> = self.input[start..self.pos].into();
-            return Ok(Token::CustomOp(name));
+        if let Some(token) = self.backslash_operator() {
+            return Ok(token);
         }
         if self.consume("\\") {
             return Ok(Token::SetMinus);
@@ -1008,62 +1076,58 @@ impl<'a> Lexer<'a> {
         if self.consume("#") || self.consume("/=") || self.consume("\\#") || self.consume("≠") {
             return Ok(Token::Neq);
         }
-        if self.consume("<=") || self.consume("=<") || self.consume("\\leq") || self.consume("≤")
-        {
+        if self.consume("<=") || self.consume("=<") || self.consume("≤") {
             return Ok(Token::Le);
         }
-        if self.consume(">=") || self.consume("\\geq") || self.consume("≥") {
+        if self.consume(">=") || self.consume("≥") {
             return Ok(Token::Ge);
         }
-        if self.consume("/\\") || self.consume("\\land") || self.consume("∧") {
+        if self.consume("/\\") || self.consume("∧") {
             return Ok(Token::And);
         }
-        if self.consume("\\/") || self.consume("\\lor") || self.consume("∨") {
+        if self.consume("\\/") || self.consume("∨") {
             return Ok(Token::Or);
         }
         if self.consume("=>") || self.consume("⟹") || self.consume("⇒") {
             return Ok(Token::Implies);
         }
-        if self.consume("\\notin") || self.consume("∉") {
+        if self.consume("∉") {
             return Ok(Token::NotIn);
         }
-        if self.consume("\\in") || self.consume("∈") {
+        if self.consume("∈") {
             return Ok(Token::In);
         }
-        if self.consume("\\union") || self.consume("\\cup") || self.consume("∪") {
+        if self.consume("∪") {
             return Ok(Token::Union);
         }
-        if self.consume("\\intersect") || self.consume("\\cap") || self.consume("∩") {
+        if self.consume("∩") {
             return Ok(Token::Intersect);
         }
-        if self.consume("\\subseteq") || self.consume("⊆") {
+        if self.consume("⊆") {
             return Ok(Token::Subseteq);
         }
-        if self.consume("\\subset") || self.consume("⊂") {
+        if self.consume("⊂") {
             return Ok(Token::ProperSubset);
         }
-        if self.consume("\\supseteq") || self.consume("⊇") {
+        if self.consume("⊇") {
             return Ok(Token::Supseteq);
         }
-        if self.consume("\\supset") || self.consume("⊃") {
+        if self.consume("⊃") {
             return Ok(Token::ProperSupset);
         }
-        if self.consume("\\times") || self.consume("\\X") || self.consume("×") {
+        if self.consume("×") {
             return Ok(Token::Times);
         }
-        if self.consume("\\oplus") || self.consume("(+)") || self.consume("⊕") {
+        if self.consume("(+)") || self.consume("⊕") {
             return Ok(Token::BagAdd);
         }
-        if self.consume("\\ominus") || self.consume("(-)") || self.consume("⊖") {
+        if self.consume("(-)") || self.consume("⊖") {
             return Ok(Token::BagSub);
         }
-        if self.consume("\\sqsubseteq") || self.consume("⊑") {
+        if self.consume("⊑") {
             return Ok(Token::SqSubseteq);
         }
-        if self.consume("\\div") {
-            return Ok(Token::Div);
-        }
-        if self.consume("\\cdot") || self.consume("⋅") {
+        if self.consume("⋅") {
             return Ok(Token::ActionCompose);
         }
         if self.starts_with("\\b") {
@@ -1115,41 +1179,17 @@ impl<'a> Lexer<'a> {
                 return Ok(Token::Int(n));
             }
         }
-        if self.consume("\\E") || self.consume("\\exists") || self.consume("∃") {
+        if self.consume("∃") {
             return Ok(Token::Exists);
         }
-        if self.consume("\\A") || self.consume("\\forall") || self.consume("∀") {
+        if self.consume("∀") {
             return Ok(Token::Forall);
         }
-        if self.consume("~") || self.consume("\\lnot") || self.consume("\\neg") || self.consume("¬")
-        {
+        if self.consume("~") || self.consume("¬") {
             return Ok(Token::Not);
         }
-        if self.starts_with("\\o")
-            && !self.input[self.pos + 2..]
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_alphanumeric())
-        {
-            self.pos += 2;
-            return Ok(Token::Concat);
-        }
-        if self.starts_with("\\")
-            && self.input[self.pos + 1..]
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_alphabetic())
-        {
-            self.advance();
-            let start = self.pos;
-            while self
-                .peek_char()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_')
-            {
-                self.advance();
-            }
-            let name: Arc<str> = self.input[start..self.pos].into();
-            return Ok(Token::CustomOp(name));
+        if let Some(token) = self.backslash_operator() {
+            return Ok(token);
         }
         if self.consume("\\") {
             return Ok(Token::SetMinus);
@@ -1567,6 +1607,50 @@ mod tests {
                 Token::Int(2),
                 Token::RBrace,
                 Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_backslash_takes_the_longest_predefined_operator_name() {
+        let lexed = |input: &str| Lexer::new(input).tokenize().unwrap();
+        let ident = |name: &str| Token::Ident(name.into());
+        assert_eq!(
+            lexed("S\\used"),
+            vec![ident("S"), Token::SetMinus, ident("used"), Token::Eof]
+        );
+        assert_eq!(
+            lexed("S\\intersect T"),
+            vec![ident("S"), Token::Intersect, ident("T"), Token::Eof]
+        );
+        assert_eq!(
+            lexed("x\\inner"),
+            vec![ident("x"), Token::In, ident("ner"), Token::Eof]
+        );
+        assert_eq!(
+            lexed("\\exists \\forall \\notin \\subseteq \\sqsubseteq \\equiv"),
+            vec![
+                Token::Exists,
+                Token::Forall,
+                Token::NotIn,
+                Token::Subseteq,
+                Token::SqSubseteq,
+                Token::Equiv,
+                Token::Eof
+            ]
+        );
+        assert_eq!(
+            lexed("s\\o t \\odot \\prec \\b101 \\o17 \\hFF"),
+            vec![
+                ident("s"),
+                Token::Concat,
+                ident("t"),
+                Token::CustomOp("odot".into()),
+                Token::CustomOp("prec".into()),
+                Token::Int(5),
+                Token::Int(15),
+                Token::Int(255),
+                Token::Eof
             ]
         );
     }
