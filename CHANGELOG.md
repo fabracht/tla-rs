@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.24.2] - 2026-10-08
+
+### Fixed
+
+- A recursive function whose recursive call is an operand of an operator other than `+`, `=` or `\` (`IF n = 0 THEN 1 ELSE n * f[n - 1]`) never finished: each such call computed the whole function again, from scratch (#181). It now reuses the values computed so far. The same held for a recursive function that uses an operator defining its own function of the same name, which also read the outer function's values. A recursive call outside the function's domain (`f[n \in 1..3] == n * f[n - 1]`) is an error, "key 0 not in function domain", as in TLC, instead of a value added to the function.
+
 ## [0.24.1] - 2026-10-07
 
 ### Fixed

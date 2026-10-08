@@ -87,6 +87,16 @@ fn test_should_pass_set_difference_identifier() {
 }
 
 #[test]
+fn test_should_pass_recursive_fn_under_operator() {
+    let path = Path::new("test_cases/should_pass/recursive_fn_under_operator.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::Ok(_)),
+        "a recursive call under an operator such as * must reuse the values computed so far, got: {result:?}"
+    );
+}
+
+#[test]
 fn test_should_pass_fn_constructor_let_binding() {
     let path = Path::new("test_cases/should_pass/fn_constructor_let_binding.tla");
     let result = check_spec_file_allow_deadlock(path);
@@ -1567,6 +1577,17 @@ fn test_should_error_next_error() {
         matches!(result, CheckResult::NextError(..)),
         "next_error.tla should produce NextError, got: {:?}",
         result
+    );
+}
+
+#[test]
+fn test_should_error_recursive_fn_out_of_domain() {
+    let path = Path::new("test_cases/should_error/recursive_fn_out_of_domain.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::InvariantError(..))
+            && format!("{result:?}").contains("not in function domain"),
+        "a recursive call outside the function's domain must be an error, got: {result:?}"
     );
 }
 
