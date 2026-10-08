@@ -14,7 +14,7 @@ use super::helpers::{
     eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_symbolic_set_expr,
     update_nested_value,
 };
-use super::recursive::eval_fn_def_recursive;
+use super::recursive::{apply_active_function, eval_fn_def_recursive};
 use crate::ast::{Env, Expr, Value};
 use crate::checker::format_value;
 use crate::substitution::substitute_expr;
@@ -731,6 +731,12 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 }
                 return result;
             }
+            if let Expr::Var(name) = f.as_ref()
+                && !env.contains_key(name)
+                && let Some(result) = apply_active_function(name, arg, env, defs)
+            {
+                return result;
+            }
             let fval = eval(f, env, defs)?;
             let av = eval(arg, env, defs)?;
             apply_fn_value(fval, av)
@@ -742,9 +748,8 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
 
         Expr::FnDef(var, domain, body) => {
             let dom = eval_set(domain, env, defs)?;
-            let dom_vec: Vec<_> = dom.into_iter().collect();
             let placeholder_name: Arc<str> = "".into();
-            let result = eval_fn_def_recursive(&placeholder_name, var, &dom_vec, body, env, defs)?;
+            let result = eval_fn_def_recursive(&placeholder_name, var, dom, body, env, defs)?;
             Ok(Value::func(result))
         }
 
@@ -1585,9 +1590,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 let mut local_defs = defs.clone();
                 local_defs.insert(var.clone(), (vec![], Arc::new((**binding).clone())));
                 let dom = eval_set(domain_expr, env, &local_defs)?;
-                let dom_vec: Vec<_> = dom.into_iter().collect();
-                let fn_result =
-                    eval_fn_def_recursive(var, param, &dom_vec, fn_body, env, &local_defs)?;
+                let fn_result = eval_fn_def_recursive(var, param, dom, fn_body, env, &local_defs)?;
                 let prev = env.insert(var.clone(), Value::func(fn_result));
                 let result = eval(body, env, &local_defs);
                 match prev {
