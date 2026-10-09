@@ -1,6 +1,70 @@
 # CLI Guide
 
-Detailed usage for the `tla` command-line tool. See the [README](README.md) for installation, a quick start, and the full options table.
+Detailed usage for the `tla` command-line tool. See the [README](README.md) for installation and a quick start.
+
+```
+tla <spec.tla> [options]
+```
+
+## Options
+
+This is the full list printed by `tla --help`.
+
+### Constants and limits
+
+| Option | Description |
+|--------|-------------|
+| `--constant`, `-c NAME=VALUE` | Set a constant value (formats under [Configuration Files](#configuration-files)) |
+| `--symmetry`, `-s NAME` | Enable symmetry reduction for a set constant of model values |
+| `--config PATH` | Load a TLC-style cfg file (default: `Spec.cfg` next to `Spec.tla`, if present) |
+| `--max-states N` | Maximum states to explore (default: 1000000) |
+| `--max-depth N` | Maximum trace depth (default: 100) |
+| `--max-powerset N` | Max set size for `SUBSET` enumeration (default: 20) |
+| `--max-permutations N` | Max set size for `Permutations` (default: 10) |
+| `--max-subbag N` | Max total copies for `SubBag` enumeration (default: 20) |
+| `--quick`, `-q` | Quick exploration (limit: 10,000 states) |
+
+### Checking
+
+| Option | Description |
+|--------|-------------|
+| `--allow-deadlock` | Allow states with no successors |
+| `--allow-unassigned-stutter` | Treat a variable an action leaves unassigned as `UNCHANGED` instead of reporting an error |
+| `--symbolic-integers` | Treat `Nat`/`Int` as infinite sets (membership only; enumerating them is an error) |
+| `--check-liveness` | Check liveness and fairness properties (see [Liveness](#liveness)) |
+| `--liveness-engine E` | `tableau` (default) or `legacy` |
+| `--check-refinement ALIAS` | Verify `Spec => ALIAS!Spec` for a non-parameterized `INSTANCE` alias |
+| `--continue` | Continue past invariant violations (see [Analytics](#analytics)) |
+| `--count-satisfying NAME` | Count states satisfying a definition (repeatable) |
+| `--sweep NAME=V1;V2;...` | Sweep a constant across values and compare results |
+| `--validate` | Parse and validate the spec without model checking |
+| `--list-invariants` | Show the detected invariants and exit |
+
+### Exploration
+
+| Option | Description |
+|--------|-------------|
+| `--scenario TEXT` | Explore a specific scenario (or `@file`; see [Scenarios](#scenarios)) |
+| `--interactive`, `-i` | Interactive TUI exploration mode |
+| `--replay FILE` | Replay a saved counterexample in the TUI (see [Counterexample Files](#counterexample-files)) |
+| `--present FILE` | Run a demo manifest, `.json` or `.toml` (TUI, or `--validate` for a report) |
+| `--export-md FILE` | With `--present`: write a Markdown walkthrough |
+| `--export-html FILE` | With `--present`: write a self-contained HTML walkthrough |
+| `--explorable` | With `--export-html`: embed the wasm engine for in-browser state exploration |
+
+### Output
+
+| Option | Description |
+|--------|-------------|
+| `--verbose`, `-v` | Verbose output (depth breakdowns, etc.) |
+| `-vv` | Debug output |
+| `--json` | Output results in JSON format |
+| `--export-dot FILE` | Export the state graph to DOT format |
+| `--dot-mode MODE` | DOT mode: `full`, `trace`, `clean` (default), `choices` |
+| `--trace-json FILE` | Export the counterexample trace to JSON |
+| `--save-counterexample FILE` | Export the counterexample with metadata for `--replay` |
+| `--version`, `-V` | Show version information |
+| `--help`, `-h` | Show help |
 
 ## Configuration Files
 
@@ -14,7 +78,20 @@ INVARIANT TPTypeOK
 CHECK_DEADLOCK TRUE
 ```
 
-Supported directives: `INIT`/`NEXT`, `SPECIFICATION` (temporal formula in `Init /\ [][Next]_vars` form, with exactly one `[][Next]_v` conjunct, as in TLC), `CONSTANT`/`CONSTANTS`, `INVARIANT`/`INVARIANTS`, `PROPERTY`/`PROPERTIES`, `SYMMETRY`, and `CHECK_DEADLOCK`. CLI flags override cfg values.
+Supported directives:
+
+- `INIT`/`NEXT`, or `SPECIFICATION` (temporal formula in `Init /\ [][Next]_vars` form, with exactly one `[][Next]_v` conjunct, as in TLC)
+- `CONSTANT`/`CONSTANTS`: `Name = value` assignments, or `Name <- Def` to substitute a zero-parameter definition of the spec
+- `INVARIANT`/`INVARIANTS` and `PROPERTY`/`PROPERTIES`
+- `SYMMETRY`
+- `CHECK_DEADLOCK TRUE|FALSE` (`FALSE` is the same as `--allow-deadlock`)
+- `SYMBOLIC_INTEGERS TRUE|FALSE` (same as `--symbolic-integers`)
+- `CONSTRAINT`/`CONSTRAINTS`: states outside the constraint are still checked against invariants, as in TLC, but not explored further
+- `VIEW`: states with the same view value are treated as one state
+
+`ACTION_CONSTRAINT`, `ALIAS` and `POSTCONDITION` are parsed but ignored with a warning such as `ACTION_CONSTRAINT 'ActC' is not yet supported, ignoring`.
+
+CLI flags override cfg values.
 
 `CONSTANT` values (and `-c` on the CLI) accept integers (`42`), booleans (`TRUE`/`FALSE`), strings (`"hello"`), bare identifiers as model values (`rm1`), sets (`{a, b}`), tuples (`<<1, 2>>`), records (`[hp |-> 100, mp |-> 50]`), and functions built with `:>`/`@@` (`d1 :> 1 @@ d2 :> 2`, left-biased on key collisions). All shapes nest. The set-of-functions form `[S -> T]` is a spec-level expression, not a concrete value, so it is not accepted here.
 
@@ -28,13 +105,21 @@ step: count' = count + 1
 step: count' = count + 1"
 ```
 
-Or load from a file with `--scenario @scenario.txt`. Each `step:` line is a TLA+ predicate over current (unprimed) and next (primed) state variables.
+Or load from a file with `--scenario @scenario.txt`. Each line picks the next transition and is one of:
+
+- `step: <expr>`: a TLA+ predicate over current (unprimed) and next (primed) state variables. Constants from the cfg or `-c` resolve inside it.
+- `action: <Name>`: the transition produced by the named action.
+- `action: <Name>; <expr>`: the named action, further constrained by a predicate.
 
 ```
 step: x' > x                    # x increases
 step: "s1" \in active'          # s1 becomes active
 step: pc'["p1"] = "critical"    # p1 enters critical section
+action: NTPSync
+action: Cadence; tampered' = TRUE
 ```
+
+`action:` lines remove the need for a synthetic action-tag variable in the spec. The [time-integrity example](examples/time-integrity/WALKTHROUGH.md) uses them throughout.
 
 ## Demo Walkthroughs
 
@@ -65,7 +150,7 @@ Launch the TUI with `-i` to step through state spaces manually. You can select a
 
 ![Interactive mode — navigating the C-3PO asteroid field spec](falcon-escape.gif)
 
-Key bindings: `↑`/`↓` select actions, `Enter` takes the selected action, `→`/`Space` expands grouped changes, `←` collapses, `b` backtracks, `e` opens the REPL, `t` shows variable trace, `h` tests a hypothesis, `g` toggles guards, `w` random walks N steps, `u` steps until a condition holds, `s`/`l` save/load traces, `r` resets to initial state, `q` quits.
+Key bindings: `↑`/`↓` (or `k`/`j`) select actions, `Enter` takes the selected action, `→`/`Space` expands grouped changes, `←` collapses, `b` backtracks, `e` opens the REPL, `t` shows variable trace, `h` tests a hypothesis, `g` toggles guards, `w` random walks N steps, `u` steps until a condition holds, `s`/`l` save/load traces, `r` resets to initial state, `q` quits.
 
 ```bash
 tla examples/c3po_asteroid_field.tla -c 'Density=3' --allow-deadlock -i
@@ -144,17 +229,31 @@ The depth breakdown shows destruction starting early and escape requiring a long
 
 ## Output
 
-On success:
+On success (`tla examples/counter.tla --allow-deadlock`):
 ```
 Model checking complete. No errors found.
 
-  States explored: 1331
-  Transitions: 3630
-  Max depth: 31
-  Time: 0.019s
+  Reachable states: 6
+  Transitions: 5
+  Max depth: 6
+  Time: 0.001s
 ```
 
-On invariant violation, you get a counterexample trace with state diffs marking changed variables. On deadlock, a trace to the deadlock state with a suggestion to use `--allow-deadlock`. Parse errors show source locations, and undefined variables suggest similar names.
+On invariant violation, you get a counterexample trace with state diffs marking changed variables, followed by `States explored` and `Transitions` counts. On deadlock, a trace to the deadlock state with a suggestion to use `--allow-deadlock`. Parse errors show source locations, and undefined variables suggest similar names.
+
+## Counterexample Files
+
+Two flags write a counterexample to disk when a check fails:
+
+- `--trace-json FILE` writes the trace as a JSON array of `{"index", "action", "state"}` entries (`action` is currently always `null`: [#198](https://github.com/fabracht/tla-rs/issues/198)).
+- `--save-counterexample FILE` writes an object with `spec_file`, `invariant`, `violated_invariant_index`, `vars` and a `trace` of `{"action", "state"}` entries.
+
+`--replay FILE` loads a file written by `--save-counterexample` and steps through it in the TUI: `n`/`→`/`↓` next state, `p`/`←`/`↑` previous state, `e` opens the REPL, `f` switches to free exploration from the current state, `q` quits.
+
+```bash
+tla examples/counter_bug.tla --save-counterexample ce.json
+tla examples/counter_bug.tla --replay ce.json
+```
 
 ## State Graph Visualization
 

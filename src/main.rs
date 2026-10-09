@@ -731,6 +731,8 @@ fn main() -> ExitCode {
                 println!();
                 println!("Scenario format:");
                 println!("  step: <TLA+ expression>    Match transition where expression is TRUE");
+                println!("  action: <Name>             Match transition produced by action Name");
+                println!("  action: <Name>; <expr>     Match action Name where expression is TRUE");
                 println!();
                 println!("  Variables: unprimed = current state, primed = next state");
                 println!();
@@ -740,6 +742,8 @@ fn main() -> ExitCode {
                 println!("    step: pc'[\"p1\"] = \"critical\"    # p1 enters critical section");
                 println!("    step: count' = count + 1        # count increments by 1");
                 println!("    step: x' # x                    # x changes (any value)");
+                println!("    action: NTPSync                 # the NTPSync action fires");
+                println!("    action: Cadence; tampered' = TRUE  # Cadence sets tampered");
                 return ExitCode::SUCCESS;
             }
             arg if arg.starts_with('-') => {

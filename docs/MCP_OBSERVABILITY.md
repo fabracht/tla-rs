@@ -89,6 +89,26 @@ Still open: large-constant detection (warn when a single int/set constant is
 much bigger than its peers). The `validate_spec` description asks the caller to
 eyeball the resolved constants for this in the meantime.
 
+### ✅ Run warnings and counters
+
+`check_spec` also returns a `warnings` array (`CheckSpecOutput.warnings`):
+parse and cfg warnings from loading the spec, boolean definitions that look like
+invariants but are not checked (`checker::unchecked_predicate_warning`), and
+the deprecation notice for temporal conjuncts of a `*Spec` definition checked as
+properties because no cfg `SPECIFICATION` is given
+(`config::legacy_temporal_warning`).
+
+Two opt-in inputs turn a run into a measurement:
+
+- `count_satisfying: [names]` evaluates each zero-argument boolean definition on
+  every reachable state and reports `stats.property_stats: [{name, satisfied,
+  violated, errors}]`
+- `continue_on_violation: true` counts invariant violations instead of stopping
+  at the first, reported as `stats.violations: [{kind, name, count}]` and
+  `stats.violation_count`; the `status` reflects the rest of the search, so a
+  run whose only failures were counted returns `ok`
+  ([#196](https://github.com/fabracht/tla-rs/issues/196))
+
 ### 🔭 #1: Pre-flight branching-factor estimator
 
 After `Init` enumeration, the checker knows the initial-state count and could
