@@ -1592,6 +1592,16 @@ fn test_should_error_recursive_fn_out_of_domain() {
 }
 
 #[test]
+fn test_should_error_string_concat_with_sequence() {
+    let path = Path::new("test_cases/should_error/string_concat_with_sequence.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(result, CheckResult::InvariantError(..)),
+        "a string concatenated with a sequence must be an error, as in TLC, got: {result:?}"
+    );
+}
+
+#[test]
 fn test_should_error_invariant_error() {
     let path = Path::new("test_cases/should_error/invariant_error.tla");
     let result = check_spec_file(path);
@@ -2145,6 +2155,15 @@ fn test_should_pass_strings() {
     match check_spec_file(path) {
         CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
         other => panic!("strings.tla should pass, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_pass_string_sequence_operators() {
+    let path = Path::new("test_cases/should_pass/string_sequence_operators.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("Len, \\o, SubSeq and Tail must accept strings, got: {other:?}"),
     }
 }
 

@@ -11,8 +11,8 @@ use super::global_state::{
 };
 use super::helpers::{
     apply_fn_value, cartesian_product_records, eval_bool, eval_fn, eval_int, eval_record, eval_set,
-    eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_symbolic_set_expr,
-    update_nested_value,
+    eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_symbolic_set_expr, subseq_range,
+    update_nested_value, value_as_tuple,
 };
 use super::recursive::{apply_active_function, eval_fn_def_recursive};
 use crate::ast::{Env, Expr, Value};
@@ -1102,10 +1102,10 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             }
         }
 
-        Expr::Len(seq) => {
-            let tv = eval_tuple(seq, env, defs)?;
-            Ok(Value::Int(tv.len() as i64))
-        }
+        Expr::Len(seq) => match eval(seq, env, defs)? {
+            Value::Str(s) => Ok(Value::Int(s.chars().count() as i64)),
+            other => Ok(Value::Int(value_as_tuple(other)?.len() as i64)),
+        },
 
         Expr::Head(seq) => {
             let tv = eval_tuple(seq, env, defs)?;
@@ -1114,13 +1114,22 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 .ok_or_else(|| EvalError::domain_error("Head of empty sequence"))
         }
 
-        Expr::Tail(seq) => {
-            let tv = eval_tuple(seq, env, defs)?;
-            if tv.is_empty() {
-                return Err(EvalError::domain_error("Tail of empty sequence"));
+        Expr::Tail(seq) => match eval(seq, env, defs)? {
+            Value::Str(s) => {
+                let mut chars = s.chars();
+                match chars.next() {
+                    Some(_) => Ok(Value::Str(Arc::from(chars.as_str()))),
+                    None => Err(EvalError::domain_error("Tail of empty sequence")),
+                }
             }
-            Ok(Value::tuple(tv[1..].to_vec()))
-        }
+            other => {
+                let tv = value_as_tuple(other)?;
+                if tv.is_empty() {
+                    return Err(EvalError::domain_error("Tail of empty sequence"));
+                }
+                Ok(Value::tuple(tv[1..].to_vec()))
+            }
+        },
 
         Expr::Append(seq, elem) => {
             let mut tv = eval_tuple(seq, env, defs)?;
@@ -1129,22 +1138,39 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             Ok(Value::tuple(tv))
         }
 
-        Expr::Concat(seq1, seq2) => {
-            let mut tv1 = eval_tuple(seq1, env, defs)?;
-            let tv2 = eval_tuple(seq2, env, defs)?;
-            tv1.extend(tv2);
-            Ok(Value::tuple(tv1))
-        }
+        Expr::Concat(seq1, seq2) => match (eval(seq1, env, defs)?, eval(seq2, env, defs)?) {
+            (Value::Str(a), Value::Str(b)) => Ok(Value::Str(Arc::from(format!("{a}{b}")))),
+            (Value::Str(_), other) | (other, Value::Str(_)) => Err(EvalError::TypeMismatch {
+                expected: "Str",
+                got: other,
+                context: Some("\\o with a string operand"),
+                span: None,
+            }),
+            (first, second) => {
+                let mut tv = value_as_tuple(first)?;
+                tv.extend(value_as_tuple(second)?);
+                Ok(Value::tuple(tv))
+            }
+        },
 
         Expr::SubSeq(seq, start, end) => {
-            let tv = eval_tuple(seq, env, defs)?;
-            let s = eval_int(start, env, defs)? as usize;
-            let e = eval_int(end, env, defs)? as usize;
-            if s < 1 || s > tv.len() + 1 || e < s - 1 || e > tv.len() {
-                return Err(EvalError::domain_error("SubSeq index out of bounds"));
+            let sv = eval(seq, env, defs)?;
+            let first = eval_int(start, env, defs)?;
+            let last = eval_int(end, env, defs)?;
+            match sv {
+                Value::Str(s) => {
+                    let chars: Vec<char> = s.chars().collect();
+                    let range = subseq_range(first, last, chars.len())?;
+                    Ok(Value::Str(Arc::from(
+                        chars[range].iter().collect::<String>(),
+                    )))
+                }
+                other => {
+                    let tv = value_as_tuple(other)?;
+                    let range = subseq_range(first, last, tv.len())?;
+                    Ok(Value::tuple(tv[range].to_vec()))
+                }
             }
-            let subseq = tv.get((s - 1)..e).unwrap_or(&[]).to_vec();
-            Ok(Value::tuple(subseq))
         }
 
         Expr::SelectSeq(seq, test) => {

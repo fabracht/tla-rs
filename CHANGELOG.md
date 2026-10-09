@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.3] - 2026-10-08
+
+### Fixed
+
+- `Len`, `\o`, `SubSeq` and `Tail` failed on a string with "type mismatch: expected Tuple, got Str" (#175). As in TLC, they treat a string as its sequence of characters: `Len("abc") = 3`, `"ab" \o "c" = "abc"`, `SubSeq("abcd", 2, 3) = "bc"`, `Tail("abc") = "bc"`. A string concatenated with a sequence (`"ab" \o <<"c">>`) is an error, as in TLC; `Head`, `Append` and `"abc"[1]` still reject a string, as TLC does.
+- `SubSeq(s, m, n)` with `m > n` is the empty sequence whatever `m` and `n` are, as in TLC; `SubSeq(<<1, 2, 3>>, 9, 2)` failed with "SubSeq index out of bounds". An index outside the sequence's domain is now reported with the index and the domain.
+
 ## [0.24.2] - 2026-10-08
 
 ### Fixed

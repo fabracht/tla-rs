@@ -348,7 +348,11 @@ pub(crate) fn fn_as_tuple(f: &BTreeMap<Value, Value>) -> Option<Vec<Value>> {
 }
 
 pub(crate) fn eval_tuple(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Vec<Value>> {
-    match eval(expr, env, defs)? {
+    value_as_tuple(eval(expr, env, defs)?)
+}
+
+pub(crate) fn value_as_tuple(value: Value) -> Result<Vec<Value>> {
+    match value {
         Value::Tuple(t) => Ok(Arc::unwrap_or_clone(t)),
         Value::Fn(f) => fn_as_tuple(&f).ok_or(EvalError::TypeMismatch {
             expected: "Tuple",
@@ -362,6 +366,22 @@ pub(crate) fn eval_tuple(expr: &Expr, env: &mut Env, defs: &Definitions) -> Resu
             context: None,
             span: None,
         }),
+    }
+}
+
+pub(crate) fn subseq_range(start: i64, end: i64, len: usize) -> Result<std::ops::Range<usize>> {
+    if start > end {
+        return Ok(0..0);
+    }
+    let domain = 1..=len as i64;
+    match (domain.contains(&start), domain.contains(&end)) {
+        (true, true) => Ok((start - 1) as usize..end as usize),
+        (false, _) => Err(EvalError::domain_error(format!(
+            "SubSeq start {start} not in the sequence's domain 1..{len}"
+        ))),
+        (true, false) => Err(EvalError::domain_error(format!(
+            "SubSeq end {end} not in the sequence's domain 1..{len}"
+        ))),
     }
 }
 
