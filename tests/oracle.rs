@@ -1596,8 +1596,48 @@ fn test_should_error_string_concat_with_sequence() {
     let path = Path::new("test_cases/should_error/string_concat_with_sequence.tla");
     let result = check_spec_file_allow_deadlock(path);
     assert!(
-        matches!(result, CheckResult::InvariantError(..)),
+        matches!(&result, CheckResult::InvariantError(e, ..) if e.to_string().contains("expected Str")),
         "a string concatenated with a sequence must be an error, as in TLC, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_should_error_sequence_concat_with_string() {
+    let path = Path::new("test_cases/should_error/sequence_concat_with_string.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(&result, CheckResult::InvariantError(e, ..) if e.to_string().contains("expected Tuple")),
+        "a sequence concatenated with a string must be an error, as in TLC, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_should_error_tail_of_empty_string() {
+    let path = Path::new("test_cases/should_error/tail_of_empty_string.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(&result, CheckResult::InvariantError(e, ..) if e.to_string().contains("Tail of empty sequence")),
+        "Tail of the empty string must be an error, as in TLC, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_should_error_subseq_start_out_of_domain() {
+    let path = Path::new("test_cases/should_error/subseq_start_out_of_domain.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(&result, CheckResult::InvariantError(e, ..) if e.to_string().contains("SubSeq start 0 not in the sequence's domain 1..3")),
+        "a SubSeq start outside the domain must be an error, as in TLC, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_should_error_subseq_end_out_of_domain() {
+    let path = Path::new("test_cases/should_error/subseq_end_out_of_domain.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(&result, CheckResult::InvariantError(e, ..) if e.to_string().contains("SubSeq end 3 not in the sequence's domain 1..2")),
+        "a SubSeq end outside the domain must be an error, as in TLC, got: {result:?}"
     );
 }
 

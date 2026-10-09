@@ -348,11 +348,7 @@ pub(crate) fn fn_as_tuple(f: &BTreeMap<Value, Value>) -> Option<Vec<Value>> {
 }
 
 pub(crate) fn eval_tuple(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Vec<Value>> {
-    value_as_tuple(eval(expr, env, defs)?)
-}
-
-pub(crate) fn value_as_tuple(value: Value) -> Result<Vec<Value>> {
-    match value {
+    match eval(expr, env, defs)? {
         Value::Tuple(t) => Ok(Arc::unwrap_or_clone(t)),
         Value::Fn(f) => fn_as_tuple(&f).ok_or(EvalError::TypeMismatch {
             expected: "Tuple",
@@ -383,6 +379,70 @@ pub(crate) fn subseq_range(start: i64, end: i64, len: usize) -> Result<std::ops:
             "SubSeq end {end} not in the sequence's domain 1..{len}"
         ))),
     }
+}
+
+pub(crate) enum Sequence {
+    Str(Arc<str>),
+    Tuple(Arc<Vec<Value>>),
+}
+
+impl Sequence {
+    pub(crate) fn from_value(value: Value) -> Result<Self> {
+        match value {
+            Value::Str(s) => Ok(Sequence::Str(s)),
+            Value::Tuple(t) => Ok(Sequence::Tuple(t)),
+            Value::Fn(f) => match fn_as_tuple(&f) {
+                Some(elements) => Ok(Sequence::Tuple(Arc::new(elements))),
+                None => Err(EvalError::TypeMismatch {
+                    expected: "Tuple or Str",
+                    got: Value::Fn(f),
+                    context: None,
+                    span: None,
+                }),
+            },
+            other => Err(EvalError::TypeMismatch {
+                expected: "Tuple or Str",
+                got: other,
+                context: None,
+                span: None,
+            }),
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Sequence::Str(s) => s.encode_utf16().count(),
+            Sequence::Tuple(t) => t.len(),
+        }
+    }
+
+    pub(crate) fn slice(&self, range: std::ops::Range<usize>) -> Value {
+        match self {
+            Sequence::Str(s) => Value::Str(Arc::from(utf16_substring(s, range))),
+            Sequence::Tuple(t) => Value::tuple(t[range].to_vec()),
+        }
+    }
+}
+
+fn utf16_substring(s: &str, range: std::ops::Range<usize>) -> String {
+    let mut substring = String::new();
+    let mut unit = 0;
+    for c in s.chars() {
+        let start = unit;
+        unit += c.len_utf16();
+        if unit <= range.start {
+            continue;
+        }
+        if start >= range.end {
+            break;
+        }
+        if start >= range.start && unit <= range.end {
+            substring.push(c);
+        } else {
+            substring.push(char::REPLACEMENT_CHARACTER);
+        }
+    }
+    substring
 }
 
 pub(crate) fn cartesian_product_records(

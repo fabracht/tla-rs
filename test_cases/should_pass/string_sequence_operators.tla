@@ -17,4 +17,11 @@ Tails == /\ Tail("a") = ""
          /\ Tail(Tail(id)) \o "!" = SubSeq(id, 3, Len(id)) \o "!"
 Concats == /\ "" \o "" = ""
            /\ "work" \o SubSeq(id, 5, Len(id)) = id
+Utf16Units == /\ Len("😀") = 2
+              /\ Len("a😀b") = 4
+              /\ Len(Tail("😀a")) = 2
+              /\ SubSeq("😀b", 3, 3) = "b"
+              /\ SubSeq("a😀b", 2, 3) = "😀"
+              /\ Len(SubSeq("😀b", 1, 1)) = 1
+              /\ Len("😀" \o "😀") = 4
 ====
