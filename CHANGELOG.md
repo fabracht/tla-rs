@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.24.4] - 2026-10-09
+
+### Changed
+
+- The documentation was checked against 0.24.3 and corrected throughout. Notably:
+  - `SYNTAX_STATUS.md` has a "Known Differences from TLC" table, with an issue for each one (#186–#194) in place of the "100%" coverage table.
+  - `CLI_GUIDE.md` lists every option.
+  - `MCP.md` covers every `check_spec` input and output.
+  - The examples and the practical guide run as written, and their figures were re-measured.
+  - `ARCHITECTURE.md`, linked from the README but never published, is published and describes the current source.
+- The project is licensed under MIT OR Apache-2.0, as `Cargo.toml` already declared; `LICENSE-MIT` and `LICENSE-APACHE` are added, and the README no longer says MIT only.
+- `tla --help` lists the `action: <Name>` and `action: <Name>; <expr>` scenario lines, and the `tla-mcp` instructions name `max_seconds` among the budgets behind `limit_reached`.
+- `cargo make wasm` no longer needs npm; the unused npm packaging and publishing tasks are removed (npm releases stopped at 0.9.0).
+
 ## [0.24.3] - 2026-10-09
 
 ### Fixed

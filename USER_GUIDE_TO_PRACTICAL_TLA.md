@@ -8,16 +8,36 @@ Start minimal. Model one interaction with the smallest constants that expose the
 
 ```tla
 ---- MODULE MyProtocol ----
-EXTENDS Naturals
+EXTENDS Naturals, FiniteSets
 
 CONSTANT Users, Resources
 VARIABLES state, owner
+
+vars == <<state, owner>>
 
 Init ==
     /\ state = [u \in Users |-> "idle"]
     /\ owner = [r \in Resources |-> "none"]
 
+Start(u) ==
+    /\ state[u] = "idle"
+    /\ state' = [state EXCEPT ![u] = "active"]
+    /\ UNCHANGED owner
+
+Claim(u, r) ==
+    /\ state[u] = "active"
+    /\ owner[r] = "none"
+    /\ \A r2 \in Resources : owner[r2] /= u
+    /\ owner' = [owner EXCEPT ![r] = u]
+    /\ UNCHANGED state
+
+Release(u, r) ==
+    /\ owner[r] = u
+    /\ owner' = [owner EXCEPT ![r] = "none"]
+    /\ state' = [state EXCEPT ![u] = "idle"]
+
 Next ==
+    \/ \E u \in Users: Start(u)
     \/ \E u \in Users, r \in Resources: Claim(u, r)
     \/ \E u \in Users, r \in Resources: Release(u, r)
 
@@ -34,14 +54,14 @@ InvExclusiveOwnership ==
 
 Run it:
 ```bash
-tla spec.tla -c 'Users={"u1","u2"}' -c 'Resources={"r1"}' --allow-deadlock
+tla MyProtocol.tla -c 'Users={"u1","u2"}' -c 'Resources={"r1"}' --allow-deadlock
 ```
 
-If the invariant holds with 2 users and 1 resource, add a second resource. If it still holds, you probably have the right design. If the state space explodes, that tells you something too — the constraint you removed was load-bearing.
+It explores 8 states and both invariants hold. If the invariant holds with 2 users and 1 resource, add a second resource (`-c 'Resources={"r1","r2"}'`: 14 states here, still holding). If it still holds, you probably have the right design. If the state space explodes, that tells you something too — the constraint you removed was load-bearing.
 
 ## Naming Invariants
 
-tla-rs auto-detects invariants by name prefix. Definitions starting with `Inv`, `TypeOK`, or `NotSolved` are checked automatically. Everything else is just a definition.
+Without a cfg `INVARIANT`, tla-rs auto-detects invariants by name prefix. Definitions starting with `Inv`, `TypeOK`, or `NotSolved` are checked automatically, as are `Inv` and `TypeOK` after a module prefix (`TPTypeOK`, `M_Inv`). Everything else is just a definition. A cfg `INVARIANT` replaces detection: only the definitions it names are checked. `--list-invariants` shows which ones will be checked.
 
 `TypeOK` checks that variables stay in their expected domains. Write it first — it catches modeling errors before you get to the interesting invariants.
 
@@ -55,7 +75,7 @@ The shape of your actions determines how readable, scalable, and debuggable your
 
 ### Separate Variables, Not Records
 
-Don't pack all state into one record. The state count is the same either way — a resource allocation spec with 2 users and a bounded counter produces 32 states and 44 transitions whether you use a single `system` record or three separate variables. But separate variables make each action's footprint obvious: you can see exactly what changes and what doesn't, and UNCHANGED clauses document the scope of every action.
+Don't pack all state into one record. The state count is the same either way — a resource allocation spec with the `Advance` action below, an `Assign(u)` action that sets the owner, a `Finish` action that resets phase and owner, 2 users and `count` bounded by 3 produces 13 states and 15 transitions whether you use a single `system` record or three separate variables. But separate variables make each action's footprint obvious: you can see exactly what changes and what doesn't, and UNCHANGED clauses document the scope of every action.
 
 Bad — a single record variable:
 ```tla
@@ -84,7 +104,7 @@ Advance ==
     /\ UNCHANGED <<owner>>
 ```
 
-The record version hides which fields each action touches. With separate variables, a missing `UNCHANGED` is a checker error, so you can't accidentally leave a variable unspecified.
+The record version hides which fields each action touches. With separate variables, a missing `UNCHANGED` is a checker error ("variable(s) not assigned in action ..."), so you can't accidentally leave a variable unspecified (`--allow-unassigned-stutter` treats an unassigned variable as unchanged instead).
 
 ### Managing UNCHANGED
 
@@ -94,7 +114,7 @@ Define a `vars` tuple once at the top of your spec:
 vars == <<phase, count, owner>>
 ```
 
-Every action must account for every variable — either assign its primed version or list it in UNCHANGED. When you add a new variable to `vars`, the checker will flag every action that doesn't mention it, so missing updates surface immediately rather than hiding as silent stuttering.
+Every action must account for every variable — either assign its primed version or list it in UNCHANGED. When you declare a new variable, the checker will flag every action that doesn't mention it, so missing updates surface immediately rather than hiding as silent stuttering.
 
 The TwoPhase spec shows this clearly: `TMCommit` sets `tmState'` and `msgs'`, then explicitly declares `UNCHANGED <<rmState, tmPrepared>>`. Every variable is accounted for in every action.
 
@@ -167,7 +187,7 @@ MarkReady(p) ==
 
 EXCEPT works naturally on functions: `[rmState EXCEPT ![rm] = "prepared"]` updates one key and leaves the rest unchanged. The TwoPhase spec models the state of every resource manager this way — `rmState` is a function from `RM` to `{"working", "prepared", "committed", "aborted"}`. Adding a fifth RM means changing the constant, not the spec.
 
-The state space is identical either way — 3 independent booleans and a function `[Proc |-> BOOLEAN]` with `|Proc| = 3` both produce 8 states and 24 transitions. The advantage is purely structural: the function version doesn't require code changes when you scale up.
+The state space is identical either way — 3 independent booleans and a function `[Proc -> BOOLEAN]` with `|Proc| = 3`, each with the `MarkReady` step above, both produce 8 states and 12 transitions. The advantage is purely structural: the function version doesn't require code changes when you scale up.
 
 ### Keep State Flat
 
@@ -195,22 +215,37 @@ HandleMsg(n, msg) ==
     /\ UNCHANGED <<nodeStatus>>
 ```
 
-The flat version is easier to read, each action's scope is obvious from its UNCHANGED clause, and you avoid the `[@ EXCEPT !.field = ...]` nesting that gets unreadable past two levels. Like the record vs. separate variables case, state counts are identical — 2 nodes with status and a bounded queue produce 16 states and 48 transitions in both the nested and flat versions. The benefit is readability, not performance.
+The flat version is easier to read, each action's scope is obvious from its UNCHANGED clause, and you avoid the `[@ EXCEPT !.field = ...]` nesting that gets unreadable past two levels. Like the record vs. separate variables case, state counts are identical — 2 nodes with `HandleMsg` above, an action that removes the head of a queue, an action that toggles a node's status between up and down, one message value and queues of at most one message produce 16 states and 56 transitions in both the nested and flat versions. The benefit is readability, not performance.
 
 ## Bug Hunting
 
 The most effective bug-hunting technique is comparative analysis: write the correct spec, then create a variant that removes exactly one guard or precondition. The difference in behavior reveals what that guard was protecting.
 
-For an ownership protocol with compare-and-swap:
-```bash
-# Correct spec — should pass
-tla spec.tla -c 'Users={"u1","u2"}' --allow-deadlock
+For an ownership protocol with compare-and-swap: each user reads the current `owner` into `seen[u]`, then acquires ownership for one of a set of `Requests`, gives up, or later leaves. The safety property is `InvOwnershipSafety == Cardinality({u \in Users : pc[u] = "owns"}) <= 1`. The correct `Acquire` re-checks the owner at the moment of writing:
 
-# Bug variant — remove the CAS check, should violate InvOwnershipSafety
-tla bugs/spec_no_cas.tla -c 'Users={"u1","u2"}' --allow-deadlock --continue
+```tla
+Acquire(u, r) ==
+    /\ pc[u] = "read"
+    /\ r \notin done
+    /\ seen[u] = "none"
+    /\ owner = "none"
+    /\ owner' = u
+    /\ pc' = [pc EXCEPT ![u] = "owns"]
+    /\ done' = done \cup {r}
+    /\ UNCHANGED seen
 ```
 
-The `--continue` flag is critical for bug hunting. Without it, the checker stops at the first violation and you see one trace. With it, you see all violations across the full state space. The difference between "1 violation in 239 states" and "640 violations in 1,668 states" tells you whether the bug is a corner case or a fundamental design flaw.
+The bug variant drops the `owner = "none"` conjunct, so a user acts on the value it read earlier (check-then-write):
+
+```bash
+# Correct spec — should pass
+tla spec.tla -c 'Users={"u1","u2"}' -c 'Requests={"r1","r2"}' --allow-deadlock
+
+# Bug variant — remove the CAS check, should violate InvOwnershipSafety
+tla bugs/spec_no_cas.tla -c 'Users={"u1","u2"}' -c 'Requests={"r1","r2"}' --allow-deadlock --continue
+```
+
+The correct spec passes in 64 states. The `--continue` flag is critical for bug hunting. Without it, the checker stops at the first violation and you see one trace: here after 20 states. With it, you see all violations across the full state space: 2 violations in 70 states for two users, 36 in 584 states with a third user. How the count grows with the constants tells you whether the bug is a corner case or a fundamental design flaw.
 
 ### Quantifying Bug Severity
 
@@ -223,11 +258,11 @@ tla bugs/spec_no_cas.tla \
   --count-satisfying InvOwnershipSafety --verbose
 ```
 
-The depth breakdown shows when the bug first manifests. A TOCTOU race might show 100% safety at depths 1-5, then 90.9% at depth 6, dropping to 0% by depth 11. This tells you the bug requires specific interleaving depth to trigger — it won't show up in simple unit tests.
+The depth breakdown shows when the bug first manifests. For this TOCTOU race, `InvOwnershipSafety` holds in 68 of 70 states (97.1%): in every state at depths 1-4, in 12 of 14 (85.7%) at depth 5, and in every state after. Both users must read the owner before either writes, so the bug needs a specific interleaving four steps deep — it won't show up in simple unit tests.
 
 ### State Space Size as a Signal
 
-When you remove a precondition and the state space grows dramatically, that constraint was doing heavy lifting. In a collaborative editing spec, removing the delete-requires-lock check increased states from 443 to 10,015 (2,162% growth). Removing the edit-requires-lock check grew states to 2,401 (442% growth). The magnitude tells you which guards to prioritize in implementation.
+When you remove a precondition and the state space grows dramatically, that constraint was doing heavy lifting. Compare the reachable state counts of the correct spec and of each single-guard variant: the guard whose removal grows the space the most is the one to prioritize in implementation. Growth is a signal, not a verdict — removing the CAS check above grows the space only from 64 to 70 states, yet it breaks safety.
 
 ## Designing New Systems
 
@@ -264,22 +299,30 @@ After finding the bug, write the fix into the spec and verify it passes. Then wr
 `--sweep` runs the full model check across multiple values of a constant and produces a comparison table:
 
 ```bash
-tla spec.tla \
-  --sweep 'N=2;3;4;5' \
-  --count-satisfying InvSafety \
-  --allow-deadlock
+tla bugs/spec_no_cas.tla \
+  -c 'Requests={"r1","r2"}' \
+  --sweep 'Users={"u1","u2"};{"u1","u2","u3"}' \
+  --count-satisfying InvOwnershipSafety \
+  --allow-deadlock --continue
 ```
 
-This answers questions like "at what team size does QA starvation become structural?" or "how does retry count affect the probability of double delivery?" Look for cliffs — parameter values where behavior changes sharply. If going from N=2 to N=3 drops safety from 100% to 62%, that's the threshold your implementation needs to handle.
+```
+           Users |         states |    transitions |      max_depth |           time | InvOwnershipSafety
+-----------------------------------------------------------------------------------------------------
+     {"u1","u2"} |             70 |            132 |             10 |         0.002s |  68/70 (97.1%)
+{"u1","u2","u3"} |            584 |           1590 |             12 |         0.022s | 548/584 (93.8%)
+```
 
-Sweep results from a team dynamics model showed that `EscalatedCost` had a binary threshold: the jump from 1 to 2 cost 9.4 percentage points of churn, but 2 to 3 added only 0.1pp. Initial resilience was linear: each point bought roughly 3pp churn reduction. These are the kind of insights that change design decisions.
+Pass `--continue` when the counted property is also an invariant (an `Inv*` name is detected as one): without it, each run stops at the first violation and the count column reads `n/a`.
+
+This answers questions like "at what team size does QA starvation become structural?" or "how does retry count affect the probability of double delivery?" Look for cliffs — parameter values where behavior changes sharply. If going from N=2 to N=3 drops safety from 100% to 62%, that's the threshold your implementation needs to handle. A threshold can also be a plateau: a cost parameter whose first increment changes the outcome sharply while later increments barely move it is a design decision worth knowing about.
 
 ## Interactive Exploration
 
 Use `-i` for interactive mode when you want to understand a system's behavior rather than just verify it. You can step through transitions manually, evaluate expressions in the current state, test hypotheses about guards, and trace variable changes across history.
 
 ```bash
-tla spec.tla -c 'Density=3' --allow-deadlock -i
+tla MyProtocol.tla -c 'Users={"u1","u2"}' -c 'Resources={"r1"}' --allow-deadlock -i
 ```
 
 Key bindings: arrow keys to select actions, Enter to take an action, `b` to backtrack, `e` for the REPL, `t` for variable trace, `h` for hypothesis testing, `g` to show guard conditions. When an action has many changes, Right arrow or Space expands the details.
@@ -291,12 +334,21 @@ Interactive mode is especially useful for understanding counterexample traces. A
 Drive the checker along a specific execution path using TLA+ predicates:
 
 ```bash
-tla spec.tla --scenario "step: state'[\"u1\"] = \"active\"
+tla MyProtocol.tla -c 'Users={"u1","u2"}' -c 'Resources={"r1"}' --allow-deadlock \
+  --scenario "step: state'[\"u1\"] = \"active\"
 step: owner'[\"r1\"] = \"u1\"
 step: state'[\"u2\"] = \"active\""
 ```
 
-Each `step:` line is a TLA+ expression over current (unprimed) and next-state (primed) variables. The checker finds a transition matching each predicate in sequence. Use this to validate that a specific path exists in your model — "can we actually reach the state we think we can?" — or to set up a specific scenario before switching to free exploration.
+Each `step:` line is a TLA+ expression over current (unprimed) and next-state (primed) variables. The checker finds a transition matching each predicate in sequence. An `action:` line pins the step to a named action instead, optionally constrained by an expression after a `;`:
+
+```
+action: Start
+action: Claim; owner'["r1"] = "u1"
+action: Release
+```
+
+Put the lines in a file and pass `--scenario @path.txt`. Use this to validate that a specific path exists in your model — "can we actually reach the state we think we can?" — or to set up a specific scenario before switching to free exploration.
 
 ## Constant Sizing
 
@@ -343,7 +395,7 @@ Not every invariant violation is a bug. An offline auth system might have 25% of
 | Find all bugs | `--continue` |
 | Measure safety degradation | `--continue --count-satisfying InvName --verbose` |
 | Compare correct vs buggy | Run both, compare violation counts and satisfaction % |
-| Sensitivity analysis | `--sweep 'Param=V1;V2;V3'` |
+| Sensitivity analysis | `--sweep 'Param=V1;V2;V3' --count-satisfying InvName --continue` |
 | Explore interactively | `-i` |
 | Verify specific path exists | `--scenario @path.txt` |
 | Quick iteration during development | `--quick` |
@@ -352,6 +404,10 @@ Not every invariant violation is a bug. An offline auth system might have 25% of
 | Visualize state graph | `--export-dot graph.dot` |
 | Check liveness/fairness | `--check-liveness` |
 | Use the liveness engine before 0.16 | `--liveness-engine legacy` |
+| Use a cfg file other than `Spec.cfg` | `--config path.cfg` |
+| Treat `Nat`/`Int` as infinite sets | `--symbolic-integers` |
+| Check that the spec refines an instance | `--check-refinement ALIAS` |
+| Treat variables an action leaves unassigned as unchanged | `--allow-unassigned-stutter` |
 
 ## Compositional Specs with INSTANCE
 
@@ -391,16 +447,19 @@ Each qualified call like `ServerToClientChannel(1)!Send(msg)` substitutes `Id=1`
 
 The module file must be in the same directory as the main spec. Library modules (no Init/Next) work as INSTANCE targets. Stdlib modules (Naturals, Sequences, TLC) can be used with `LOCAL INSTANCE` inside any module.
 
+The excerpts above are simplified from [`test_cases/should_pass/pingpong.tla`](test_cases/should_pass/pingpong.tla) and [`MChannel.tla`](test_cases/should_pass/MChannel.tla) (which add a ping counter, type checks and `Assert`s); with two clients and two pings the complete spec explores 17 states:
+
 ```bash
-tla pingpong.tla -c NumberOfClients=2 -c NumberOfPings=2 --allow-deadlock
+tla test_cases/should_pass/pingpong.tla -c NumberOfClients=2 -c NumberOfPings=2 --allow-deadlock
 ```
 
 ## Stack Size
 
-Complex specs with deeply nested function access patterns (like `store[id][field][subfield]`) may need a larger stack. If you get a stack overflow, set:
+Expression evaluation grows its own stack as needed, so deep recursion in a spec does not need any setting (a `RECURSIVE` operator 50,000 calls deep runs on the default stack). Parsing does not: an expression nested about a thousand levels deep (such as 1,000 nested parentheses) overflows the default 8 MB stack on macOS. `RUST_MIN_STACK` does not help, since it applies only to threads the program spawns. Raise the shell's stack limit before running instead:
 
 ```bash
-RUST_MIN_STACK=33554432 tla spec.tla ...
+ulimit -s 65520
+tla spec.tla ...
 ```
 
-This gives 32MB of stack, which handles most real-world specs.
+65520 KB is the hard limit on macOS; `ulimit -Hs` shows the limit on your system.

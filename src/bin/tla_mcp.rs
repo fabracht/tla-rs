@@ -154,7 +154,7 @@ impl ServerHandler for TlaMcpServer {
         info.instructions = Some(
             "TLA+ model checker as MCP tools. Behaviors to follow:\n\
             \n\
-            • `limit_reached` is NOT a pass. It means the budget (max_states / max_depth) was exhausted before exploring the full reachable state space — treat as inconclusive. Either grow the budget OR shrink the state space (smaller constants, enable `symmetry`) before drawing conclusions.\n\
+            • `limit_reached` is NOT a pass. It means the budget (max_states / max_depth / max_seconds) was exhausted before exploring the full reachable state space — treat as inconclusive. Either grow the budget OR shrink the state space (smaller constants, enable `symmetry`) before drawing conclusions.\n\
             \n\
             • Always validate_spec after editing a .tla file. A definition that does not parse is reported in `warnings` with its line, and a use of it fails with that parse error. Cross-check the returned `spec.invariants` list against what you expected: without a cfg INVARIANT, invariants are detected by name (`Inv*`, `TypeOK*`, `NotSolved*`, or a prefix such as `MInv` / `M_TypeOK`), so a misnamed one is not checked.\n\
             \n\

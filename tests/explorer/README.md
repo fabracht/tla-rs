@@ -14,12 +14,18 @@ the Rust render tests can only check as string scaffolding:
 
 The test reads a pre-generated fixture from `fixtures/explore.html`, which
 requires a `tla` binary built with the `embed-wasm` feature (so the wasm engine
-is embedded in the HTML):
+is embedded in the HTML). The build below uses
+[cargo-make](https://github.com/sagiegurari/cargo-make)
+(`cargo install cargo-make`): `cargo make wasm` runs `wasm-bindgen` at the exact
+version of the `wasm-bindgen` crate in `Cargo.lock`, installing a project-local
+copy if needed, as CI does. Without cargo-make, run the two commands it wraps,
+with a `wasm-bindgen-cli` of that same version:
+`cargo rustc --lib --release --target wasm32-unknown-unknown --features wasm --crate-type cdylib`,
+then `wasm-bindgen --target web --out-dir pkg target/wasm32-unknown-unknown/release/tla_checker.wasm`.
 
 ```bash
 # from the repo root — build the wasm engine into pkg/ then a tla with it embedded
-cargo rustc --lib --release --target wasm32-unknown-unknown --features wasm --crate-type cdylib
-wasm-bindgen --target web --out-dir pkg target/wasm32-unknown-unknown/release/tla_checker.wasm
+cargo make wasm
 cargo build --release --bin tla --features embed-wasm
 
 # export the fixture the test expects

@@ -6,11 +6,19 @@ tla-rs verifies TLA+ specifications by exploring all reachable states, checking 
 
 ## Installation
 
+From crates.io (installs both `tla` and the `tla-mcp` server):
+
+```bash
+cargo install tla-checker
+```
+
+From a working copy:
+
 ```bash
 cargo build --release
 ```
 
-The binary will be at `target/release/tla`. Prebuilt binaries and the `tla-mcp` server are available via Homebrew, an install script, or GitHub releases — see the [MCP Server guide](MCP.md#install).
+The binaries will be at `target/release/tla` and `target/release/tla-mcp`. Prebuilt binaries are also available via Homebrew (`brew install fabracht/tla/tla-mcp`), an install script, or GitHub releases — see the [MCP Server guide](MCP.md#install).
 
 ## Quick Start
 
@@ -29,14 +37,16 @@ A bare identifier is a **model value** — an uninterpreted, pairwise-distinct a
 
 ## Options
 
+The most common options are below. The [CLI Guide](CLI_GUIDE.md#options) lists every option, and `tla --help` prints them.
+
 | Option | Description |
 |--------|-------------|
-| `-c NAME=VALUE` | Set a constant value |
-| `-s CONST` | Enable symmetry reduction for a constant |
+| `-c`, `--constant NAME=VALUE` | Set a constant value |
+| `-s`, `--symmetry CONST` | Enable symmetry reduction for a set constant |
 | `--config PATH` | Load TLC-style cfg file (auto-discovers `Spec.cfg` next to `Spec.tla`) |
 | `--max-states N` | Maximum states to explore (default: 1000000) |
 | `--max-depth N` | Maximum trace depth (default: 100) |
-| `-q` | Quick exploration (limit: 10,000 states) |
+| `-q`, `--quick` | Quick exploration (limit: 10,000 states) |
 | `--export-dot FILE` | Export state graph to DOT format |
 | `--dot-mode MODE` | DOT mode: `full`, `trace`, `clean` (default), `choices` |
 | `--allow-deadlock` | Allow states with no successors |
@@ -46,20 +56,21 @@ A bare identifier is a **model value** — an uninterpreted, pairwise-distinct a
 | `--count-satisfying NAME` | Count states satisfying a definition (repeatable) |
 | `--sweep NAME=V1;V2;...` | Sweep a constant across values, compare results |
 | `--scenario TEXT` | Explore a specific scenario (or `@file`) |
-| `-i` | Interactive TUI exploration mode |
+| `-i`, `--interactive` | Interactive TUI exploration mode |
 | `--present FILE` | Run a demo manifest (`.json`/`.toml`); TUI walkthrough, or `--validate` for a pass/fail report |
 | `--export-md FILE` | With `--present`: write a Markdown walkthrough |
 | `--export-html FILE` | With `--present`: write a self-contained HTML walkthrough |
 | `--explorable` | With `--export-html`: embed the wasm engine for in-browser state exploration |
+| `--validate` | Parse and validate the spec without model checking |
 | `--json` | JSON output |
-| `-v` | Verbose output (depth breakdowns, etc.) |
-| `--version`, `-V` | Show version information |
+| `-v`, `--verbose` | Verbose output (depth breakdowns, etc.) |
+| `-V`, `--version` | Show version information |
 
 ## Documentation
 
 | Guide | Contents |
 |-------|----------|
-| [CLI Guide](CLI_GUIDE.md) | Configuration files, scenarios, demo walkthroughs (incl. the `--explorable` browser explorer), interactive mode, analytics, output, and state-graph visualization |
+| [CLI Guide](CLI_GUIDE.md) | Full options reference, configuration files, scenarios, demo walkthroughs (incl. the `--explorable` browser explorer), interactive mode, analytics, output, and state-graph visualization |
 | [TLA+ Support](TLA_SUPPORT.md) | Supported operator subset, module instances, spec structure, and limitations |
 | [WebAssembly](WASM.md) | Browser-embeddable WASM API, including the live stepping bindings |
 | [MCP Server](MCP.md) | `tla-mcp` install, client registration, and tool reference |
@@ -69,4 +80,4 @@ A bare identifier is a **model value** — an uninterpreted, pairwise-distinct a
 
 ## License
 
-MIT
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.

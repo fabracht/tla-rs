@@ -18,7 +18,7 @@ Install tla and tla-mcp binaries from a GitHub release.
 Usage:
   curl -fsSL https://raw.githubusercontent.com/fabracht/tla-rs/main/scripts/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/fabracht/tla-rs/main/scripts/install.sh | bash -s -- --bin tla-mcp
-  curl -fsSL https://raw.githubusercontent.com/fabracht/tla-rs/main/scripts/install.sh | bash -s -- --version v0.4.2 --dir /usr/local/bin
+  curl -fsSL https://raw.githubusercontent.com/fabracht/tla-rs/main/scripts/install.sh | bash -s -- --version v0.24.3 --dir /usr/local/bin
 
 Flags:
   --bin <tla|tla-mcp|both>  Which binary to install (default: both)

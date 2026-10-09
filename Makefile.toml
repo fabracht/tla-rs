@@ -3,8 +3,8 @@ command = "cargo"
 args = ["install", "--path", ".", "--force"]
 
 [tasks.wasm]
-description = "Build wasm package for npm"
-dependencies = ["wasm-clean", "wasm-build", "wasm-bindgen", "wasm-package"]
+description = "Build the wasm engine and its web JS bindings into pkg/"
+dependencies = ["wasm-clean", "wasm-build", "wasm-bindgen"]
 
 [tasks.wasm-clean]
 description = "Clean pkg directory"
@@ -36,58 +36,5 @@ script = [
     fi
     echo "using $("$BIN" --version)"
     "$BIN" --target web --out-dir pkg target/wasm32-unknown-unknown/release/tla_checker.wasm
-    '''
-]
-
-[tasks.wasm-package]
-description = "Generate package.json and copy README into pkg"
-dependencies = ["wasm-bindgen"]
-script = [
-    '''
-    VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-    cat > pkg/package.json << PKGJSON
-{
-  "name": "tla-checker",
-  "version": "$VERSION",
-  "type": "module",
-  "description": "A TLA+ model checker compiled to WebAssembly",
-  "license": "MIT OR Apache-2.0",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/fabracht/tla-rs.git"
-  },
-  "main": "tla_checker.js",
-  "types": "tla_checker.d.ts",
-  "files": [
-    "tla_checker_bg.wasm",
-    "tla_checker.js",
-    "tla_checker.d.ts",
-    "tla_checker_bg.wasm.d.ts"
-  ],
-  "keywords": [
-    "tla",
-    "model-checking",
-    "formal-verification",
-    "wasm"
-  ],
-  "sideEffects": [
-    "./snippets/*"
-  ]
-}
-PKGJSON
-    cp README.md pkg/README.md
-    cd pkg && npm pkg fix
-    '''
-]
-
-[tasks.wasm-publish]
-description = "Build and publish WASM package to npm"
-dependencies = ["wasm"]
-script = [
-    '''
-    echo "Publishing WASM package to npm..."
-    cd pkg
-    npm publish
-    echo "Published tla-checker to npm!"
     '''
 ]

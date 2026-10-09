@@ -16,7 +16,7 @@ Cross-checked against:
 | `\/` | ∨ | Disjunction (OR) |
 | `~` | ¬ | Negation (NOT) |
 | `=>` | ⇒ | Implication |
-| `<=>` | ≡, ⟺ | Equivalence |
+| `<=>`, `\equiv` | ≡ | Equivalence |
 | `\land` | | Conjunction (alias) |
 | `\lor` | | Disjunction (alias) |
 | `\lnot`, `\neg` | | Negation (aliases) |
@@ -40,7 +40,7 @@ Cross-checked against:
 | `*` | | Multiplication |
 | `/` | | Integer division (aliased to `\div`; warns once — in TLA+ `/` is real division from the Reals module, which TLC cannot evaluate and tla-rs does not support; use `\div`) |
 | `\div` | | Integer division |
-| `%` | | Modulo |
+| `%` | | Modulo; the result has the sign of the divisor (`(-7) % 2 = 1`); see [Known Differences from TLC](#known-differences-from-tlc) for a negative divisor |
 | `^` | | Exponentiation |
 | `..` | | Integer range |
 | `\b` | | Binary literals (`\b1010` = 10) |
@@ -60,14 +60,14 @@ Cross-checked against:
 | `\intersect`, `\cap` | ∩ | Intersection |
 | `\` | | Set difference |
 | `\times`, `\X` | × | Cartesian product |
-| `SUBSET` | | Powerset |
+| `SUBSET` | | Powerset (of a set of at most 20 elements by default; `--max-powerset`) |
 | `UNION` | | Distributed union |
 | `{x \in S : P}` | | Set filter |
 | `{e : x \in S}` | | Set map |
 | `{<<x, y>> \in S : P}` | | Set filter with tuple binder |
 | `{e : <<x, y>> \in S}` | | Set map with tuple binder |
 | `Cardinality(S)` | | Set cardinality (FiniteSets) |
-| `IsFiniteSet(S)` | | Finiteness test (FiniteSets) |
+| `IsFiniteSet(S)` | | Finiteness test (FiniteSets): TRUE for every set tla-rs can enumerate, including the default bounded `Nat` and `Int`; FALSE for `STRING`, and for `Nat`/`Int` under `--symbolic-integers`; an error for `Seq(S)` |
 | `BOOLEAN` | | The set `{FALSE, TRUE}` |
 | `STRING` | | The set of all strings: membership only (`s \in STRING`); enumerating it is an error, as in TLC |
 | `"a\"b"` | | String literal; `\"`, `\\`, `\n`, `\t`, `\r` and `\f` are escapes, any other escape is an error |
@@ -81,8 +81,8 @@ Cross-checked against:
 | `\E x \in S, y \in T : P` | | Multiple independent bindings |
 | `\E <<x, y>> \in S : P` | | Tuple-binding destructuring (also `\A`, set comprehensions, `CHOOSE`, fn def) |
 | `CHOOSE x \in S : P` | | Bounded Hilbert choice |
-| `CHOOSE x : x \notin S` | | Unbounded — picks a fresh `MODEL_VALUE_i` not in S |
-| `CHOOSE x : x = e` | | Unbounded — returns `e` (when `e` is independent of `x`) |
+| `CHOOSE x : x \notin S` | | Unbounded — picks a fresh `MODEL_VALUE_i` not in S (TLC rejects unbounded `CHOOSE`) |
+| `CHOOSE x : x = e` | | Unbounded — returns `e` (when `e` is independent of `x`; TLC rejects it) |
 
 ### Function Operators
 | ASCII | Unicode | Description |
@@ -113,6 +113,8 @@ Cross-checked against:
 | `SubSeq(s, m, n)` | Subsequence |
 | `SelectSeq(s, Test)` | Filter sequence by predicate |
 | `Seq(S)` | Set of all sequences (membership tests only, not enumerable) |
+
+As in TLC, `Len`, `\o`, `SubSeq` and `Tail` also accept a string, whose elements are UTF-16 code units: `Len("abc") = 3`, `"ab" \o "c" = "abc"`, `SubSeq("abcd", 2, 3) = "bc"`, `Tail("abc") = "bc"`, `Len("😀") = 2`. `Head`, `Append` and indexing (`"abc"[1]`) reject a string, as TLC does.
 
 ### Record Operators
 | ASCII | Description |
@@ -147,17 +149,17 @@ Cross-checked against:
 | `PrintT(val)` | Shorthand for Print(val, TRUE) |
 | `Assert(cond, msg)` | Assertion (fails if cond false) |
 | `ToString(v)` | Convert value to string |
-| `SystemTime` | Current time in ms since epoch |
-| `JavaTime` | Errors (use SystemTime instead) |
+| `SystemTime` | Current time in ms since epoch (a tla-rs built-in, not defined in TLC.tla) |
+| `JavaTime` | Not supported: evaluating it is an error (use `SystemTime`) |
 | `Permutations(S)` | All permutations of set (max 10 elements by default; `--max-permutations`) |
 | `SortSeq(s, cmp)` | Sort sequence with comparator LAMBDA |
 | `RandomElement(S)` | Random element from set (deterministic with seed) |
-| `TLCGet(i)` | Get TLC state value at index i, or stats with string keys |
+| `TLCGet(i)` | Get the value `TLCSet` stored at index i (FALSE when none was stored, where TLC errors), or a statistic by string key (below) |
 | `TLCSet(i, v)` | Set TLC state value at index i |
 | `Any` | Special constant where `v \in Any` for all v |
 | `TLCEval(v)` | Force eager evaluation (no-op in tla-rs) |
 
-**TLCGet String Keys:** `"distinct"`, `"level"`, `"diameter"`, `"queue"`, `"duration"`, `"generated"`
+**TLCGet String Keys:** `"distinct"`, `"level"`, `"diameter"`, `"queue"`, `"duration"`, `"generated"`. Any other key, including `"config"`, `"stats"`, `"action"` and `"spec"`, which TLC supports, fails with `TLCGet: unknown key`. `TLCGet` in a temporal property is rejected before the search (`liveness_property_error`).
 
 ### Bags Operators
 | ASCII | Unicode | Description |
@@ -210,30 +212,30 @@ Stdlib modules (Naturals, Sequences, TLC, etc.) can be used with `LOCAL INSTANCE
 |--------|--------|
 | `Naturals` | ✓ Nat set (bounded 0..100 by default; infinite symbolic set with `--symbolic-integers`), arithmetic operators built-in |
 | `Integers` | ✓ Int set (bounded -100..100 by default; infinite symbolic set with `--symbolic-integers`), includes Nat |
-| `Sequences` | ✓ All 8 operators: Len, Head, Tail, Append, \o, SubSeq, SelectSeq, Seq(S) |
-| `FiniteSets` | ✓ Cardinality, IsFiniteSet |
-| `TLC` | ✓ All 13 operators |
+| `Sequences` | ✓ All 8 operators: Len, Head, Tail, Append, \o, SubSeq, SelectSeq, Seq(S) (`Seq(S)` membership only) |
+| `FiniteSets` | ✓ Cardinality, IsFiniteSet (see the `IsFiniteSet` row above) |
+| `TLC` | ✓ 13 of the 14 operators of TLC.tla (`Print`, `PrintT`, `Assert`, `TLCGet`, `TLCSet`, `:>`, `@@`, `Permutations`, `SortSeq`, `RandomElement`, `Any`, `ToString`, `TLCEval`); `JavaTime` is not supported, and `TLCGet` supports only the keys above |
 | `Bags` | ✓ All 13 operators |
 | `Bits` | ✓ All 6 operators: BitAnd, BitOr, BitXor, BitNot, ShiftLeft, ShiftRight (built-ins, not module exports) |
 
 ---
 
-## Parsed But Not Evaluated ⚠️
+## Temporal Operators and Liveness
 
 ### Temporal Operators
-These operators are parsed into the AST but error at evaluation time. They can appear in skipped definitions (like `Spec`) without causing errors. Fairness operators are handled by the liveness checker (`--check-liveness`); see **Liveness Property Forms** below for how `<>`, `[]<>`, `<>[]`, and `~>` are checked as top-level properties.
+`[]`, `<>`, `~>` and `\cdot` are parsed into the AST but error when evaluated as a state or action expression. They can appear in definitions that are never evaluated (like `Spec`) without causing errors. Temporal formulas are checked as a cfg `PROPERTY` (or with `--check-liveness`) by the tableau engine described below, and fairness comes from the `SPECIFICATION`.
 
 | ASCII | Unicode | Description | Status |
 |-------|---------|-------------|--------|
 | `[]P` | □ | Always | Parsed, errors if evaluated directly |
 | `<>P` | ◇ | Eventually | Parsed, errors if evaluated directly |
 | `~>` | | Leads-to | Parsed, errors if evaluated directly |
-| `WF_v(A)` | | Weak fairness | ✓ Used in liveness checking via SCC analysis |
-| `SF_v(A)` | | Strong fairness | ✓ Used in liveness checking via SCC analysis |
-| `ENABLED A` | | Action enabled | ✓ In invariants, properties and liveness checking; not in an action that generates states |
+| `WF_v(A)` | | Weak fairness | ✓ A fairness assumption in a `SPECIFICATION`; an obligation inside a `PROPERTY` |
+| `SF_v(A)` | | Strong fairness | ✓ A fairness assumption in a `SPECIFICATION`; an obligation inside a `PROPERTY` |
+| `ENABLED A` | | Action enabled | ✓ In invariants, properties, liveness checking and the next-state relation |
 | `[A]_v` | | Box action | ✓ As an action (`A \/ UNCHANGED v`), e.g. under `ENABLED`; `[][A]_v` is the temporal form |
-| `<<A>>_v` | | Diamond action | Parsed, errors if evaluated directly |
-| `\cdot` | | Action composition | Parsed, errors if evaluated directly |
+| `<<A>>_v` | | Diamond action | ✓ Under `ENABLED` and in temporal properties; as an action of the next-state relation it is an error (TLC accepts it) |
+| `\cdot` | | Action composition | Parsed, errors if evaluated |
 
 The subscript `v` of `WF_v`, `SF_v`, `[A]_v` and `<<A>>_v` may be a variable, a definition, or any parenthesized expression, tuple or record: `WF_<<x, y>>(A)`, `[A]_(x + y)`, `[A]_[a |-> x]`.
 
@@ -309,6 +311,10 @@ Temporal properties may be quantified over a constant set (requires `--check-liv
 | Feature | Description |
 |---------|-------------|
 | Unbounded `\E` / `\A` | `\E x : P` / `\A x : P` without domain (the universe cannot be enumerated). Unbounded `CHOOSE` is supported for the `x \notin S` and `x = e` patterns. |
+| User-defined infix operators | A definition such as `a ** b == a * b` or `a ++ b == a + b` makes the whole module fail to parse ("unexpected `*`"). Defining a predefined backslash operator such as `a \prec b == a < b` works. [#186](https://github.com/fabracht/tla-rs/issues/186) |
+| Top-level function definitions | `f[x \in S] == e` does not parse; the definition is reported with its parse error when used. The same definition inside a `LET` (`LET f[n \in 0..5] == IF n = 0 THEN 1 ELSE n * f[n - 1] IN f[3]`) works, recursion included. [#187](https://github.com/fabracht/tla-rs/issues/187) |
+| Temporal quantifiers | `\EE x : F` and `\AA x : F` do not parse. |
+| `-+->` | The "while-plus" operator does not parse. |
 
 ---
 
@@ -321,7 +327,6 @@ Temporal properties may be quantified over a constant set (requires `--check-liv
 | ∨ | `\/` |
 | ¬ | `~` |
 | ⇒, ⟹ | `=>` |
-| ⟺ | `<=>` |
 | ∈ | `\in` |
 | ∉ | `\notin` |
 | ⊆ | `\subseteq` |
@@ -346,61 +351,68 @@ Temporal properties may be quantified over a constant set (requires `--check-liv
 | □ | `[]` |
 | ◇ | `<>` |
 
----
-
-## Coverage Summary
-
-| Category | Coverage |
-|----------|----------|
-| Logical Operators | 100% ✓ |
-| Comparison | 100% ✓ |
-| Arithmetic | 100% ✓ |
-| Set Operators | 100% ✓ |
-| Quantifiers | 100% ✓ |
-| Functions | 100% ✓ |
-| Sequences | 100% ✓ |
-| Records | 100% ✓ |
-| Control Flow | 100% ✓ |
-| State Operators | 100% ✓ |
-| Relation Operators | 100% ✓ |
-| TLC Module | 100% ✓ |
-| Bags Module | 100% ✓ |
-| Bits Module | 100% ✓ |
-| Standard Library | 100% ✓ |
-| Module System | 100% ✓ |
-| Temporal/Liveness | 60% ⚠ |
-| Proofs | 0% ✗ |
-| Number Formats | 100% ✓ |
+### Not Supported
+`⟨ ⟩` (for `<< >>`), `÷` (for `\div`) and `≜` (for `==`) fail with "unexpected character"; TLC accepts them. `⟺` and `∖` are rejected too, as TLC also rejects them.
 
 ---
 
-## Implementation Priority
+## Known Gaps
 
-### Low Priority (Remaining)
-1. **Proof constructs** (currently safely skipped)
-2. **Unbounded `\E` / `\A`** (`\E x : P` without domain — fundamentally unsupportable for explicit-state checking)
+Everything listed under **Fully Implemented** above parses and evaluates, with these exceptions, each described in its row or section:
+
+- `JavaTime` is not supported, and `TLCGet` supports only six string keys.
+- `SUBSET` is limited to sets of 20 elements, `Permutations` to 10 and `SubBag` to 20 copies by default.
+- `Nat` and `Int` are bounded unless symbolic integers are enabled.
+- `Seq(S)` and `STRING` support membership only.
+- `<<A>>_v` and the temporal operators cannot be evaluated as actions.
+- The constructs listed under **Not Implemented** and the Unicode forms under **Not Supported** are not available.
+
+---
+
+## Known Differences from TLC
+
+Current behavior where tla-rs and TLC disagree on the same input:
+
+| Input | tla-rs | TLC |
+|-------|--------|-----|
+| `Nat`, `Int` | Bounded to `0..100` and `-100..100` unless `--symbolic-integers` (or cfg `SYMBOLIC_INTEGERS TRUE`): `1000 \in Nat` is FALSE with no warning, `IsFiniteSet(Nat)` is TRUE, `Cardinality(Nat) = 101` | Infinite sets |
+| `a / b` | Integer division, with a warning | Parse error with `Integers`: `/` is real division, defined only in the Reals module, which TLC cannot evaluate |
+| `7 % (-2)` | `-1` (the result has the sign of the divisor); [#189](https://github.com/fabracht/tla-rs/issues/189) | Error: the second argument of `%` must be positive |
+| `CHOOSE x : x = 3`, `CHOOSE x : x \notin S` | Evaluated; [#190](https://github.com/fabracht/tla-rs/issues/190) | Error: unbounded `CHOOSE` |
+| `"" = <<>>` | FALSE; [#191](https://github.com/fabracht/tla-rs/issues/191) | Error: equality of a string with a non-string |
+| `TLCGet(i)` for an index never set | FALSE; [#193](https://github.com/fabracht/tla-rs/issues/193) | Error |
+| `TLCGet("config")`, `"stats"`, `"action"`, `"spec"` | Error: unknown key | Supported |
+| `JavaTime` | Error | Current time |
+| `Next == <<A>>_v` | Error: `<<A>>_v` cannot be evaluated as an action; [#188](https://github.com/fabracht/tla-rs/issues/188) | Checked as the action `A /\ v' # v` |
+| `a ** b == a * b` (user-defined infix operator) | The module fails to parse; [#186](https://github.com/fabracht/tla-rs/issues/186) | Supported |
+| `f[x \in S] == e` at the top level | The definition does not parse; [#187](https://github.com/fabracht/tla-rs/issues/187) | Supported |
+| `⟨1, 2⟩`, `1 ÷ 1`, `Op ≜ e` | Error: unexpected character; [#194](https://github.com/fabracht/tla-rs/issues/194) | Supported |
+| `Cardinality` used without `EXTENDS FiniteSets` | Evaluated; [#192](https://github.com/fabracht/tla-rs/issues/192) | Error: unknown operator |
+| cfg `ACTION_CONSTRAINT`, `ALIAS`, `POSTCONDITION` | Ignored, with the warning "not yet supported, ignoring" | Supported |
+| Liveness under `SYMMETRY` | Checked on the graph expanded by the symmetry group (TLC's verdict without `SYMMETRY`) | Unsound for liveness (TLC warns) |
 
 ---
 
 ## Test Results (Official Examples)
 
+Numbers are from the 0.24.4 CLI on the specs in `test_cases/official/`, with the constants and flags given (a spec with its own cfg is run with it); where marked, TLC finds the same number of distinct states.
+
 | Spec | Status | Notes |
 |------|--------|-------|
-| CarTalkPuzzle | ✓ | Logic puzzle |
-| DieHard | ✓ | Finds solution (11 states) |
-| EWD840 | ✓ | Termination detection (64 states, N=2) |
-| Hanoi | ✓ | Tower of Hanoi puzzle |
+| CarTalkPuzzle | ✓ | Constant module (no variables): `--validate` with `N=40`, `P=4` parses and evaluates it, reporting only that no `VARIABLES` are declared |
+| DieHard | ✓ | Finds the solution: `NotSolved` violated after 14 states explored, 7-state trace |
+| EWD840 | ✓ | Termination detection, `N=2`, `--allow-deadlock`: 54 states (TLC: 54) |
+| Hanoi | ✓ | `D=3`, `N=3`: finds the solution, `NotSolved` violated with an 8-state trace |
 | HourClock | ✓ | 12 states |
-| MissionariesAndCannibals | ✓ | Classic puzzle (64 states) |
-| Paxos | ✓ | Large state space |
-| Prisoners | ✓ | 74 states |
-| Queens | ✓ | N-Queens constraint satisfaction |
-| Reachability | ✓ | Graph reachability |
-| SimpleAllocator | ✓ | 64 states |
-| TCommit | ✓ | Transaction commit (12 states) |
-| TwoPhase | ✓ | Two-phase commit (56 states, RM=2) |
-| Voting | ✓ | Bounded via `MaxBallot` constant (599 states) |
-| Paxos | ✓ | Bounded via `MaxBallot` constant (3921 states) |
+| MissionariesAndCannibals | ✓ | `Missionaries={m1,m2,m3}`, `Cannibals={c1,c2,c3}`: 64 states |
+| Prisoners | ✓ | `Prisoner={"a","b","c"}`, `Counter="a"`: 70 states (TLC: 70) |
+| Queens | ✓ | `N=4`, `--allow-deadlock`: 785 states (TLC: 785) |
+| Reachability | ✓ | `Nodes={1,2,3}`, `Succ=1 :> {2} @@ 2 :> {3} @@ 3 :> {}`, `--allow-deadlock`: 7 states |
+| SimpleAllocator | ✓ | `Clients={c1,c2}`, `Resources={r1,r2}`: 64 states |
+| TCommit | ✓ | Transaction commit, `RM={r1,r2}`, `--allow-deadlock`: 12 states |
+| TwoPhase | ✓ | Two-phase commit: 56 states with `RM={r1,r2}`, 288 with the three RMs of its cfg |
+| Voting | ✓ | Bounded via `MaxBallot` constant (599 states, its cfg) |
+| Paxos | ✓ | Bounded via `MaxBallot` constant (3921 states, its cfg) |
 
 ---
 

@@ -20,7 +20,7 @@
         </p>
         <p class="lede">
           Plug a working model checker into Claude Code, Cursor, or any
-          MCP-aware client. Validate specs, replay counterexamples, and
+          MCP-aware client. Validate specs, replay scenarios, and
           catch invariant violations without leaving the conversation.
         </p>
         <div class="badges">
@@ -28,15 +28,11 @@
             ><img alt="crates.io"
               src="https://img.shields.io/crates/v/tla-checker?style=flat-square&amp;label=crates.io"
           /></a>
-          <a href="https://www.npmjs.com/package/tla-checker"
-            ><img alt="npm"
-              src="https://img.shields.io/npm/v/tla-checker?style=flat-square&amp;label=npm"
-          /></a>
           <a href="https://github.com/fabracht/tla-rs/releases/latest"
             ><img alt="latest release"
               src="https://img.shields.io/github/v/release/fabracht/tla-rs?style=flat-square&amp;label=release"
           /></a>
-          <a href="https://github.com/fabracht/tla-rs/blob/main/LICENSE"
+          <a href="https://github.com/fabracht/tla-rs/blob/main/LICENSE-MIT"
             ><img alt="license"
               src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square"
           /></a>
@@ -71,11 +67,12 @@
 
         <h3>Homebrew (macOS, Linuxbrew)</h3>
         <pre><code>brew install fabracht/tla/tla-mcp</code></pre>
-        <p class="aside">Installs both <code>tla</code> (model checker CLI) and <code>tla-mcp</code> (MCP server).</p>
+        <p class="aside">Installs both <code>tla</code> (model checker CLI) and <code>tla-mcp</code> (MCP server). The <a href="https://github.com/fabracht/homebrew-tla">tap</a> is updated on every release.</p>
 
         <h3>Install script (Linux, macOS)</h3>
         <pre><code>curl -fsSL https://raw.githubusercontent.com/fabracht/tla-rs/main/scripts/install.sh | bash</code></pre>
-        <p class="aside">SHA256-verified binary download. Pass <code>--bin tla-mcp</code> to install just the server.</p>
+        <p class="aside">SHA256-verified binary download. To install just the server, pass flags after <code>bash -s --</code>:</p>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/fabracht/tla-rs/main/scripts/install.sh | bash -s -- --bin tla-mcp</code></pre>
 
         <h3>Cargo (any platform with a Rust toolchain)</h3>
         <pre><code>cargo install tla-checker --bin tla-mcp</code></pre>
@@ -84,14 +81,18 @@
         <p>
           Linux x86_64, macOS x86_64, macOS arm64, Windows x86_64 are attached to
           every <a href="https://github.com/fabracht/tla-rs/releases/latest">GitHub release</a>
-          as <code>tla-&lt;platform&gt;</code> and <code>tla-mcp-&lt;platform&gt;</code>,
-          alongside a <code>SHA256SUMS</code> file.
+          as <code>tla-&lt;platform&gt;</code> and <code>tla-mcp-&lt;platform&gt;</code>
+          (<code>linux-amd64</code>, <code>macos-amd64</code>, <code>macos-arm64</code>,
+          <code>windows-amd64.exe</code>), alongside a <code>SHA256SUMS</code> file and the
+          browser engine (<code>tla_checker.js</code>, <code>tla_checker_bg.wasm</code>).
         </p>
       </section>
 
       <section id="register">
         <h2>Register with your client</h2>
-        <p>Add to your MCP client config (Claude Code example, <code>~/.claude/mcp.json</code>):</p>
+        <p>Claude Code:</p>
+        <pre><code>claude mcp add --scope user tla -- tla-mcp</code></pre>
+        <p>Other MCP clients (e.g. <code>claude_desktop_config.json</code>):</p>
         <pre><code>{
   "mcpServers": {
     "tla": {
@@ -99,12 +100,12 @@
     }
   }
 }</code></pre>
-        <p>Restart the client. The four tools become available immediately.</p>
+        <p>Restart the client. The eight tools become available immediately.</p>
       </section>
 
       <section id="tools">
         <h2>What the agent gets</h2>
-        <p>Eight tools, versioned JSON schemas (<code>schema_version: "1"</code>):</p>
+        <p>Eight tools, versioned JSON schemas (<code>schema_version: "2"</code>):</p>
         <table>
           <thead>
             <tr><th><code>tool</code></th><th>purpose</th></tr>
@@ -121,8 +122,10 @@
             <tr>
               <td><code>list_invariants</code></td>
               <td>
-                Return invariant names matching <code>Inv*</code>, <code>TypeOK*</code>, <code>NotSolved*</code>,
-                plus anything declared via cfg <code>INVARIANT</code> directive.
+                Return the invariants <code>check_spec</code> will verify: the definitions a cfg
+                <code>INVARIANT</code> directive lists, or, without one, those named <code>Inv*</code>,
+                <code>TypeOK*</code>, <code>NotSolved*</code>, or a module prefix plus <code>Inv</code>/<code>TypeOK</code>
+                (<code>MInv</code>, <code>M_TypeOK</code>).
               </td>
             </tr>
             <tr>
@@ -138,7 +141,8 @@
             <tr>
               <td><code>replay_scenario</code></td>
               <td>
-                Step through a spec along a guided path (<code>step: &lt;TLA+ expr&gt;</code> lines).
+                Step through a spec along a guided path (<code>step: &lt;TLA+ expr&gt;</code> or
+                <code>action: &lt;Name&gt;</code> lines).
                 Returns per-step state snapshots + variable changes, or a failure with
                 <code>available_actions</code> on a mismatch.
               </td>
@@ -166,7 +170,7 @@
               <td>
                 Render a demo manifest to a self-contained, offline HTML walkthrough.
                 Pass <code>explorable: true</code> to embed the wasm engine as a live
-                in-browser state explorer (step actions, live invariants, expression REPL).
+                in-browser state explorer (step actions, live invariants).
               </td>
             </tr>
           </tbody>

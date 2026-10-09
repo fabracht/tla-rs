@@ -1,19 +1,8 @@
 # Homebrew formula for tla-rs
 
-`tla-mcp.rb` is a Homebrew formula that installs both the `tla` model checker and the `tla-mcp` MCP server from prebuilt GitHub release binaries. It is **not** discoverable via `brew install` unless it lives in a tap repository.
+`tla-mcp.rb` is a Homebrew formula that installs both the `tla` model checker and the `tla-mcp` MCP server from prebuilt GitHub release binaries.
 
-## Setting up the tap (one-time, by the maintainer)
-
-1. Create a new public GitHub repo named `homebrew-tla` under the same owner as `tla-rs`. The `homebrew-` prefix is required — without it `brew tap` will reject the URL.
-2. Add a `Formula/` directory and copy this file into it:
-
-   ```
-   homebrew-tla/
-   └── Formula/
-       └── tla-mcp.rb
-   ```
-
-3. Commit and push. The tap is now usable as `<owner>/tla`.
+The formula is published through the tap repository [`fabracht/homebrew-tla`](https://github.com/fabracht/homebrew-tla), at `Formula/tla-mcp.rb`. The copy in this directory is a reference template that the release workflow does not read: its `version`, URLs and checksums still point at v0.6.7. The tap's copy is the live formula, and its version, URLs and checksums are rewritten on every release (see below).
 
 ## Installing (users)
 
