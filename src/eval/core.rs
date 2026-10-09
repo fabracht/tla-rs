@@ -10,9 +10,9 @@ use super::global_state::{
     CHECKER_STATS, PARAMETERIZED_INSTANCES, RESOLVED_INSTANCES, RNG, TLC_STATE,
 };
 use super::helpers::{
-    apply_fn_value, cartesian_product_records, eval_bool, eval_fn, eval_int, eval_record, eval_set,
-    eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_symbolic_set_expr,
-    update_nested_value,
+    Sequence, apply_fn_value, cartesian_product_records, eval_bool, eval_fn, eval_int, eval_record,
+    eval_set, eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_symbolic_set_expr,
+    subseq_range, update_nested_value,
 };
 use super::recursive::{apply_active_function, eval_fn_def_recursive};
 use crate::ast::{Env, Expr, Value};
@@ -1102,10 +1102,9 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             }
         }
 
-        Expr::Len(seq) => {
-            let tv = eval_tuple(seq, env, defs)?;
-            Ok(Value::Int(tv.len() as i64))
-        }
+        Expr::Len(seq) => Ok(Value::Int(
+            Sequence::from_value(eval(seq, env, defs)?)?.len() as i64,
+        )),
 
         Expr::Head(seq) => {
             let tv = eval_tuple(seq, env, defs)?;
@@ -1115,11 +1114,11 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Tail(seq) => {
-            let tv = eval_tuple(seq, env, defs)?;
-            if tv.is_empty() {
-                return Err(EvalError::domain_error("Tail of empty sequence"));
+            let sequence = Sequence::from_value(eval(seq, env, defs)?)?;
+            match sequence.len() {
+                0 => Err(EvalError::domain_error("Tail of empty sequence")),
+                len => Ok(sequence.slice(1..len)),
             }
-            Ok(Value::tuple(tv[1..].to_vec()))
         }
 
         Expr::Append(seq, elem) => {
@@ -1130,21 +1129,35 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Concat(seq1, seq2) => {
-            let mut tv1 = eval_tuple(seq1, env, defs)?;
-            let tv2 = eval_tuple(seq2, env, defs)?;
-            tv1.extend(tv2);
-            Ok(Value::tuple(tv1))
+            let first = Sequence::from_value(eval(seq1, env, defs)?)?;
+            let second = Sequence::from_value(eval(seq2, env, defs)?)?;
+            match (first, second) {
+                (Sequence::Str(a), Sequence::Str(b)) => {
+                    Ok(Value::Str(Arc::from(format!("{a}{b}"))))
+                }
+                (Sequence::Tuple(a), Sequence::Tuple(b)) => {
+                    Ok(Value::tuple([a.as_slice(), b.as_slice()].concat()))
+                }
+                (Sequence::Str(_), Sequence::Tuple(b)) => Err(EvalError::TypeMismatch {
+                    expected: "Str",
+                    got: Value::Tuple(b),
+                    context: Some("\\o with a string operand"),
+                    span: None,
+                }),
+                (Sequence::Tuple(_), Sequence::Str(b)) => Err(EvalError::TypeMismatch {
+                    expected: "Tuple",
+                    got: Value::Str(b),
+                    context: Some("\\o with a sequence operand"),
+                    span: None,
+                }),
+            }
         }
 
         Expr::SubSeq(seq, start, end) => {
-            let tv = eval_tuple(seq, env, defs)?;
-            let s = eval_int(start, env, defs)? as usize;
-            let e = eval_int(end, env, defs)? as usize;
-            if s < 1 || s > tv.len() + 1 || e < s - 1 || e > tv.len() {
-                return Err(EvalError::domain_error("SubSeq index out of bounds"));
-            }
-            let subseq = tv.get((s - 1)..e).unwrap_or(&[]).to_vec();
-            Ok(Value::tuple(subseq))
+            let sequence = Sequence::from_value(eval(seq, env, defs)?)?;
+            let first = eval_int(start, env, defs)?;
+            let last = eval_int(end, env, defs)?;
+            Ok(sequence.slice(subseq_range(first, last, sequence.len())?))
         }
 
         Expr::SelectSeq(seq, test) => {

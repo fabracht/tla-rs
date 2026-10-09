@@ -1592,6 +1592,56 @@ fn test_should_error_recursive_fn_out_of_domain() {
 }
 
 #[test]
+fn test_should_error_string_concat_with_sequence() {
+    let path = Path::new("test_cases/should_error/string_concat_with_sequence.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(&result, CheckResult::InvariantError(e, ..) if e.to_string().contains("expected Str")),
+        "a string concatenated with a sequence must be an error, as in TLC, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_should_error_sequence_concat_with_string() {
+    let path = Path::new("test_cases/should_error/sequence_concat_with_string.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(&result, CheckResult::InvariantError(e, ..) if e.to_string().contains("expected Tuple")),
+        "a sequence concatenated with a string must be an error, as in TLC, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_should_error_tail_of_empty_string() {
+    let path = Path::new("test_cases/should_error/tail_of_empty_string.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(&result, CheckResult::InvariantError(e, ..) if e.to_string().contains("Tail of empty sequence")),
+        "Tail of the empty string must be an error, as in TLC, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_should_error_subseq_start_out_of_domain() {
+    let path = Path::new("test_cases/should_error/subseq_start_out_of_domain.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(&result, CheckResult::InvariantError(e, ..) if e.to_string().contains("SubSeq start 0 not in the sequence's domain 1..3")),
+        "a SubSeq start outside the domain must be an error, as in TLC, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_should_error_subseq_end_out_of_domain() {
+    let path = Path::new("test_cases/should_error/subseq_end_out_of_domain.tla");
+    let result = check_spec_file_allow_deadlock(path);
+    assert!(
+        matches!(&result, CheckResult::InvariantError(e, ..) if e.to_string().contains("SubSeq end 3 not in the sequence's domain 1..2")),
+        "a SubSeq end outside the domain must be an error, as in TLC, got: {result:?}"
+    );
+}
+
+#[test]
 fn test_should_error_invariant_error() {
     let path = Path::new("test_cases/should_error/invariant_error.tla");
     let result = check_spec_file(path);
@@ -2145,6 +2195,15 @@ fn test_should_pass_strings() {
     match check_spec_file(path) {
         CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
         other => panic!("strings.tla should pass, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_pass_string_sequence_operators() {
+    let path = Path::new("test_cases/should_pass/string_sequence_operators.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("Len, \\o, SubSeq and Tail must accept strings, got: {other:?}"),
     }
 }
 
