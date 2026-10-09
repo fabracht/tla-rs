@@ -742,8 +742,8 @@ fn main() -> ExitCode {
                 println!("    step: pc'[\"p1\"] = \"critical\"    # p1 enters critical section");
                 println!("    step: count' = count + 1        # count increments by 1");
                 println!("    step: x' # x                    # x changes (any value)");
-                println!("    action: NTPSync                 # the NTPSync action fires");
-                println!("    action: Cadence; tampered' = TRUE  # Cadence sets tampered");
+                println!("    action: Next                    # any transition of Next");
+                println!("    action: Inc; x' > x             # Inc, with x increasing");
                 return ExitCode::SUCCESS;
             }
             arg if arg.starts_with('-') => {

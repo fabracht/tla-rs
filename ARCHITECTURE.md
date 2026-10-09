@@ -195,7 +195,7 @@ pub enum Value {
 - Logic, comparison and arithmetic: `And`, `Or`, `Not`, `Implies`, `Equiv`, `Eq`, `Neq`, `Lt`/`Le`/`Gt`/`Ge`, `In`, `NotIn`, `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Exp`, `Neg`, `BitwiseAnd`.
 - Sets: `SetEnum`, `SetRange`, `SetFilter`, `SetMap`, `Union`, `Intersect`, `SetMinus`, `Cartesian`, `Subset`, `ProperSubset`, `Powerset`, `BigUnion`, `Cardinality`, `IsFiniteSet`.
 - Binders: `Exists`, `Forall`, `Choose`, `ChooseUnbounded`, `Let`, `Lambda`.
-- Functions, records, tuples: `FnApp`, `FnDef`, `FnCall` (operator application), `FnMerge` (`@@`), `SingleFn` (`:>`), `Except`, `Domain`, `FunctionSet`, `RecordLit`, `RecordSet`, `RecordAccess`, `TupleLit`, `TupleAccess`, `CustomOp` (user-defined infix operators).
+- Functions, records, tuples: `FnApp`, `FnDef`, `FnCall` (operator application), `FnMerge` (`@@`), `SingleFn` (`:>`), `Except`, `Domain`, `FunctionSet`, `RecordLit`, `RecordSet`, `RecordAccess`, `TupleLit`, `TupleAccess`, `CustomOp` (predefined backslash infix operators such as `\prec` or `\oplus`, including user definitions of them; a user definition with a symbol name such as `**` does not parse, [#186](https://github.com/fabracht/tla-rs/issues/186)).
 - Sequences, Bags and TLC module operators (`Len`, `Append`, `SubSeq`, `SelectSeq`, `SeqSet`, `BagAdd`, `SubBag`, …, `Print`, `Assert`, `Permutations`, `SortSeq`, `RandomElement`, `TLCGet`, `TLCSet`, `TLCEval`, `Any`, …) are dedicated variants.
 - Relations: `TransitiveClosure` (`^+`), `ReflexiveTransitiveClosure` (`^*`), `ActionCompose` (`\cdot`).
 - Control: `If`, `Case`, `Unchanged`, `LabeledAction`.
@@ -232,7 +232,7 @@ A recursive-descent parser. Expression precedence, lowest to highest (`parser/ex
 5. `@@`
 6. `:>`
 7. `..`
-8. additive: `+`, `-`, `\union`, `\intersect`, `\`, `\times`, `\o`, bag `(+)` / `(-)`, user infix operators
+8. additive: `+`, `-`, `\union`, `\intersect`, `\`, `\times`, `\o`, bag `(+)` / `(-)`, backslash infix operators (`CustomOp`)
 9. multiplicative: `*`, `/`, `\div`, `%`, `&`
 10. `^`
 11. prefix: `~`, `-`, `DOMAIN`, `SUBSET`, `UNION`, `ENABLED`, `[]`, `<>`, …

@@ -100,6 +100,7 @@ The boolean toggles `allow_deadlock` and `check_liveness` are `Option<bool>` —
 | `spec_path` | Path to the `.tla` file (required). |
 | `config_path` | Path to a cfg file. When omitted, `<spec>.cfg` next to the spec is loaded if it exists. |
 | `constants` | Map of constant name to value string, in the same formats as the CLI `--constant` (`"3"`, `"{p1, p2}"`, `"<<1, 2>>"`). Overrides a cfg constant of the same name. |
+| `liveness_engine` | `"tableau"` (default) or `"legacy"` (above). |
 
 `check_spec` additionally takes:
 
@@ -112,7 +113,6 @@ The boolean toggles `allow_deadlock` and `check_liveness` are `Option<bool>` —
 | `state_constraint` | Inline constraint expression (above). |
 | `count_satisfying` | Names of zero-argument boolean definitions to evaluate on every reachable state; counts come back in `stats.property_stats` as `{name, satisfied, violated, errors}`. |
 | `continue_on_violation` | Default `false`. When `true`, invariant violations (and violations of a `PROPERTY`'s `[][A]_v` parts) are counted instead of ending the run: the result reports the outcome of the rest of the search (`ok` if nothing else fails, unlike the CLI's `--continue --json`: [#196](https://github.com/fabracht/tla-rs/issues/196)) and lists the counts in `stats.violations` (`{kind, name, count}`) and `stats.violation_count`, without traces. |
-| `liveness_engine` | `"tableau"` (default) or `"legacy"` (above). |
 
 ### Outputs
 

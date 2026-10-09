@@ -365,7 +365,7 @@ Everything listed under **Fully Implemented** above parses and evaluates, with t
 - `Nat` and `Int` are bounded unless symbolic integers are enabled.
 - `Seq(S)` and `STRING` support membership only.
 - `<<A>>_v` and the temporal operators cannot be evaluated as actions.
-- The items under **Not Implemented** and **Not Supported** Unicode.
+- The constructs listed under **Not Implemented** and the Unicode forms under **Not Supported** are not available.
 
 ---
 
@@ -395,22 +395,22 @@ Current behavior where tla-rs and TLC disagree on the same input:
 
 ## Test Results (Official Examples)
 
-Numbers are from the 0.24.3 CLI with the constants given; where marked, TLC finds the same number of distinct states.
+Numbers are from the 0.24.4 CLI on the specs in `test_cases/official/`, with the constants and flags given (a spec with its own cfg is run with it); where marked, TLC finds the same number of distinct states.
 
 | Spec | Status | Notes |
 |------|--------|-------|
-| CarTalkPuzzle | ✓ | Constant module (no variables); passes `--validate` with `N=40`, `P=4` |
+| CarTalkPuzzle | ✓ | Constant module (no variables): `--validate` with `N=40`, `P=4` parses and evaluates it, reporting only that no `VARIABLES` are declared |
 | DieHard | ✓ | Finds the solution: `NotSolved` violated after 14 states explored, 7-state trace |
-| EWD840 | ✓ | Termination detection, `N=2`: 54 states (TLC: 54) |
+| EWD840 | ✓ | Termination detection, `N=2`, `--allow-deadlock`: 54 states (TLC: 54) |
 | Hanoi | ✓ | `D=3`, `N=3`: finds the solution, `NotSolved` violated with an 8-state trace |
 | HourClock | ✓ | 12 states |
-| MissionariesAndCannibals | ✓ | Three of each: 64 states |
+| MissionariesAndCannibals | ✓ | `Missionaries={m1,m2,m3}`, `Cannibals={c1,c2,c3}`: 64 states |
 | Prisoners | ✓ | `Prisoner={"a","b","c"}`, `Counter="a"`: 70 states (TLC: 70) |
 | Queens | ✓ | `N=4`, `--allow-deadlock`: 785 states (TLC: 785) |
-| Reachability | ✓ | Three nodes in a chain: 7 states |
-| SimpleAllocator | ✓ | Two clients, two resources: 64 states |
-| TCommit | ✓ | Transaction commit, two RMs: 12 states |
-| TwoPhase | ✓ | Two-phase commit: 56 states with two RMs, 288 with the three RMs of its cfg |
+| Reachability | ✓ | `Nodes={1,2,3}`, `Succ=1 :> {2} @@ 2 :> {3} @@ 3 :> {}`, `--allow-deadlock`: 7 states |
+| SimpleAllocator | ✓ | `Clients={c1,c2}`, `Resources={r1,r2}`: 64 states |
+| TCommit | ✓ | Transaction commit, `RM={r1,r2}`, `--allow-deadlock`: 12 states |
+| TwoPhase | ✓ | Two-phase commit: 56 states with `RM={r1,r2}`, 288 with the three RMs of its cfg |
 | Voting | ✓ | Bounded via `MaxBallot` constant (599 states, its cfg) |
 | Paxos | ✓ | Bounded via `MaxBallot` constant (3921 states, its cfg) |
 

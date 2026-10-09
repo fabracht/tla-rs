@@ -22,7 +22,7 @@ The WASM API provides four checking bindings, each taking the spec source and re
 | `check_spec_with_cfg(spec, cfg_source, constants_json, max_states, max_depth, allow_deadlock, export_dot)` | A TLC-style cfg plus explicit limits. |
 | `check_spec_with_options(spec, options_json)` | A JSON options object (below). |
 
-The result has `success`, `error_type` and `error_message` (`null` on success), `states_explored`, `trace` (the counterexample as formatted text, or `null`), `dot` (the DOT graph when requested, or `null`), and `warnings`.
+The result has `success`, `error_type` and `error_message` (`null` on success), `states_explored`, `trace` (the counterexample as an array of strings, one formatted state each, or `null`), `dot` (the DOT graph when requested, or `null`), and `warnings`.
 
 The `check_spec_with_options` API accepts a JSON options object:
 
