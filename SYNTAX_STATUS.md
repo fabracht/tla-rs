@@ -197,11 +197,11 @@ As in TLC, `Len`, `\o`, `SubSeq` and `Tail` also accept a string, whose elements
 | `CONSTANT(S)` | Constants |
 | `ASSUME` | Evaluated at startup; aborts if any constraint is FALSE |
 | `RECURSIVE` | Recursive operator (stack overflow protected via `stacker`) |
-| `INSTANCE M WITH p <- e` | Static module instantiation with substitutions |
+| `INSTANCE M WITH p <- e` | Static module instantiation with substitutions; M's definitions are imported into the module that declares it, in the root or in a module it extends |
 | `A(x) == INSTANCE M WITH p <- e` | Parameterized module instantiation |
 | `A!Op(args)` | Qualified call to instance operator |
 | `A(x)!Op(args)` | Qualified call to parameterized instance operator |
-| `LOCAL` | Local definitions and instances (not exported) |
+| `LOCAL` | Local definitions and instances; a `LOCAL INSTANCE` is exported (see [Known Differences from TLC](#known-differences-from-tlc)) |
 | `Label::` | Action labels (consumed by parser, used for action naming) |
 
 Library modules (modules without Init/Next) are supported for use as instance targets.
@@ -389,6 +389,7 @@ Current behavior where tla-rs and TLC disagree on the same input:
 | `⟨1, 2⟩`, `1 ÷ 1`, `Op ≜ e` | Error: unexpected character; [#194](https://github.com/fabracht/tla-rs/issues/194) | Supported |
 | `Cardinality` used without `EXTENDS FiniteSets` | Evaluated; [#192](https://github.com/fabracht/tla-rs/issues/192) | Error: unknown operator |
 | cfg `ACTION_CONSTRAINT`, `ALIAS`, `POSTCONDITION` | Ignored, with the warning "not yet supported, ignoring" | Supported |
+| `LOCAL INSTANCE M` in a module another extends | M's definitions are visible to the extending module too | Visible only inside the module that declares it |
 | Liveness under `SYMMETRY` | Checked on the graph expanded by the symmetry group (TLC's verdict without `SYMMETRY`) | Unsound for liveness (TLC warns) |
 
 ---

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::ast::{DefinitionMap, Expr, Spec, UnparsedDefinition};
+use crate::ast::{DefinitionMap, Expr, InstanceDecl, Spec, UnparsedDefinition};
 use crate::eval::{Definitions, ParameterizedInstance, ParameterizedInstances};
 use crate::parser;
 use crate::substitution::apply_substitutions;
@@ -13,6 +13,23 @@ pub enum ModuleError {
     ParseError(String),
     CyclicDependency(Arc<str>),
     IoError(String),
+}
+
+impl ModuleError {
+    pub fn describe(&self, module: &str) -> String {
+        match self {
+            ModuleError::ParseError(message) => {
+                format!("parse error in module {module}: {message}")
+            }
+            ModuleError::NotFound(_) => {
+                format!("module {module} not found (no file {module}.tla in spec directory)")
+            }
+            ModuleError::CyclicDependency(dep) => format!("cyclic dependency loading module {dep}"),
+            ModuleError::IoError(message) => {
+                format!("I/O error loading module {module}: {message}")
+            }
+        }
+    }
 }
 
 pub struct ModuleRegistry {
@@ -114,8 +131,17 @@ impl Default for ModuleRegistry {
 /// definition overrides one it extends, the root's override all). A state is
 /// indexed by `spec.vars`, and the cfg names definitions, so both must be complete
 /// before the cfg is applied and the spec is checked. A module that does not parse is an error, so it is reported
-/// before the cfg names a definition it was to provide; a module that cannot be
-/// found or read is skipped here, and [`crate::checker::prepare_spec`] reports why.
+/// before the cfg names a definition it was to provide; an extended module that
+/// cannot be found or read is skipped here, and [`crate::checker::prepare_spec`]
+/// reports why.
+///
+/// An unnamed `INSTANCE M` (`LOCAL` or not), in the root or in a module it extends,
+/// imports the definitions M exports, with its `WITH` substitutions applied, under
+/// the definitions of the module that declares it. Definitions are one flat map, so
+/// a `LOCAL INSTANCE` is exported too. The standard modules these instanced modules
+/// extend or instance, and the instanced modules that cannot be found or read, are
+/// added to `spec.instances`: [`crate::checker::prepare_spec`] loads the constants
+/// (`Nat`, `Int`) of the first and reports why the others failed.
 pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<(), String> {
     let mut registry = ModuleRegistry::new();
     let mut visited = Vec::new();
@@ -129,10 +155,25 @@ pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<
             &mut declarations,
         )?;
     }
+    let imported =
+        instanced_definitions(&spec.instances, spec_path, &mut registry, &mut Vec::new())?;
+    declarations.import(imported);
     declarations.add(&spec.vars, &spec.constants, &spec.definitions);
     spec.vars = declarations.vars;
     spec.constants = declarations.constants;
     spec.definitions = declarations.definitions;
+    for module in declarations.deferred_modules {
+        let loaded = spec.extends.contains(&module)
+            || spec.instances.iter().any(|inst| inst.module_name == module);
+        if !loaded {
+            spec.instances.push(InstanceDecl {
+                alias: None,
+                params: Vec::new(),
+                module_name: module,
+                substitutions: Vec::new(),
+            });
+        }
+    }
     Ok(())
 }
 
@@ -141,6 +182,7 @@ struct Declarations {
     vars: Vec<Arc<str>>,
     constants: Vec<Arc<str>>,
     definitions: DefinitionMap,
+    deferred_modules: Vec<Arc<str>>,
 }
 
 impl Declarations {
@@ -156,6 +198,15 @@ impl Declarations {
         for constant in constants {
             if !self.constants.contains(constant) {
                 self.constants.push(constant.clone());
+            }
+        }
+    }
+
+    fn import(&mut self, imported: Imported) {
+        self.definitions.extend(imported.definitions);
+        for module in imported.deferred_modules {
+            if !self.deferred_modules.contains(&module) {
+                self.deferred_modules.push(module);
             }
         }
     }
@@ -179,8 +230,9 @@ fn collect_declarations(
         }
         Err(_) => return Ok(()),
     };
-    let (extends, vars, constants, definitions) = (
+    let (extends, instances, vars, constants, definitions) = (
         module.extends.clone(),
+        module.instances.clone(),
         module.vars.clone(),
         module.constants.clone(),
         module.definitions.clone(),
@@ -188,8 +240,106 @@ fn collect_declarations(
     for inner in &extends {
         collect_declarations(inner, spec_path, registry, visited, declarations)?;
     }
+    declarations.import(instanced_definitions(
+        &instances,
+        spec_path,
+        registry,
+        &mut Vec::new(),
+    )?);
     declarations.add(&vars, &constants, &definitions);
     Ok(())
+}
+
+/// The definitions an unnamed `INSTANCE` brings into a module, and the modules
+/// left to [`crate::checker::prepare_spec`]: the standard modules they depend on,
+/// and those that cannot be found or read.
+#[derive(Default)]
+struct Imported {
+    definitions: DefinitionMap,
+    deferred_modules: Vec<Arc<str>>,
+}
+
+impl Imported {
+    fn defer(&mut self, module: &Arc<str>) {
+        if !self.deferred_modules.contains(module) {
+            self.deferred_modules.push(module.clone());
+        }
+    }
+
+    fn merge(&mut self, other: Imported) {
+        self.definitions.extend(other.definitions);
+        for module in &other.deferred_modules {
+            self.defer(module);
+        }
+    }
+}
+
+fn instanced_definitions(
+    instances: &[InstanceDecl],
+    spec_path: &Path,
+    registry: &mut ModuleRegistry,
+    loading: &mut Vec<Arc<str>>,
+) -> Result<Imported, String> {
+    let mut imported = Imported::default();
+    for inst in instances.iter().filter(|inst| inst.alias.is_none()) {
+        if crate::stdlib::is_stdlib_module(&inst.module_name) {
+            imported.defer(&inst.module_name);
+            continue;
+        }
+        let exported = exported_definitions(&inst.module_name, spec_path, registry, loading)?;
+        imported.definitions.extend(apply_substitutions(
+            &exported.definitions,
+            &inst.substitutions,
+        ));
+        for module in &exported.deferred_modules {
+            imported.defer(module);
+        }
+    }
+    Ok(imported)
+}
+
+/// The definitions a module exports to one that instances it: those of the modules
+/// it extends and instances without a name, under its own.
+fn exported_definitions(
+    name: &Arc<str>,
+    spec_path: &Path,
+    registry: &mut ModuleRegistry,
+    loading: &mut Vec<Arc<str>>,
+) -> Result<Imported, String> {
+    if loading.contains(name) {
+        return Err(ModuleError::CyclicDependency(name.clone()).describe(name));
+    }
+    let module = match registry.load(name, spec_path) {
+        Ok(module) => module,
+        Err(error @ ModuleError::ParseError(_)) => return Err(error.describe(name)),
+        Err(_) => {
+            let mut imported = Imported::default();
+            imported.defer(name);
+            return Ok(imported);
+        }
+    };
+    let (extends, instances, definitions) = (
+        module.extends.clone(),
+        module.instances.clone(),
+        module.definitions.clone(),
+    );
+    loading.push(name.clone());
+    let mut imported = Imported::default();
+    for extended in &extends {
+        if crate::stdlib::is_stdlib_module(extended) {
+            imported.defer(extended);
+        } else {
+            imported.merge(exported_definitions(
+                extended, spec_path, registry, loading,
+            )?);
+        }
+    }
+    imported.merge(instanced_definitions(
+        &instances, spec_path, registry, loading,
+    )?);
+    loading.pop();
+    imported.definitions.extend(definitions);
+    Ok(imported)
 }
 
 type InstanceVars = BTreeMap<Arc<str>, Vec<Arc<str>>>;

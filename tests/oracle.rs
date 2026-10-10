@@ -2233,6 +2233,48 @@ fn test_should_pass_extends_multiple() {
     );
 }
 
+/// An unnamed `INSTANCE` in an extended module, `LOCAL` or not, brings the
+/// instanced module's definitions into it (TLC: 3 distinct states, `InvEven` holds).
+#[test]
+fn test_should_pass_instance_in_extended_module() {
+    let path = Path::new(
+        "test_cases/should_pass/instance_in_extended_module/instance_in_extended_module.tla",
+    );
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("instance_in_extended_module.tla should pass, got: {other:?}"),
+    }
+}
+
+/// The root's unnamed `INSTANCE M WITH ...` imports M's definitions with the
+/// substitutions applied, so the cfg can name them, and `Nat` from M's
+/// `LOCAL INSTANCE Naturals` is defined (TLC: 4 distinct states, `Bounded` holds).
+#[test]
+fn test_should_pass_instance_with_substitution() {
+    let path = Path::new(
+        "test_cases/should_pass/instance_with_substitution/instance_with_substitution.tla",
+    );
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 4),
+        other => panic!("instance_with_substitution.tla should pass, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_instance_module_missing() {
+    let path =
+        Path::new("test_cases/should_error/instance_module_missing/instance_module_missing.tla");
+    match check_spec_file(path) {
+        CheckResult::PrepareError(PrepareSpecError::InstanceError(error)) => {
+            assert_eq!(
+                error.to_string(),
+                "module Nowhere not found (no file Nowhere.tla in spec directory)"
+            );
+        }
+        other => panic!("expected a missing-module error, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_should_error_extends_parse_error() {
     let path = Path::new("test_cases/should_error/extends_parse_error/extends_parse_error.tla");

@@ -1,7 +1,7 @@
 {
   "name": "tla-rs",
   "description": "TLA+ model checker as MCP tools — validate specs, list invariants, run checks, replay scenarios, and build tested demo walkthroughs directly from Claude Code.",
-  "version": "0.24.4",
+  "version": "0.24.5",
   "author": {
     "name": "Fabrício Bracht",
     "email": "fabracht@gmail.com",
