@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- An unnamed `INSTANCE M` (`LOCAL` or not) did not bring M's definitions into the module that declares it: a use failed with "undefined variable", and a cfg could not name them (#218, #205). As in TLC, M's definitions are imported with its `WITH` substitutions applied, whether the `INSTANCE` is in the root module or in a module it extends, transitively. This is how the CommunityModules use one another, so `SeqOf` and `MapThenFoldSet` from `SequencesExt` are now defined. A standard module that M extends or instances is loaded, so M may use `Nat` when the root does not extend `Naturals`. A missing instanced module is an error, as in TLC; it was a warning in the root module and ignored elsewhere. A `LOCAL INSTANCE` is also visible to modules that extend its module, where TLC hides it.
+- An unnamed `INSTANCE M` (`LOCAL` or not) did not bring M's definitions into the module that declares it: a use failed with "undefined variable", and a cfg could not name them (#218, #205). As in TLC, M's definitions are imported with its `WITH` substitutions applied, whether the `INSTANCE` is in the root module or in a module it extends, transitively; this is how the CommunityModules use one another, so `SeqOf` and `MapThenFoldSet` from `SequencesExt` are now defined. Each instantiation keeps M's scope: a definition of the instancing module does not replace one M calls, and a `LOCAL INSTANCE` in an extended module is seen only by that module. A standard module that M extends or instances is loaded, so M may use `Nat` when the root does not extend `Naturals`. A module that cannot be found is skipped with a warning, wherever the `INSTANCE` is.
 
 ## [0.24.4] - 2026-10-09
 

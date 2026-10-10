@@ -446,9 +446,6 @@ pub fn prepare_spec(
             }
             match registry.load(&inst.module_name, spec_path) {
                 Ok(_) => {}
-                Err(error @ ModuleError::NotFound(_)) if inst.alias.is_none() => {
-                    return Err(module_load_error(&inst.module_name, error));
-                }
                 Err(ModuleError::NotFound(_)) => {
                     if !quiet {
                         let module = &inst.module_name;

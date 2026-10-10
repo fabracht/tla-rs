@@ -131,38 +131,32 @@ impl Default for ModuleRegistry {
 /// definition overrides one it extends, the root's override all). A state is
 /// indexed by `spec.vars`, and the cfg names definitions, so both must be complete
 /// before the cfg is applied and the spec is checked. A module that does not parse is an error, so it is reported
-/// before the cfg names a definition it was to provide; an extended module that
-/// cannot be found or read is skipped here, and [`crate::checker::prepare_spec`]
-/// reports why.
+/// before the cfg names a definition it was to provide; a module that cannot be
+/// found or read is skipped here, and [`crate::checker::prepare_spec`] reports why.
 ///
-/// An unnamed `INSTANCE M` (`LOCAL` or not), in the root or in a module it extends,
-/// imports the definitions M exports, with its `WITH` substitutions applied, under
-/// the definitions of the module that declares it. Definitions are one flat map, so
-/// a `LOCAL INSTANCE` is exported too. The standard modules these instanced modules
-/// extend or instance, and the instanced modules that cannot be found or read, are
-/// added to `spec.instances`: [`crate::checker::prepare_spec`] loads the constants
-/// (`Nat`, `Int`) of the first and reports why the others failed.
+/// An unnamed `INSTANCE M`, in the root or in a module it extends, brings in M's
+/// definitions with its `WITH` substitutions applied. Each instantiation keeps its
+/// own scope: its definitions are stored under keys of the form `M!Op#n`, and the
+/// names inside them are rewritten to those keys, so a definition of the
+/// instancing module never replaces one M relies on. M's definitions are then
+/// added under their own names, except those of a `LOCAL INSTANCE` in an extended
+/// module, which only the definitions of that module see. The standard modules
+/// instanced modules depend on, and those that cannot be found or read, are added
+/// to `spec.instances`, for [`crate::checker::prepare_spec`] to load or warn about.
 pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<(), String> {
-    let mut registry = ModuleRegistry::new();
+    let mut resolver = InstanceResolver::new(spec_path);
     let mut visited = Vec::new();
     let mut declarations = Declarations::default();
     for module in &spec.extends {
-        collect_declarations(
-            module,
-            spec_path,
-            &mut registry,
-            &mut visited,
-            &mut declarations,
-        )?;
+        collect_declarations(module, &mut resolver, &mut visited, &mut declarations)?;
     }
-    let imported =
-        instanced_definitions(&spec.instances, spec_path, &mut registry, &mut Vec::new())?;
-    declarations.import(imported);
+    let imports = resolver.imports(&spec.instances, &mut Vec::new())?;
+    declarations.import(&imports, imports.links.iter());
     declarations.add(&spec.vars, &spec.constants, &spec.definitions);
     spec.vars = declarations.vars;
     spec.constants = declarations.constants;
     spec.definitions = declarations.definitions;
-    for module in declarations.deferred_modules {
+    for module in resolver.deferred_modules {
         let loaded = spec.extends.contains(&module)
             || spec.instances.iter().any(|inst| inst.module_name == module);
         if !loaded {
@@ -171,6 +165,7 @@ pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<
                 params: Vec::new(),
                 module_name: module,
                 substitutions: Vec::new(),
+                local: false,
             });
         }
     }
@@ -182,7 +177,6 @@ struct Declarations {
     vars: Vec<Arc<str>>,
     constants: Vec<Arc<str>>,
     definitions: DefinitionMap,
-    deferred_modules: Vec<Arc<str>>,
 }
 
 impl Declarations {
@@ -202,11 +196,12 @@ impl Declarations {
         }
     }
 
-    fn import(&mut self, imported: Imported) {
-        self.definitions.extend(imported.definitions);
-        for module in imported.deferred_modules {
-            if !self.deferred_modules.contains(&module) {
-                self.deferred_modules.push(module);
+    fn import<'a>(&mut self, imports: &Imports, visible: impl Iterator<Item = &'a Link>) {
+        self.definitions.extend(imports.scoped.clone());
+        for link in visible {
+            if let Some(definition) = imports.scoped.get(&link.key) {
+                self.definitions
+                    .insert(link.name.clone(), definition.clone());
             }
         }
     }
@@ -214,8 +209,7 @@ impl Declarations {
 
 fn collect_declarations(
     name: &Arc<str>,
-    spec_path: &Path,
-    registry: &mut ModuleRegistry,
+    resolver: &mut InstanceResolver,
     visited: &mut Vec<Arc<str>>,
     declarations: &mut Declarations,
 ) -> Result<(), String> {
@@ -223,11 +217,9 @@ fn collect_declarations(
         return Ok(());
     }
     visited.push(name.clone());
-    let module = match registry.load(name, spec_path) {
+    let module = match resolver.registry.load(name, &resolver.spec_path) {
         Ok(module) => module,
-        Err(ModuleError::ParseError(message)) => {
-            return Err(format!("parse error in module {name}: {message}"));
-        }
+        Err(error @ ModuleError::ParseError(_)) => return Err(error.describe(name)),
         Err(_) => return Ok(()),
     };
     let (extends, instances, vars, constants, definitions) = (
@@ -238,108 +230,198 @@ fn collect_declarations(
         module.definitions.clone(),
     );
     for inner in &extends {
-        collect_declarations(inner, spec_path, registry, visited, declarations)?;
+        collect_declarations(inner, resolver, visited, declarations)?;
     }
-    declarations.import(instanced_definitions(
-        &instances,
-        spec_path,
-        registry,
-        &mut Vec::new(),
-    )?);
-    declarations.add(&vars, &constants, &definitions);
+    let imports = resolver.imports(&instances, &mut Vec::new())?;
+    declarations.import(&imports, imports.links.iter().filter(|link| !link.local));
+    let local_links: Vec<&Link> = imports.links.iter().filter(|link| link.local).collect();
+    declarations.add(
+        &vars,
+        &constants,
+        &rename(&definitions, local_links.into_iter()),
+    );
     Ok(())
 }
 
-/// The definitions an unnamed `INSTANCE` brings into a module, and the modules
-/// left to [`crate::checker::prepare_spec`]: the standard modules they depend on,
-/// and those that cannot be found or read.
+/// A name a module sees through an unnamed `INSTANCE`, and the key of the
+/// definition it stands for.
+#[derive(Clone)]
+struct Link {
+    name: Arc<str>,
+    key: Arc<str>,
+    local: bool,
+}
+
+/// What a module's unnamed `INSTANCE`s bring in: the names it sees, and the
+/// definitions behind them under their keys.
 #[derive(Default)]
-struct Imported {
-    definitions: DefinitionMap,
+struct Imports {
+    links: Vec<Link>,
+    scoped: DefinitionMap,
+}
+
+struct InstanceResolver {
+    registry: ModuleRegistry,
+    spec_path: PathBuf,
+    copies: usize,
     deferred_modules: Vec<Arc<str>>,
 }
 
-impl Imported {
+impl InstanceResolver {
+    fn new(spec_path: &Path) -> Self {
+        Self {
+            registry: ModuleRegistry::new(),
+            spec_path: spec_path.to_path_buf(),
+            copies: 0,
+            deferred_modules: Vec::new(),
+        }
+    }
+
     fn defer(&mut self, module: &Arc<str>) {
         if !self.deferred_modules.contains(module) {
             self.deferred_modules.push(module.clone());
         }
     }
 
-    fn merge(&mut self, other: Imported) {
-        self.definitions.extend(other.definitions);
-        for module in &other.deferred_modules {
-            self.defer(module);
+    fn imports(
+        &mut self,
+        instances: &[InstanceDecl],
+        loading: &mut Vec<Arc<str>>,
+    ) -> Result<Imports, String> {
+        let mut imports = Imports::default();
+        for inst in instances.iter().filter(|inst| inst.alias.is_none()) {
+            if crate::stdlib::is_stdlib_module(&inst.module_name) {
+                self.defer(&inst.module_name);
+                continue;
+            }
+            let Some(instance) =
+                self.instantiate(&inst.module_name, &inst.substitutions, loading)?
+            else {
+                continue;
+            };
+            imports.scoped.extend(instance.scoped);
+            imports
+                .links
+                .extend(instance.links.into_iter().map(|link| Link {
+                    local: inst.local,
+                    ..link
+                }));
         }
+        Ok(imports)
+    }
+
+    /// Module `name` instanced with `substitutions`: the names it exports, linked
+    /// to its definitions under fresh keys, together with the definitions of the
+    /// modules it extends and instances, all rewritten so that every name refers
+    /// to the definition in scope where it was written. `None` when the module
+    /// cannot be found or read.
+    fn instantiate(
+        &mut self,
+        name: &Arc<str>,
+        substitutions: &[(Arc<str>, Expr)],
+        loading: &mut Vec<Arc<str>>,
+    ) -> Result<Option<Imports>, String> {
+        if loading.contains(name) {
+            return Err(ModuleError::CyclicDependency(name.clone()).describe(name));
+        }
+        let module = match self.registry.load(name, &self.spec_path) {
+            Ok(module) => module,
+            Err(error @ ModuleError::ParseError(_)) => return Err(error.describe(name)),
+            Err(_) => {
+                self.defer(name);
+                return Ok(None);
+            }
+        };
+        let (extends, instances, definitions) = (
+            module.extends.clone(),
+            module.instances.clone(),
+            module.definitions.clone(),
+        );
+        loading.push(name.clone());
+        let mut inner = Imports::default();
+        for extended in &extends {
+            if crate::stdlib::is_stdlib_module(extended) {
+                self.defer(extended);
+            } else if let Some(instance) = self.instantiate(extended, &[], loading)? {
+                inner.scoped.extend(instance.scoped);
+                inner.links.extend(instance.links);
+            }
+        }
+        let imports = self.imports(&instances, loading)?;
+        inner.scoped.extend(imports.scoped);
+        inner.links.extend(imports.links);
+        loading.pop();
+
+        let copy = self.copies;
+        self.copies += 1;
+        let own_links: Vec<Link> = definitions
+            .keys()
+            .map(|op| Link {
+                name: op.clone(),
+                key: format!("{name}!{op}#{copy}").into(),
+                local: false,
+            })
+            .collect();
+        let in_scope: Vec<&Link> = inner
+            .links
+            .iter()
+            .filter(|link| !definitions.contains_key(&link.name))
+            .chain(own_links.iter())
+            .collect();
+        let renamings: Vec<(Arc<str>, Expr)> = substitutions
+            .iter()
+            .cloned()
+            .chain(
+                in_scope
+                    .iter()
+                    .map(|link| (link.name.clone(), Expr::Var(link.key.clone()))),
+            )
+            .collect();
+        let mut scoped = substitute_definitions(&inner.scoped, &renamings);
+        let own = substitute_definitions(&definitions, &renamings);
+        for link in &own_links {
+            if let Some(definition) = own.get(&link.name) {
+                scoped.insert(link.key.clone(), definition.clone());
+            }
+        }
+        let links = in_scope
+            .into_iter()
+            .filter(|link| !link.local)
+            .cloned()
+            .collect();
+        Ok(Some(Imports { links, scoped }))
     }
 }
 
-fn instanced_definitions(
-    instances: &[InstanceDecl],
-    spec_path: &Path,
-    registry: &mut ModuleRegistry,
-    loading: &mut Vec<Arc<str>>,
-) -> Result<Imported, String> {
-    let mut imported = Imported::default();
-    for inst in instances.iter().filter(|inst| inst.alias.is_none()) {
-        if crate::stdlib::is_stdlib_module(&inst.module_name) {
-            imported.defer(&inst.module_name);
-            continue;
-        }
-        let exported = exported_definitions(&inst.module_name, spec_path, registry, loading)?;
-        imported.definitions.extend(apply_substitutions(
-            &exported.definitions,
-            &inst.substitutions,
-        ));
-        for module in &exported.deferred_modules {
-            imported.defer(module);
-        }
-    }
-    Ok(imported)
+fn rename<'a>(definitions: &DefinitionMap, links: impl Iterator<Item = &'a Link>) -> DefinitionMap {
+    let renamings: Vec<(Arc<str>, Expr)> = links
+        .filter(|link| !definitions.contains_key(&link.name))
+        .map(|link| (link.name.clone(), Expr::Var(link.key.clone())))
+        .collect();
+    substitute_definitions(definitions, &renamings)
 }
 
-/// The definitions a module exports to one that instances it: those of the modules
-/// it extends and instances without a name, under its own.
-fn exported_definitions(
-    name: &Arc<str>,
-    spec_path: &Path,
-    registry: &mut ModuleRegistry,
-    loading: &mut Vec<Arc<str>>,
-) -> Result<Imported, String> {
-    if loading.contains(name) {
-        return Err(ModuleError::CyclicDependency(name.clone()).describe(name));
+/// `definitions` with `substitutions` applied to each body, except for the names
+/// its parameters bind.
+fn substitute_definitions(
+    definitions: &DefinitionMap,
+    substitutions: &[(Arc<str>, Expr)],
+) -> DefinitionMap {
+    if substitutions.is_empty() {
+        return definitions.clone();
     }
-    let module = match registry.load(name, spec_path) {
-        Ok(module) => module,
-        Err(error @ ModuleError::ParseError(_)) => return Err(error.describe(name)),
-        Err(_) => {
-            let mut imported = Imported::default();
-            imported.defer(name);
-            return Ok(imported);
-        }
-    };
-    let (extends, instances, definitions) = (
-        module.extends.clone(),
-        module.instances.clone(),
-        module.definitions.clone(),
-    );
-    loading.push(name.clone());
-    let mut imported = Imported::default();
-    for extended in &extends {
-        if crate::stdlib::is_stdlib_module(extended) {
-            imported.defer(extended);
-        } else {
-            imported.merge(exported_definitions(
-                extended, spec_path, registry, loading,
-            )?);
-        }
-    }
-    imported.merge(instanced_definitions(
-        &instances, spec_path, registry, loading,
-    )?);
-    loading.pop();
-    imported.definitions.extend(definitions);
-    Ok(imported)
+    definitions
+        .iter()
+        .map(|(name, (params, body))| {
+            let free: Vec<(Arc<str>, Expr)> = substitutions
+                .iter()
+                .filter(|(target, _)| !params.contains(target))
+                .cloned()
+                .collect();
+            let body = crate::substitution::substitute_expr(body, &free);
+            (name.clone(), (params.clone(), Arc::new(body)))
+        })
+        .collect()
 }
 
 type InstanceVars = BTreeMap<Arc<str>, Vec<Arc<str>>>;
@@ -588,12 +670,14 @@ mod tests {
                     params: vec![],
                     module_name: Arc::from("TestMod"),
                     substitutions: vec![(var("N"), lit_int(5))],
+                    local: false,
                 },
                 InstanceDecl {
                     alias: Some(Arc::from("P")),
                     params: vec![var("n")],
                     module_name: Arc::from("TestMod"),
                     substitutions: vec![(var("N"), var_expr("n"))],
+                    local: false,
                 },
             ],
             init: None,

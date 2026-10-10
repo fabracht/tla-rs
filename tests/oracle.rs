@@ -2260,18 +2260,30 @@ fn test_should_pass_instance_with_substitution() {
     }
 }
 
+/// An unnamed `INSTANCE` of a module that cannot be found is skipped with a
+/// warning, as on the root's `INSTANCE` before: TLC finds modules it bundles
+/// (`TLCExt`, `Json`, ...) that tla-rs does not, so it is not an error.
 #[test]
-fn test_should_error_instance_module_missing() {
+fn test_should_pass_instance_module_missing() {
     let path =
-        Path::new("test_cases/should_error/instance_module_missing/instance_module_missing.tla");
+        Path::new("test_cases/should_pass/instance_module_missing/instance_module_missing.tla");
     match check_spec_file(path) {
-        CheckResult::PrepareError(PrepareSpecError::InstanceError(error)) => {
-            assert_eq!(
-                error.to_string(),
-                "module Nowhere not found (no file Nowhere.tla in spec directory)"
-            );
-        }
-        other => panic!("expected a missing-module error, got: {other:?}"),
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 1),
+        other => panic!("instance_module_missing.tla should pass, got: {other:?}"),
+    }
+}
+
+/// Each instanced module keeps its own scope (TLC: 1 distinct state, every
+/// invariant holds): a definition of the instancing module does not replace one
+/// the instanced module calls, a `LOCAL INSTANCE` in an extended module does not
+/// replace a sibling's definition, and parameters, operator arguments, `WITH`
+/// targets, implicit substitutions, recursion and nested `WITH` still resolve.
+#[test]
+fn test_should_pass_instance_scoping() {
+    let path = Path::new("test_cases/should_pass/instance_scoping/instance_scoping.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 1),
+        other => panic!("instance_scoping.tla should pass, got: {other:?}"),
     }
 }
 
