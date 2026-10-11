@@ -1,5 +1,6 @@
 use std::borrow::Cow;
-use std::collections::BTreeSet;
+use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use super::Definitions;
@@ -245,6 +246,100 @@ pub(crate) fn contains_prime_ref(expr: &Expr, defs: &Definitions) -> bool {
             skips_enabled: false,
         },
     )
+}
+
+/// Whether `body` primes one of `params`: it applies `'` or `UNCHANGED` to one,
+/// evaluates a call that mentions one in the next state (`Op(p)'`), or passes one
+/// to an operator that primes the corresponding parameter. Priming a parameter
+/// primes its argument expression, so such an operator is called by substitution:
+/// a value bound to the parameter has lost the expression to prime.
+pub(crate) fn primes_parameter(body: &Expr, params: &[Arc<str>], defs: &Definitions) -> bool {
+    primes_any(body, params, defs, &RefCell::new(BTreeSet::new()))
+}
+
+/// Per operator body (by address): the body, the parameters it was checked for,
+/// and whether it primes one of them.
+type PrimedParameters = HashMap<usize, (Arc<Expr>, Vec<Arc<str>>, bool)>;
+
+thread_local! {
+    static PRIMED_PARAMETERS: RefCell<PrimedParameters> = RefCell::new(HashMap::new());
+}
+
+const PRIMED_PARAMETERS_CAPACITY: usize = 4096;
+
+/// [`primes_parameter`] for an operator called by the evaluator, remembered per
+/// body: the entry holds the body, so its address names it until the entry is
+/// dropped, and the table is emptied when it reaches its capacity.
+pub(crate) fn operator_primes_parameter(
+    params: &[Arc<str>],
+    body: &Arc<Expr>,
+    defs: &Definitions,
+) -> bool {
+    let key = Arc::as_ptr(body) as usize;
+    let known = PRIMED_PARAMETERS.with(|cache| {
+        cache
+            .borrow()
+            .get(&key)
+            .filter(|(_, known_params, _)| known_params.as_slice() == params)
+            .map(|(_, _, primed)| *primed)
+    });
+    if let Some(primed) = known {
+        return primed;
+    }
+    let primed = primes_parameter(body, params, defs);
+    PRIMED_PARAMETERS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= PRIMED_PARAMETERS_CAPACITY {
+            cache.clear();
+        }
+        cache.insert(key, (body.clone(), params.to_vec(), primed));
+    });
+    primed
+}
+
+fn primes_any(
+    body: &Expr,
+    params: &[Arc<str>],
+    defs: &Definitions,
+    callees: &RefCell<BTreeSet<Arc<str>>>,
+) -> bool {
+    let no_defs = Definitions::new();
+    let opaque = Walk {
+        lets: LetScope::Opaque,
+        unknown_calls_match: false,
+        skips_enabled: false,
+    };
+    let is_param = |name: &Arc<str>| params.contains(name);
+    let mentions = |e: &Expr| {
+        refers_through_defs(
+            e,
+            &no_defs,
+            &mut BTreeSet::new(),
+            &|leaf: &Expr| matches!(leaf, Expr::Var(n) | Expr::Prime(n) if is_param(n)),
+            opaque,
+        )
+    };
+    let primes = |e: &Expr| match e {
+        Expr::Prime(name) => is_param(name),
+        Expr::Unchanged(names) => names.iter().any(is_param),
+        Expr::Let(name, binding, _) => name.as_ref() == "$primed" && mentions(binding),
+        Expr::FnCall(callee, args) => match defs.get(callee) {
+            Some((callee_params, callee_body)) if callee_params.len() == args.len() => {
+                if !callees.borrow_mut().insert(callee.clone()) {
+                    return false;
+                }
+                let primed = args.iter().zip(callee_params).any(|(arg, param)| {
+                    mentions(arg)
+                        && primes_any(callee_body, std::slice::from_ref(param), defs, callees)
+                });
+                callees.borrow_mut().remove(callee);
+                primed
+            }
+            _ => false,
+        },
+        _ => false,
+    };
+    refers_through_defs(body, &no_defs, &mut BTreeSet::new(), &primes, opaque)
 }
 
 /// Whether `expr` can take different values in different states: it refers to a

@@ -205,6 +205,11 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             {
                 return eval_in_next_state(name, body, env, defs);
             }
+            if let Some(value) = env.get(name)
+                && super::global_state::is_rigid_name(name)
+            {
+                return Ok(value.clone());
+            }
             Err(EvalError::undefined_var_with_env(primed, env, defs))
         }
 
@@ -848,6 +853,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 if args
                     .iter()
                     .any(|arg| super::ast_utils::is_operator_reference(arg, env, defs))
+                    || super::ast_utils::operator_primes_parameter(params, body, defs)
                 {
                     return eval_substituted(body, params, args, env, defs);
                 }
@@ -917,6 +923,10 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                         name,
                         params.len()
                     )));
+                }
+                if super::ast_utils::operator_primes_parameter(params, body, defs) {
+                    let args = [(**left).clone(), (**right).clone()];
+                    return eval_substituted(body, params, &args, env, defs);
                 }
                 let lv = eval(left, env, defs)?;
                 let rv = eval(right, env, defs)?;
@@ -1749,6 +1759,10 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     merged_defs.insert(name.clone(), def.clone());
                 }
 
+                if super::ast_utils::operator_primes_parameter(params, body, &merged_defs) {
+                    return eval_substituted(body, params, args, env, &merged_defs);
+                }
+
                 let mut arg_vals = Vec::with_capacity(args.len());
                 for arg_expr in args {
                     arg_vals.push(eval(arg_expr, env, defs)?);
@@ -1813,6 +1827,10 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     let mut merged_defs = defs.clone();
                     for (name, def) in &instance_defs {
                         merged_defs.insert(name.clone(), def.clone());
+                    }
+
+                    if super::ast_utils::operator_primes_parameter(params, body, &merged_defs) {
+                        return eval_substituted(body, params, args, env, &merged_defs);
                     }
 
                     let mut arg_vals = Vec::with_capacity(args.len());

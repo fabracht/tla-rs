@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::core::eval;
 use super::error::{EvalError, Result};
 use super::global_state::{EvalContext, with_state_vars};
@@ -41,6 +43,13 @@ pub fn eval_with_instances(
                     params.len(),
                     args.len()
                 )));
+            }
+
+            if super::ast_utils::operator_primes_parameter(params, body, defs) {
+                let subs: Vec<(Arc<str>, Expr)> =
+                    params.iter().cloned().zip(args.iter().cloned()).collect();
+                let applied = crate::substitution::substitute_expr(body, &subs);
+                return eval_with_instances(&applied, env, defs, instances);
             }
 
             let mut arg_vals = Vec::with_capacity(args.len());

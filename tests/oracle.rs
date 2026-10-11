@@ -2288,6 +2288,15 @@ fn test_should_pass_instance_scoping() {
 }
 
 #[test]
+fn test_should_pass_prime_parameters() {
+    let path = Path::new("test_cases/should_pass/prime_parameters/prime_parameters.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 4),
+        other => panic!("prime_parameters.tla should pass, got: {other:?}"),
+    }
+}
+
+#[test]
 fn test_should_error_extends_parse_error() {
     let path = Path::new("test_cases/should_error/extends_parse_error/extends_parse_error.tla");
     match check_spec_file(path) {

@@ -261,11 +261,17 @@ impl Parser {
 
     /// `body` with `params` bound to `args`, as a call of the operator they belong
     /// to. An operator argument is substituted where its parameter is called; a
-    /// value argument is bound by a `LET`, so it is evaluated once. A value
+    /// value argument is bound by a `LET`, so it is evaluated once, unless the body
+    /// primes its parameter: priming a parameter primes the argument expression,
+    /// which a bound value has lost, so that argument is substituted too. A value
     /// parameter whose name occurs in another argument is renamed first, so its
     /// `LET` cannot capture that occurrence (`Pair(a, b) == <<a, b>>` called as
     /// `Pair(b, 1)`); otherwise the call keeps the shape that names its action.
     fn inline_call(&self, params: &[Arc<str>], body: &Expr, args: Vec<Expr>) -> Expr {
+        let no_defs = crate::eval::Definitions::new();
+        let primes = |param: &Arc<str>| {
+            crate::eval::primes_parameter(body, std::slice::from_ref(param), &no_defs)
+        };
         let mut substitutions: Vec<(Arc<str>, Expr)> = Vec::new();
         let mut bindings: Vec<(Arc<str>, Expr)> = Vec::new();
         for (index, (param, arg)) in params.iter().zip(&args).enumerate() {
@@ -275,6 +281,7 @@ impl Parser {
                 .any(|(other, a)| other != index && crate::eval::expr_references(a, param));
             match self.operator_argument(arg) {
                 Some(operator) => substitutions.push((param.clone(), operator)),
+                None if primes(param) => substitutions.push((param.clone(), arg.clone())),
                 None if captured => {
                     let fresh = crate::substitution::fresh_name(param, |candidate| {
                         crate::eval::expr_references(body, candidate)
@@ -813,8 +820,17 @@ impl Parser {
         self.let_scope.truncate(scope_start);
         let mut body = body_result?;
 
+        let no_defs = crate::eval::Definitions::new();
         for (var, binding) in bindings.into_iter().rev() {
-            body = Expr::Let(var, Box::new(binding), Box::new(body));
+            let value = !matches!(binding, Expr::FnDef(..))
+                && crate::eval::parameterized_let_op(&binding).is_none();
+            body = if value
+                && crate::eval::primes_parameter(&body, std::slice::from_ref(&var), &no_defs)
+            {
+                crate::substitution::substitute_expr(&body, &[(var, binding)])
+            } else {
+                Expr::Let(var, Box::new(binding), Box::new(body))
+            };
         }
 
         Ok(body)

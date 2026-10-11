@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.24.6] - 2026-10-10
+
+### Fixed
+
+- Priming an expression primed every name in it, so a bound variable or an operator parameter inside it failed with "undefined variable `p'`" (#223): `w[p]'` in an action `Bump(p)` called under `\E p`, as in Huang, MCEWD687a and MCYoYoNoPruning from tlaplus/Examples. As in TLC, only state variables are primed: a quantifier-bound variable or a constant keeps its value, and priming an operator parameter primes the argument expression, so `After(a) == a'` called as `After(x)` gives `x'`. This holds for calls the parser inlines, for operators of extended and instanced modules, for infix operators and for a `LET` name primed in its body.
+
 ## [0.24.5] - 2026-10-10
 
 ### Fixed

@@ -112,6 +112,16 @@ pub(crate) fn state_vars_in_scope() -> Option<Vec<Arc<str>>> {
     STATE_VARS.with(|cell| cell.borrow().clone())
 }
 
+/// Whether `name` is known not to be a state variable, inside [`with_state_vars`]:
+/// priming it leaves its value unchanged, as for a bound variable or a constant.
+pub(crate) fn is_rigid_name(name: &Arc<str>) -> bool {
+    STATE_VARS.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .is_some_and(|vars| !vars.contains(name))
+    })
+}
+
 thread_local! {
     static SYMBOLIC_INTEGERS: Cell<bool> = const { Cell::new(false) };
 }

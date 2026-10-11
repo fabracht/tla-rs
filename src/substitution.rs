@@ -47,6 +47,24 @@ pub fn apply_substitutions(module_defs: &Definitions, subs: &[(Arc<str>, Expr)])
     result
 }
 
+/// `Op(args)'` (or `I!Op(args)'`) as `LET $primed == Op(args) IN $primed'`: priming an operator with
+/// no parameters evaluates its body in the next state, the arguments and every
+/// state variable the operator reads included. `$` cannot appear in an identifier,
+/// so the name shadows nothing a spec defines.
+pub(crate) fn primed_application(call: &Expr) -> Expr {
+    let name: Arc<str> = Arc::from("$primed");
+    let operator = Expr::Let(
+        Arc::from("_params"),
+        Box::new(Expr::TupleLit(Vec::new())),
+        Box::new(call.clone()),
+    );
+    Expr::Let(
+        name.clone(),
+        Box::new(operator),
+        Box::new(Expr::Prime(name)),
+    )
+}
+
 fn prime_expr(expr: &Expr) -> Expr {
     let p = |e: &Expr| Box::new(prime_expr(e));
     match expr {
@@ -112,9 +130,7 @@ fn prime_expr(expr: &Expr) -> Expr {
         Expr::ChooseUnbounded(var, body) => Expr::ChooseUnbounded(var.clone(), p(body)),
 
         Expr::FnDef(var, domain, body) => Expr::FnDef(var.clone(), p(domain), p(body)),
-        Expr::FnCall(name, args) => {
-            Expr::FnCall(name.clone(), args.iter().map(prime_expr).collect())
-        }
+        Expr::FnCall(_, _) | Expr::QualifiedCall(_, _, _) => primed_application(expr),
         Expr::Lambda(params, body) => Expr::Lambda(params.clone(), p(body)),
         Expr::FnMerge(l, r) => Expr::FnMerge(p(l), p(r)),
         Expr::SingleFn(l, r) => Expr::SingleFn(p(l), p(r)),
@@ -198,10 +214,6 @@ fn prime_expr(expr: &Expr) -> Expr {
         Expr::BoxAction(action, subscript) => Expr::BoxAction(p(action), p(subscript)),
         Expr::DiamondAction(action, subscript) => Expr::DiamondAction(p(action), p(subscript)),
         Expr::EnabledOp(e) => Expr::EnabledOp(p(e)),
-
-        Expr::QualifiedCall(inst, op, args) => {
-            Expr::QualifiedCall(p(inst), op.clone(), args.iter().map(prime_expr).collect())
-        }
 
         Expr::LabeledAction(label, action) => Expr::LabeledAction(label.clone(), p(action)),
     }
