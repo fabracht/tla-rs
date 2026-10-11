@@ -197,7 +197,7 @@ As in TLC, `Len`, `\o`, `SubSeq` and `Tail` also accept a string, whose elements
 | `CONSTANT(S)` | Constants |
 | `ASSUME` | Evaluated at startup; aborts if any constraint is FALSE |
 | `RECURSIVE` | Recursive operator (stack overflow protected via `stacker`) |
-| `INSTANCE M WITH p <- e` | Static module instantiation with substitutions |
+| `INSTANCE M WITH p <- e` | Static module instantiation with substitutions; M's definitions are imported into the module that declares it, in the root or in a module it extends, and keep M's scope |
 | `A(x) == INSTANCE M WITH p <- e` | Parameterized module instantiation |
 | `A!Op(args)` | Qualified call to instance operator |
 | `A(x)!Op(args)` | Qualified call to parameterized instance operator |

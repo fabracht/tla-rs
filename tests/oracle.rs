@@ -2233,6 +2233,60 @@ fn test_should_pass_extends_multiple() {
     );
 }
 
+/// An unnamed `INSTANCE` in an extended module, `LOCAL` or not, brings the
+/// instanced module's definitions into it (TLC: 3 distinct states, `InvEven` holds).
+#[test]
+fn test_should_pass_instance_in_extended_module() {
+    let path = Path::new(
+        "test_cases/should_pass/instance_in_extended_module/instance_in_extended_module.tla",
+    );
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("instance_in_extended_module.tla should pass, got: {other:?}"),
+    }
+}
+
+/// The root's unnamed `INSTANCE M WITH ...` imports M's definitions with the
+/// substitutions applied, so the cfg can name them, and `Nat` from M's
+/// `LOCAL INSTANCE Naturals` is defined (TLC: 4 distinct states, `Bounded` holds).
+#[test]
+fn test_should_pass_instance_with_substitution() {
+    let path = Path::new(
+        "test_cases/should_pass/instance_with_substitution/instance_with_substitution.tla",
+    );
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 4),
+        other => panic!("instance_with_substitution.tla should pass, got: {other:?}"),
+    }
+}
+
+/// An unnamed `INSTANCE` of a module that cannot be found is skipped with a
+/// warning, as on the root's `INSTANCE` before: TLC finds modules it bundles
+/// (`TLCExt`, `Json`, ...) that tla-rs does not, so it is not an error.
+#[test]
+fn test_should_pass_instance_module_missing() {
+    let path =
+        Path::new("test_cases/should_pass/instance_module_missing/instance_module_missing.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 1),
+        other => panic!("instance_module_missing.tla should pass, got: {other:?}"),
+    }
+}
+
+/// Each instanced module keeps its own scope (TLC: 1 distinct state, every
+/// invariant holds): a definition of the instancing module does not replace one
+/// the instanced module calls, a `LOCAL INSTANCE` in an extended module does not
+/// replace a sibling's definition, and parameters, operator arguments, `WITH`
+/// targets, implicit substitutions, recursion and nested `WITH` still resolve.
+#[test]
+fn test_should_pass_instance_scoping() {
+    let path = Path::new("test_cases/should_pass/instance_scoping/instance_scoping.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 1),
+        other => panic!("instance_scoping.tla should pass, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_should_error_extends_parse_error() {
     let path = Path::new("test_cases/should_error/extends_parse_error/extends_parse_error.tla");

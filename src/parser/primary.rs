@@ -866,6 +866,7 @@ impl Parser {
             params,
             module_name,
             substitutions,
+            local: false,
         })
     }
 

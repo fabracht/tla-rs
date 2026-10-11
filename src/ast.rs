@@ -396,6 +396,7 @@ pub struct InstanceDecl {
     pub params: Vec<Arc<str>>,
     pub module_name: Arc<str>,
     pub substitutions: Vec<(Arc<str>, Expr)>,
+    pub local: bool,
 }
 
 #[derive(Debug, Clone)]

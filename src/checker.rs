@@ -313,22 +313,14 @@ fn load_module_extends(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn module_load_error(name: &str, error: ModuleError) -> PrepareSpecError {
-    let message = match error {
-        ModuleError::ParseError(message) => {
-            return PrepareSpecError::ModuleParse(format!(
-                "parse error in module {name}: {message}"
-            ));
-        }
-        ModuleError::NotFound(_) => {
-            format!("module {name} not found (no file {name}.tla in spec directory)")
-        }
-        ModuleError::CyclicDependency(dep) => format!("cyclic dependency loading module {dep}"),
-        ModuleError::IoError(message) => format!("I/O error loading module {name}: {message}"),
-    };
-    PrepareSpecError::InstanceError(EvalError::DomainError {
-        message,
-        span: None,
-    })
+    let message = error.describe(name);
+    match error {
+        ModuleError::ParseError(_) => PrepareSpecError::ModuleParse(message),
+        _ => PrepareSpecError::InstanceError(EvalError::DomainError {
+            message,
+            span: None,
+        }),
+    }
 }
 
 fn substituted_value(

@@ -92,7 +92,10 @@ impl Parser {
                     if *self.peek() == Token::Instance {
                         self.advance();
                         let inst = self.parse_instance(None, Vec::new())?;
-                        self.instances.push(inst);
+                        self.instances.push(InstanceDecl {
+                            local: true,
+                            ..inst
+                        });
                     } else if let Token::Ident(_) = self.peek() {
                         self.skip_to_next_definition();
                     }
