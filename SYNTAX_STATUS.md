@@ -133,7 +133,7 @@ As in TLC, `Len`, `\o`, `SubSeq` and `Tail` also accept a string, whose elements
 ### State Operators
 | ASCII | Description |
 |-------|-------------|
-| `x'` | Primed variable (next state); prime distributes over expressions and defined operators, so `Op'` and `(f[i])'` prime every state variable within |
+| `x'` | Primed variable (next state); prime distributes over expressions and defined operators, so `Op'` and `(f[i])'` prime every state variable within; bound variables and constants keep their value, and a primed operator parameter primes its argument |
 | `UNCHANGED <<x, y>>` | Variables unchanged |
 
 ### Relation Operators

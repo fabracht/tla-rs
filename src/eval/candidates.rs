@@ -325,6 +325,31 @@ pub(crate) fn bind_params(
     saved
 }
 
+/// The candidates of a call of an instance operator: `body` with `params` bound to
+/// the values of `args` (evaluated with the caller's definitions), or with `args`
+/// substituted when `body` primes a parameter. `defs` holds the caller's
+/// definitions and those the body is read with.
+fn collect_in_call<T: CandidateTarget>(
+    params: &[Arc<str>],
+    args: &[Expr],
+    body: &Arc<Expr>,
+    env: &mut Env,
+    (caller_defs, defs): (&Definitions, &Definitions),
+    target: &mut T,
+    expanding: &mut Vec<Arc<str>>,
+) -> Result<()> {
+    if super::ast_utils::operator_primes_parameter(params, body, defs) {
+        let bindings: Vec<(Arc<str>, Expr)> =
+            params.iter().cloned().zip(args.iter().cloned()).collect();
+        let applied = crate::substitution::substitute_expr(body, &bindings);
+        return collect_candidates_impl(&applied, env, defs, target, expanding);
+    }
+    let saved = bind_params(params, args, env, caller_defs);
+    let collected = collect_candidates_impl(body, env, defs, target, expanding);
+    restore_env(env, saved);
+    collected
+}
+
 /// `expanding` holds the operators whose bodies are being substituted into, so a
 /// recursive operator called with a primed argument is expanded once rather than
 /// without end.
@@ -466,10 +491,11 @@ fn collect_candidates_impl<T: CandidateTarget>(
             if let Some((params, body)) = defs.get(name)
                 && params.len() == args.len()
             {
-                if args.iter().any(|arg| {
+                if (args.iter().any(|arg| {
                     contains_prime_ref(arg, defs)
                         || super::ast_utils::is_operator_reference(arg, env, defs)
-                }) && !expanding.contains(name)
+                }) || super::ast_utils::operator_primes_parameter(params, body, defs))
+                    && !expanding.contains(name)
                 {
                     let bindings: Vec<(Arc<str>, Expr)> =
                         params.iter().cloned().zip(args.iter().cloned()).collect();
@@ -507,12 +533,15 @@ fn collect_candidates_impl<T: CandidateTarget>(
                             for (name, def) in instance_defs {
                                 merged_defs.insert(name.clone(), def.clone());
                             }
-                            let params: Vec<Arc<str>> = params.clone();
-                            let saved = bind_params(&params, args, env, defs);
-                            let collected =
-                                collect_candidates_impl(body, env, &merged_defs, target, expanding);
-                            restore_env(env, saved);
-                            collected?;
+                            collect_in_call(
+                                params,
+                                args,
+                                body,
+                                env,
+                                (defs, &merged_defs),
+                                target,
+                                expanding,
+                            )?;
                         }
                         Ok(())
                     })?;
@@ -539,18 +568,15 @@ fn collect_candidates_impl<T: CandidateTarget>(
                                     for (name, def) in &instance_defs {
                                         merged_defs.insert(name.clone(), def.clone());
                                     }
-                                    let params: Vec<Arc<str>> = params.clone();
-                                    let body = body.clone();
-                                    let saved = bind_params(&params, args, env, defs);
-                                    let collected = collect_candidates_impl(
-                                        &body,
+                                    collect_in_call(
+                                        params,
+                                        args,
+                                        body,
                                         env,
-                                        &merged_defs,
+                                        (defs, &merged_defs),
                                         target,
                                         expanding,
-                                    );
-                                    restore_env(env, saved);
-                                    collected?;
+                                    )?;
                                 }
                             }
                         }

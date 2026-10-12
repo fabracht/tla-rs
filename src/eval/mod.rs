@@ -51,7 +51,8 @@ pub use self::state::{
 
 pub(crate) use self::ast_utils::{
     contains_free_prime_ref, contains_prime_ref, expr_contains, expr_references,
-    parameterized_let_op, reaches_temporal, references_state, uses_run_dependent_builtin,
+    parameterized_let_op, primes_parameter, reaches_temporal, references_state,
+    uses_run_dependent_builtin,
 };
 pub(crate) use self::global_state::with_state_vars;
 pub(crate) use self::helpers::eval_set;

@@ -1099,8 +1099,8 @@ impl Parser {
                     })
                     .collect(),
             ),
-            FnCall(_, _) => primed_application(expr),
-            QualifiedCall(_, _, _) => primed_application(expr),
+            FnCall(_, _) => crate::substitution::primed_application(expr),
+            QualifiedCall(_, _, _) => crate::substitution::primed_application(expr),
             Case(branches) => Case(
                 branches
                     .iter()
@@ -1197,22 +1197,4 @@ pub(super) fn wrap_with_label(expr: Expr, label: Option<Arc<str>>) -> Expr {
         Some(name) => Expr::LabeledAction(name, Box::new(expr)),
         None => expr,
     }
-}
-
-/// `Op(args)'` (or `I!Op(args)'`) as `LET $primed == Op(args) IN $primed'`: priming an operator with
-/// no parameters evaluates its body in the next state, the arguments and every
-/// state variable the operator reads included. `$` cannot appear in an identifier,
-/// so the name shadows nothing a spec defines.
-fn primed_application(call: &Expr) -> Expr {
-    let name: Arc<str> = Arc::from("$primed");
-    let operator = Expr::Let(
-        Arc::from("_params"),
-        Box::new(Expr::TupleLit(Vec::new())),
-        Box::new(call.clone()),
-    );
-    Expr::Let(
-        name.clone(),
-        Box::new(operator),
-        Box::new(Expr::Prime(name)),
-    )
 }
