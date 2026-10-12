@@ -150,6 +150,59 @@ pub enum Token {
     Eof,
 }
 
+/// The built-in operators of the standard modules that the lexer reads as
+/// keywords, with the number of arguments each takes.
+const BUILTIN_OPERATORS: [(Token, &str, usize); 32] = [
+    (Token::Cardinality, "Cardinality", 1),
+    (Token::IsFiniteSet, "IsFiniteSet", 1),
+    (Token::Len, "Len", 1),
+    (Token::Head, "Head", 1),
+    (Token::Tail, "Tail", 1),
+    (Token::Append, "Append", 2),
+    (Token::SubSeq, "SubSeq", 3),
+    (Token::SelectSeq, "SelectSeq", 2),
+    (Token::Seq, "Seq", 1),
+    (Token::Print, "Print", 2),
+    (Token::Assert, "Assert", 2),
+    (Token::JavaTime, "JavaTime", 0),
+    (Token::SystemTime, "SystemTime", 0),
+    (Token::Permutations, "Permutations", 1),
+    (Token::SortSeq, "SortSeq", 2),
+    (Token::PrintT, "PrintT", 1),
+    (Token::TLCToString, "ToString", 1),
+    (Token::RandomElement, "RandomElement", 1),
+    (Token::TLCGet, "TLCGet", 1),
+    (Token::TLCSet, "TLCSet", 2),
+    (Token::Any, "Any", 0),
+    (Token::TLCEval, "TLCEval", 1),
+    (Token::IsABag, "IsABag", 1),
+    (Token::BagToSet, "BagToSet", 1),
+    (Token::SetToBag, "SetToBag", 1),
+    (Token::BagIn, "BagIn", 2),
+    (Token::EmptyBag, "EmptyBag", 0),
+    (Token::BagUnion, "BagUnion", 1),
+    (Token::SubBag, "SubBag", 1),
+    (Token::BagOfAll, "BagOfAll", 2),
+    (Token::BagCardinality, "BagCardinality", 1),
+    (Token::CopiesIn, "CopiesIn", 2),
+];
+
+/// The name and argument count of the built-in operator `token` reads as.
+pub(crate) fn builtin_operator(token: &Token) -> Option<(&'static str, usize)> {
+    BUILTIN_OPERATORS
+        .iter()
+        .find(|(builtin, _, _)| builtin == token)
+        .map(|(_, name, arity)| (*name, *arity))
+}
+
+/// The argument count of the keyword built-in operator called `name`.
+pub(crate) fn builtin_operator_arity(name: &str) -> Option<usize> {
+    BUILTIN_OPERATORS
+        .iter()
+        .find(|(_, builtin, _)| *builtin == name)
+        .map(|(_, _, arity)| *arity)
+}
+
 impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

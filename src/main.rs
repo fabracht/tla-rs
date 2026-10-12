@@ -878,11 +878,13 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-        if let Err(e) = override_operators(&tlc_cfg, &mut spec, &input, Some(Path::new(&spec_path)))
-        {
-            eprintln!("error applying {}: {}", cfg_file.display(), e);
-            return ExitCode::FAILURE;
-        }
+        spec = match override_operators(&tlc_cfg, spec, &input, Some(Path::new(&spec_path))) {
+            Ok(spec) => spec,
+            Err(e) => {
+                eprintln!("error applying {}: {}", cfg_file.display(), e);
+                return ExitCode::FAILURE;
+            }
+        };
         let cli_symmetry = config.symmetric_constants.clone();
         match apply_config(
             &tlc_cfg,

@@ -179,6 +179,64 @@ pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<
     Ok(())
 }
 
+/// The module whose definition of `name` the module `spec` sees through the
+/// modules it extends and instances without a name, transitively, as
+/// [`merge_extended_declarations`] merges them: a module's own definition wins
+/// over the ones it brings in, and a later module over an earlier one. `None` when
+/// none of them defines `name`.
+pub fn definition_home(spec: &Spec, name: &str, spec_path: &Path) -> Option<Arc<str>> {
+    let mut registry = ModuleRegistry::new();
+    home_among(
+        &imported_modules(&spec.extends, &spec.instances),
+        name,
+        spec_path,
+        &mut registry,
+        &mut Vec::new(),
+    )
+}
+
+fn imported_modules(extends: &[Arc<str>], instances: &[InstanceDecl]) -> Vec<Arc<str>> {
+    let unnamed = instances
+        .iter()
+        .filter(|inst| inst.alias.is_none())
+        .map(|inst| &inst.module_name);
+    extends
+        .iter()
+        .chain(unnamed)
+        .filter(|module| !crate::stdlib::is_stdlib_module(module))
+        .cloned()
+        .collect()
+}
+
+fn home_among(
+    modules: &[Arc<str>],
+    name: &str,
+    spec_path: &Path,
+    registry: &mut ModuleRegistry,
+    visiting: &mut Vec<Arc<str>>,
+) -> Option<Arc<str>> {
+    let mut home = None;
+    for module in modules {
+        if visiting.contains(module) {
+            continue;
+        }
+        let Ok(loaded) = registry.load(module, spec_path) else {
+            continue;
+        };
+        if loaded.definitions.contains_key(name) {
+            home = Some(module.clone());
+            continue;
+        }
+        let imported = imported_modules(&loaded.extends, &loaded.instances);
+        visiting.push(module.clone());
+        if let Some(found) = home_among(&imported, name, spec_path, registry, visiting) {
+            home = Some(found);
+        }
+        visiting.pop();
+    }
+    home
+}
+
 #[derive(Default)]
 struct Declarations {
     vars: Vec<Arc<str>>,

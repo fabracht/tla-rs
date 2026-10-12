@@ -156,7 +156,7 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.advance();
-                let name = self.overridden(&name).unwrap_or(name);
+                let overridden = self.overrides_here(&name);
                 if *self.peek() == Token::LParen {
                     self.advance();
                     let mut args = Vec::new();
@@ -168,7 +168,13 @@ impl Parser {
                         }
                     }
                     self.expect(Token::RParen)?;
-                    self.apply_operator(name, args)
+                    if overridden {
+                        Ok(Expr::FnCall(name, args))
+                    } else {
+                        self.apply_operator(name, args)
+                    }
+                } else if overridden {
+                    Ok(Expr::Var(name))
                 } else if !self.let_scope.contains(&name)
                     && let Some(def) = self.definitions.get(&name)
                 {
@@ -237,14 +243,6 @@ impl Parser {
         }
     }
 
-    /// `body` with `params` bound to `args`, as a call of the operator they belong
-    /// to. An operator argument is substituted where its parameter is called; a
-    /// value argument is bound by a `LET`, so it is evaluated once, unless the body
-    /// primes its parameter: priming a parameter primes the argument expression,
-    /// which a bound value has lost, so that argument is substituted too. A value
-    /// parameter whose name occurs in another argument is renamed first, so its
-    /// `LET` cannot capture that occurrence (`Pair(a, b) == <<a, b>>` called as
-    /// `Pair(b, 1)`); otherwise the call keeps the shape that names its action.
     /// `name(args)`: the operator's body with the arguments inlined when it is a
     /// non-recursive operator defined earlier and not shadowed by a `LET`, a call
     /// resolved at evaluation otherwise.
@@ -265,6 +263,14 @@ impl Parser {
         }
     }
 
+    /// `body` with `params` bound to `args`, as a call of the operator they belong
+    /// to. An operator argument is substituted where its parameter is called; a
+    /// value argument is bound by a `LET`, so it is evaluated once, unless the body
+    /// primes its parameter: priming a parameter primes the argument expression,
+    /// which a bound value has lost, so that argument is substituted too. A value
+    /// parameter whose name occurs in another argument is renamed first, so its
+    /// `LET` cannot capture that occurrence (`Pair(a, b) == <<a, b>>` called as
+    /// `Pair(b, 1)`); otherwise the call keeps the shape that names its action.
     fn inline_call(&self, params: &[Arc<str>], body: &Expr, args: Vec<Expr>) -> Expr {
         let no_defs = crate::eval::Definitions::new();
         let primes = |param: &Arc<str>| {

@@ -95,7 +95,7 @@ pub fn prepare(
         })?;
         let cfg_parsed = parse_cfg(&cfg_contents)
             .map_err(|e| StructuredError::config(format!("cfg parse error: {}", e)))?;
-        override_operators(&cfg_parsed, &mut spec, &contents, Some(&path))
+        spec = override_operators(&cfg_parsed, spec, &contents, Some(&path))
             .map_err(|e| StructuredError::config(format!("cfg apply error: {}", e)))?;
         let cfg_warnings = apply_config(
             &cfg_parsed,

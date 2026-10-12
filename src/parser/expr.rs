@@ -575,6 +575,27 @@ impl Parser {
     }
 
     fn parse_unary(&mut self) -> Result<Expr> {
+        if let Some((name, arity)) = crate::lexer::builtin_operator(self.peek())
+            && self.overrides_here(name)
+        {
+            self.advance();
+            let mut args = Vec::with_capacity(arity);
+            if arity > 0 {
+                self.expect(Token::LParen)?;
+                args.push(self.parse_expr()?);
+                while *self.peek() == Token::Comma {
+                    self.advance();
+                    args.push(self.parse_expr()?);
+                }
+                self.expect(Token::RParen)?;
+            }
+            let call = if args.is_empty() {
+                Expr::Var(name.into())
+            } else {
+                Expr::FnCall(name.into(), args)
+            };
+            return self.parse_postfix_ops(call);
+        }
         match self.peek() {
             Token::Not => {
                 self.advance();
@@ -670,11 +691,7 @@ impl Parser {
                 self.expect(Token::LParen)?;
                 let domain = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                let sequences = match self.overridden(&Arc::from("Seq")) {
-                    Some(target) => self.apply_operator(target, vec![domain])?,
-                    None => Expr::SeqSet(Box::new(domain)),
-                };
-                self.parse_postfix_ops(sequences)
+                self.parse_postfix_ops(Expr::SeqSet(Box::new(domain)))
             }
             Token::Print => {
                 self.advance();

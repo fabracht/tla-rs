@@ -16,7 +16,38 @@ use crate::span::Spanned;
 pub(crate) type Result<T> = std::result::Result<T, ParseError>;
 
 /// Operator substitutions from a cfg (`Op <- Def`), keyed by `Op`.
-pub type OperatorOverrides = BTreeMap<Arc<str>, Arc<str>>;
+pub type OperatorOverrides = BTreeMap<Arc<str>, Override>;
+
+/// The replacement of one operator, and the module whose definition of it the
+/// root module sees (`None` for a built-in). As in TLC, that definition is replaced
+/// wherever it is used; a module that defines an operator of the same name itself
+/// keeps its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Override {
+    pub target: Arc<str>,
+    pub home: Option<Arc<str>>,
+}
+
+/// The name in the `---- MODULE Name ----` header of `input`, which the lexer
+/// skips as layout.
+pub fn module_name(input: &str) -> Option<Arc<str>> {
+    input.lines().find_map(|line| {
+        let mut words = line.trim().trim_start_matches('-').split_whitespace();
+        (line.trim_start().starts_with("----") && words.next() == Some("MODULE"))
+            .then(|| words.next())
+            .flatten()
+            .map(|name| Arc::from(name.trim_end_matches('-')))
+    })
+}
+
+/// The argument count of a built-in operator a cfg may substitute: a keyword of the
+/// standard modules, or `Nat` and `Int`.
+pub fn builtin_arity(name: &str) -> Option<usize> {
+    match name {
+        "Nat" | "Int" => Some(0),
+        _ => crate::lexer::builtin_operator_arity(name),
+    }
+}
 
 pub fn parse(input: &str) -> Result<Spec> {
     let mut parser = Parser::new(input)?;

@@ -162,7 +162,7 @@ pub fn check_spec_with_cfg(
     allow_deadlock: bool,
     export_dot: bool,
 ) -> String {
-    let mut spec = match parse(spec_source) {
+    let spec = match parse(spec_source) {
         Ok(s) => s,
         Err(e) => return wasm_error("ParseError", format!("{e:?}")),
     };
@@ -172,9 +172,10 @@ pub fn check_spec_with_cfg(
         Err(e) => return wasm_error("ConfigError", e),
     };
 
-    if let Err(e) = override_operators(&cfg, &mut spec, spec_source, None) {
-        return wasm_error("ConfigError", e);
-    }
+    let mut spec = match override_operators(&cfg, spec, spec_source, None) {
+        Ok(spec) => spec,
+        Err(e) => return wasm_error("ConfigError", e),
+    };
 
     let mut domains = Env::new();
     let mut config = build_config(max_states, max_depth, allow_deadlock, export_dot);
@@ -242,9 +243,10 @@ pub fn check_spec_with_options(spec_source: &str, options_json: &str) -> String 
             Ok(c) => c,
             Err(e) => return wasm_error("ConfigError", e),
         };
-        if let Err(e) = override_operators(&cfg, &mut spec, spec_source, None) {
-            return wasm_error("ConfigError", e);
-        }
+        spec = match override_operators(&cfg, spec, spec_source, None) {
+            Ok(spec) => spec,
+            Err(e) => return wasm_error("ConfigError", e),
+        };
         let cli_allow_deadlock = options.allow_deadlock.unwrap_or(false);
         match apply_config(
             &cfg,
@@ -523,7 +525,7 @@ fn prepare_explorer(
     let mut config = CheckerConfig::default();
     if !cfg_source.trim().is_empty() {
         let cfg = parse_cfg(cfg_source)?;
-        override_operators(&cfg, &mut spec, spec_source, None)?;
+        spec = override_operators(&cfg, spec, spec_source, None)?;
         apply_config(&cfg, &mut spec, &mut domains, &mut config, &[], &[], false)?;
     }
     apply_constants_json(&mut domains, constants_json);

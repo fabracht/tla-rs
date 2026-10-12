@@ -48,20 +48,52 @@ pub struct Parser {
     /// from `a \oplus b == ...`). A use of such a symbol resolves to the user
     /// definition instead of the built-in, shadowing it within the module.
     pub(super) user_infix_ops: BTreeSet<Arc<str>>,
-    /// The cfg's `Op <- Def` substitutions of operators: every use of `Op`, and
-    /// `Op`'s own definition, refers to `Def` instead, except in a module that
-    /// declares `Op` a `CONSTANT` or where a `LET` binds it.
+    /// The cfg's `Op <- Def` substitutions of operators. A use of `Op` that refers
+    /// to the overridden definition is left as a call of `Op`, not inlined, and
+    /// renamed to `Def` once the module is parsed, where it is not bound.
     pub(super) operator_overrides: super::OperatorOverrides,
+    /// The name in the module's `MODULE` header.
+    pub(super) module_name: Option<Arc<str>>,
 }
 
 impl Parser {
-    /// The operator a use of `name` refers to under the cfg's operator
-    /// substitutions, when one replaces it here.
-    pub(super) fn overridden(&self, name: &Arc<str>) -> Option<Arc<str>> {
-        if self.let_scope.contains(name) || self.constants.contains(name) {
-            return None;
+    /// Whether the cfg replaces the operator `name` refers to in this module: one
+    /// the module neither declares a constant nor defines itself, unless the module
+    /// holds the definition that is replaced.
+    pub(super) fn overrides_here(&self, name: &str) -> bool {
+        if self.operator_overrides.is_empty() {
+            return false;
         }
-        self.operator_overrides.get(name).cloned()
+        let Some(replaced) = self.operator_overrides.get(name) else {
+            return false;
+        };
+        let defines = self.definitions.contains_key(name) || self.fn_definitions.contains_key(name);
+        !self
+            .constants
+            .iter()
+            .any(|constant| constant.as_ref() == name)
+            && (!defines || self.holds(replaced))
+    }
+
+    /// Whether this module holds the definition `replaced` replaces.
+    pub(super) fn holds(&self, replaced: &super::Override) -> bool {
+        replaced.home.is_some() && replaced.home == self.module_name
+    }
+
+    /// Renames every unbound use of an operator the cfg replaces in this module to
+    /// its replacement.
+    pub(super) fn rename_overridden(&self, expr: &Expr, params: &[Arc<str>]) -> Expr {
+        let renames: Vec<(Arc<str>, Expr)> = self
+            .operator_overrides
+            .iter()
+            .filter(|(name, _)| !params.contains(name) && self.overrides_here(name))
+            .map(|(name, replaced)| (name.clone(), Expr::Var(replaced.target.clone())))
+            .collect();
+        if renames.is_empty() {
+            expr.clone()
+        } else {
+            crate::substitution::substitute_expr(expr, &renames)
+        }
     }
 
     pub fn new(input: &str) -> Result<Self> {
@@ -89,6 +121,7 @@ impl Parser {
             warned_slash: false,
             user_infix_ops: BTreeSet::new(),
             operator_overrides: BTreeMap::new(),
+            module_name: super::module_name(input),
         })
     }
 

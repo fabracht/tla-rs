@@ -89,7 +89,7 @@ pub fn prepare_from_path_with_engine(
         })?;
         let cfg_parsed = parse_cfg(&cfg_contents)
             .map_err(|e| PrepareError::Config(format!("cfg parse error: {}", e)))?;
-        override_operators(&cfg_parsed, &mut spec, &contents, Some(spec_path))
+        spec = override_operators(&cfg_parsed, spec, &contents, Some(spec_path))
             .map_err(|e| PrepareError::Config(format!("cfg apply error: {}", e)))?;
         let cfg_warnings = apply_config(
             &cfg_parsed,
