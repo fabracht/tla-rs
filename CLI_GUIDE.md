@@ -81,7 +81,7 @@ CHECK_DEADLOCK TRUE
 Supported directives:
 
 - `INIT`/`NEXT`, or `SPECIFICATION` (temporal formula in `Init /\ [][Next]_vars` form, with exactly one `[][Next]_v` conjunct, as in TLC)
-- `CONSTANT`/`CONSTANTS`: `Name = value` assignments, or `Name <- Def` to substitute a zero-parameter definition of the spec
+- `CONSTANT`/`CONSTANTS`: `Name = value` assignments, or `Name <- Def` substitutions. A constant `Name` takes the value of the zero-parameter definition `Def`. Any other `Name` is an operator of the spec, its extended or instanced modules, or `Seq`, `Nat` or `Int`, and every use of it, including its own definition, refers to `Def`, which must take the same number of arguments (`Init <- MCInit`, `Seq <- LimitedSeq`)
 - `INVARIANT`/`INVARIANTS` and `PROPERTY`/`PROPERTIES`
 - `SYMMETRY`
 - `CHECK_DEADLOCK TRUE|FALSE` (`FALSE` is the same as `--allow-deadlock`)

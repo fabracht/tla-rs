@@ -148,6 +148,16 @@ impl Parser {
                         }
                         Definition::Instance(inst) => self.instances.push(inst),
                         Definition::Operator { params, body } => {
+                            let body = match self.overridden(&name) {
+                                Some(target) => match &params {
+                                    Some(params) => Expr::FnCall(
+                                        target,
+                                        params.iter().cloned().map(Expr::Var).collect(),
+                                    ),
+                                    None => Expr::Var(target),
+                                },
+                                None => body,
+                            };
                             let is_zero_arg = params.is_none();
                             if is_zero_arg && name.ends_with("Spec") {
                                 self.extract_fairness_and_liveness(&name, &body);
@@ -223,6 +233,7 @@ impl Parser {
             safety_properties: Vec::new(),
             temporal_assumptions: Vec::new(),
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         })
     }
 

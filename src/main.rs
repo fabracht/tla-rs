@@ -17,7 +17,8 @@ use tla_checker::checker::{
     unchecked_predicate_warning, write_trace_json,
 };
 use tla_checker::config::{
-    apply_config, legacy_temporal_warning, parse_cfg, parse_constant_value, split_top_level,
+    apply_config, legacy_temporal_warning, override_operators, parse_cfg, parse_constant_value,
+    split_top_level,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use tla_checker::demo::{Manifest, render_doc, render_explorable, render_html, run_beat};
@@ -877,6 +878,11 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
+        if let Err(e) = override_operators(&tlc_cfg, &mut spec, &input, Some(Path::new(&spec_path)))
+        {
+            eprintln!("error applying {}: {}", cfg_file.display(), e);
+            return ExitCode::FAILURE;
+        }
         let cli_symmetry = config.symmetric_constants.clone();
         match apply_config(
             &tlc_cfg,

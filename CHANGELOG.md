@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.7] - 2026-10-11
+
+### Fixed
+
+- A cfg `Op <- Def` whose `Op` is a defined operator, not a declared constant, was rejected (#219): `Init <- MCInit` in MCtcp, and `Seq <- LimitedSeq` in MCBinarySearch, MCMajority, MCParReach and MCReachable from tlaplus/Examples. As in TLC, `Op` is replaced everywhere: every use of it, in the spec and in the modules it extends or instances, and its own definition, so `INIT Init` uses `MCInit`. `Def` may take parameters and must take as many as `Op`.
+- A cfg substitution of `Nat` or `Int` (`Nat <- NatOverride` in MCBakery, MCLamportMutex and MC_sums_even) was silently ignored, so the default bound applied instead (#202). It now replaces the set everywhere, like any other operator. A substitution whose name is neither a declared constant, a definition, nor one of `Seq`, `Nat` and `Int` was also ignored; it is now an error, as in TLC.
+
 ## [0.24.6] - 2026-10-10
 
 ### Fixed

@@ -9,7 +9,7 @@ use crate::checker::{
     CheckResult, CheckStats, CheckerConfig, PrepareSpecError, PropertyViolationKind, check,
     format_eval_error, format_trace, format_value,
 };
-use crate::config::{apply_config, parse_cfg};
+use crate::config::{apply_config, override_operators, parse_cfg};
 use crate::eval::{Definitions, eval, init_states, make_primed_names, next_states};
 use crate::export::DotMode;
 use crate::parser::{parse, parse_expr};
@@ -172,6 +172,10 @@ pub fn check_spec_with_cfg(
         Err(e) => return wasm_error("ConfigError", e),
     };
 
+    if let Err(e) = override_operators(&cfg, &mut spec, spec_source, None) {
+        return wasm_error("ConfigError", e);
+    }
+
     let mut domains = Env::new();
     let mut config = build_config(max_states, max_depth, allow_deadlock, export_dot);
 
@@ -238,6 +242,9 @@ pub fn check_spec_with_options(spec_source: &str, options_json: &str) -> String 
             Ok(c) => c,
             Err(e) => return wasm_error("ConfigError", e),
         };
+        if let Err(e) = override_operators(&cfg, &mut spec, spec_source, None) {
+            return wasm_error("ConfigError", e);
+        }
         let cli_allow_deadlock = options.allow_deadlock.unwrap_or(false);
         match apply_config(
             &cfg,
@@ -516,6 +523,7 @@ fn prepare_explorer(
     let mut config = CheckerConfig::default();
     if !cfg_source.trim().is_empty() {
         let cfg = parse_cfg(cfg_source)?;
+        override_operators(&cfg, &mut spec, spec_source, None)?;
         apply_config(&cfg, &mut spec, &mut domains, &mut config, &[], &[], false)?;
     }
     apply_constants_json(&mut domains, constants_json);

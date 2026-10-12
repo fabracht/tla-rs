@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::Source;
 use crate::ast::{Env, Spec, Value};
 use crate::checker::{CheckerConfig, LivenessEngine};
-use crate::config::{apply_config, legacy_temporal_warning, parse_cfg};
+use crate::config::{apply_config, legacy_temporal_warning, override_operators, parse_cfg};
 use crate::parser::parse_with_warnings;
 use crate::span::{Span, Spanned};
 
@@ -89,6 +89,8 @@ pub fn prepare_from_path_with_engine(
         })?;
         let cfg_parsed = parse_cfg(&cfg_contents)
             .map_err(|e| PrepareError::Config(format!("cfg parse error: {}", e)))?;
+        override_operators(&cfg_parsed, &mut spec, &contents, Some(spec_path))
+            .map_err(|e| PrepareError::Config(format!("cfg apply error: {}", e)))?;
         let cfg_warnings = apply_config(
             &cfg_parsed,
             &mut spec,

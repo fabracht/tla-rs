@@ -7,10 +7,16 @@ mod spec;
 pub use self::error::ParseError;
 pub use self::lexing::Parser;
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use crate::ast::{Expr, Spec};
 use crate::span::Spanned;
 
 pub(crate) type Result<T> = std::result::Result<T, ParseError>;
+
+/// Operator substitutions from a cfg (`Op <- Def`), keyed by `Op`.
+pub type OperatorOverrides = BTreeMap<Arc<str>, Arc<str>>;
 
 pub fn parse(input: &str) -> Result<Spec> {
     let mut parser = Parser::new(input)?;
@@ -18,7 +24,17 @@ pub fn parse(input: &str) -> Result<Spec> {
 }
 
 pub fn parse_with_warnings(input: &str) -> Result<(Spec, Vec<Spanned<String>>)> {
+    parse_with_overrides(input, &OperatorOverrides::new())
+}
+
+/// [`parse_with_warnings`] with every use and definition of an operator in
+/// `overrides` referring to its replacement.
+pub fn parse_with_overrides(
+    input: &str,
+    overrides: &OperatorOverrides,
+) -> Result<(Spec, Vec<Spanned<String>>)> {
     let mut parser = Parser::new(input)?;
+    parser.operator_overrides = overrides.clone();
     let spec = parser.parse_spec()?;
     let warnings = parser.take_warnings();
     Ok((spec, warnings))

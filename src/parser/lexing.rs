@@ -48,9 +48,22 @@ pub struct Parser {
     /// from `a \oplus b == ...`). A use of such a symbol resolves to the user
     /// definition instead of the built-in, shadowing it within the module.
     pub(super) user_infix_ops: BTreeSet<Arc<str>>,
+    /// The cfg's `Op <- Def` substitutions of operators: every use of `Op`, and
+    /// `Op`'s own definition, refers to `Def` instead, except in a module that
+    /// declares `Op` a `CONSTANT` or where a `LET` binds it.
+    pub(super) operator_overrides: super::OperatorOverrides,
 }
 
 impl Parser {
+    /// The operator a use of `name` refers to under the cfg's operator
+    /// substitutions, when one replaces it here.
+    pub(super) fn overridden(&self, name: &Arc<str>) -> Option<Arc<str>> {
+        if self.let_scope.contains(name) || self.constants.contains(name) {
+            return None;
+        }
+        self.operator_overrides.get(name).cloned()
+    }
+
     pub fn new(input: &str) -> Result<Self> {
         let mut lexer = Lexer::new(input);
         let tokens = lexer.tokenize_spanned()?;
@@ -75,6 +88,7 @@ impl Parser {
             list_col_stack: Vec::new(),
             warned_slash: false,
             user_infix_ops: BTreeSet::new(),
+            operator_overrides: BTreeMap::new(),
         })
     }
 

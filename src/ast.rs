@@ -462,6 +462,10 @@ pub struct Spec {
     /// value of the zero-parameter `Definition`, evaluated once the modules the spec
     /// extends and instantiates are loaded.
     pub constant_substitutions: Vec<(Arc<str>, Arc<str>)>,
+    /// The cfg's `Op <- Def` substitutions of operators (an `Op` that is not a
+    /// declared constant). The modules are parsed with every use of `Op` referring to
+    /// `Def`, so they must be parsed again when these change.
+    pub operator_overrides: crate::parser::OperatorOverrides,
 }
 
 /// A definition whose text did not parse. It stays defined, with this as its body,

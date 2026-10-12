@@ -156,30 +156,8 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.advance();
+                let name = self.overridden(&name).unwrap_or(name);
                 if *self.peek() == Token::LParen {
-                    let is_recursive = self.recursive_names.contains(&name);
-                    if !is_recursive
-                        && !self.let_scope.contains(&name)
-                        && let Some((params, body)) = self.fn_definitions.get(&name).cloned()
-                    {
-                        self.advance();
-                        let mut args = vec![self.parse_expr()?];
-                        while *self.peek() == Token::Comma {
-                            self.advance();
-                            args.push(self.parse_expr()?);
-                        }
-                        self.expect(Token::RParen)?;
-                        if args.len() != params.len() {
-                            return Err(format!(
-                                "function {} expects {} args, got {}",
-                                name,
-                                params.len(),
-                                args.len()
-                            )
-                            .into());
-                        }
-                        return Ok(self.inline_call(&params, &body, args));
-                    }
                     self.advance();
                     let mut args = Vec::new();
                     if *self.peek() != Token::RParen {
@@ -190,7 +168,7 @@ impl Parser {
                         }
                     }
                     self.expect(Token::RParen)?;
-                    Ok(Expr::FnCall(name, args))
+                    self.apply_operator(name, args)
                 } else if !self.let_scope.contains(&name)
                     && let Some(def) = self.definitions.get(&name)
                 {
@@ -267,6 +245,26 @@ impl Parser {
     /// parameter whose name occurs in another argument is renamed first, so its
     /// `LET` cannot capture that occurrence (`Pair(a, b) == <<a, b>>` called as
     /// `Pair(b, 1)`); otherwise the call keeps the shape that names its action.
+    /// `name(args)`: the operator's body with the arguments inlined when it is a
+    /// non-recursive operator defined earlier and not shadowed by a `LET`, a call
+    /// resolved at evaluation otherwise.
+    pub(super) fn apply_operator(&self, name: Arc<str>, args: Vec<Expr>) -> Result<Expr> {
+        let inlined = (!self.recursive_names.contains(&name) && !self.let_scope.contains(&name))
+            .then(|| self.fn_definitions.get(&name))
+            .flatten();
+        match inlined {
+            Some((params, _)) if params.len() != args.len() => Err(format!(
+                "function {} expects {} args, got {}",
+                name,
+                params.len(),
+                args.len()
+            )
+            .into()),
+            Some((params, body)) => Ok(self.inline_call(params, body, args)),
+            None => Ok(Expr::FnCall(name, args)),
+        }
+    }
+
     fn inline_call(&self, params: &[Arc<str>], body: &Expr, args: Vec<Expr>) -> Expr {
         let no_defs = crate::eval::Definitions::new();
         let primes = |param: &Arc<str>| {

@@ -142,8 +142,8 @@ Release builds use `lto = "fat"`, `codegen-units = 1`, `strip = true`, `panic = 
 
 1. **Parse.** `parser::parse_with_warnings` builds a `Spec`. A definition whose body fails to parse is kept as `Expr::Unparsed` and reported as a warning; using it fails with the parse error.
 2. **EXTENDS merge.** `modules::merge_extended_declarations` adds the variables, constants and definitions of extended user modules (transitively; the extending module's definitions win).
-3. **Configuration.** The cfg (explicit `--config`, else `<Spec>.cfg` next to the spec) is parsed and applied. CLI constants override cfg constants.
-4. **Preparation.** `checker::prepare_spec` loads built-in modules, loads and resolves `EXTENDS`/`INSTANCE` modules from the spec's directory, evaluates cfg `Name <- Def` substitutions, reports missing constants, and evaluates `ASSUME`.
+3. **Configuration.** The cfg (explicit `--config`, else `<Spec>.cfg` next to the spec) is parsed and applied. CLI constants override cfg constants. A cfg `Op <- Def` whose `Op` is not a declared constant replaces an operator: `config::override_operators` parses the spec and its modules again (`parser::parse_with_overrides`, `ModuleRegistry::with_overrides`) with every use and definition of `Op` referring to `Def`, since the parser inlines operators as it reads them.
+4. **Preparation.** `checker::prepare_spec` loads built-in modules, loads and resolves `EXTENDS`/`INSTANCE` modules from the spec's directory, evaluates cfg `Name <- Def` substitutions of constants, reports missing constants, and evaluates `ASSUME`.
 5. **Search.** `checker::check` runs the BFS and, if needed, liveness checking, returning a `CheckResult`.
 
 ## Binary & CLI

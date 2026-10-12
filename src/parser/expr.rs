@@ -670,7 +670,11 @@ impl Parser {
                 self.expect(Token::LParen)?;
                 let domain = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                self.parse_postfix_ops(Expr::SeqSet(Box::new(domain)))
+                let sequences = match self.overridden(&Arc::from("Seq")) {
+                    Some(target) => self.apply_operator(target, vec![domain])?,
+                    None => Expr::SeqSet(Box::new(domain)),
+                };
+                self.parse_postfix_ops(sequences)
             }
             Token::Print => {
                 self.advance();
