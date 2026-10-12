@@ -156,30 +156,8 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.advance();
+                let overridden = self.overrides_here(&name);
                 if *self.peek() == Token::LParen {
-                    let is_recursive = self.recursive_names.contains(&name);
-                    if !is_recursive
-                        && !self.let_scope.contains(&name)
-                        && let Some((params, body)) = self.fn_definitions.get(&name).cloned()
-                    {
-                        self.advance();
-                        let mut args = vec![self.parse_expr()?];
-                        while *self.peek() == Token::Comma {
-                            self.advance();
-                            args.push(self.parse_expr()?);
-                        }
-                        self.expect(Token::RParen)?;
-                        if args.len() != params.len() {
-                            return Err(format!(
-                                "function {} expects {} args, got {}",
-                                name,
-                                params.len(),
-                                args.len()
-                            )
-                            .into());
-                        }
-                        return Ok(self.inline_call(&params, &body, args));
-                    }
                     self.advance();
                     let mut args = Vec::new();
                     if *self.peek() != Token::RParen {
@@ -190,7 +168,13 @@ impl Parser {
                         }
                     }
                     self.expect(Token::RParen)?;
-                    Ok(Expr::FnCall(name, args))
+                    if overridden {
+                        Ok(Expr::FnCall(name, args))
+                    } else {
+                        self.apply_operator(name, args)
+                    }
+                } else if overridden {
+                    Ok(Expr::Var(name))
                 } else if !self.let_scope.contains(&name)
                     && let Some(def) = self.definitions.get(&name)
                 {
@@ -256,6 +240,26 @@ impl Parser {
             other => Err(ParseError::new(format!("unexpected {other}"))
                 .with_span(span)
                 .with_context("expression", format!("{other}"))),
+        }
+    }
+
+    /// `name(args)`: the operator's body with the arguments inlined when it is a
+    /// non-recursive operator defined earlier and not shadowed by a `LET`, a call
+    /// resolved at evaluation otherwise.
+    pub(super) fn apply_operator(&self, name: Arc<str>, args: Vec<Expr>) -> Result<Expr> {
+        let inlined = (!self.recursive_names.contains(&name) && !self.let_scope.contains(&name))
+            .then(|| self.fn_definitions.get(&name))
+            .flatten();
+        match inlined {
+            Some((params, _)) if params.len() != args.len() => Err(format!(
+                "function {} expects {} args, got {}",
+                name,
+                params.len(),
+                args.len()
+            )
+            .into()),
+            Some((params, body)) => Ok(self.inline_call(params, body, args)),
+            None => Ok(Expr::FnCall(name, args)),
         }
     }
 

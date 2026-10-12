@@ -36,14 +36,21 @@ pub struct ModuleRegistry {
     modules: BTreeMap<Arc<str>, Spec>,
     search_paths: Vec<PathBuf>,
     loading_stack: Vec<Arc<str>>,
+    overrides: parser::OperatorOverrides,
 }
 
 impl ModuleRegistry {
     pub fn new() -> Self {
+        Self::with_overrides(parser::OperatorOverrides::new())
+    }
+
+    /// A registry that parses each module with the cfg's operator substitutions.
+    pub fn with_overrides(overrides: parser::OperatorOverrides) -> Self {
         Self {
             modules: BTreeMap::new(),
             search_paths: Vec::new(),
             loading_stack: Vec::new(),
+            overrides,
         }
     }
 
@@ -69,7 +76,7 @@ impl ModuleRegistry {
         self.loading_stack.push(name.clone());
 
         let file: Arc<str> = file_path.display().to_string().into();
-        let parsed = parser::parse(&content).map_err(|e| {
+        let parsed = parser::parse_with_overrides(&content, &self.overrides).map_err(|e| {
             let location = match e.span {
                 Some(span) => {
                     let (line, column) = crate::source::Source::new(name.clone(), content.as_str())
@@ -82,7 +89,7 @@ impl ModuleRegistry {
         });
 
         self.loading_stack.pop();
-        let mut spec = parsed?;
+        let (mut spec, _) = parsed?;
         for (_, body) in spec.definitions.values_mut() {
             if let Expr::Unparsed(unparsed) = body.as_ref() {
                 let located = UnparsedDefinition {
@@ -144,7 +151,7 @@ impl Default for ModuleRegistry {
 /// instanced modules depend on, and those that cannot be found or read, are added
 /// to `spec.instances`, for [`crate::checker::prepare_spec`] to load or warn about.
 pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<(), String> {
-    let mut resolver = InstanceResolver::new(spec_path);
+    let mut resolver = InstanceResolver::new(spec_path, spec.operator_overrides.clone());
     let mut visited = Vec::new();
     let mut declarations = Declarations::default();
     for module in &spec.extends {
@@ -170,6 +177,64 @@ pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<
         }
     }
     Ok(())
+}
+
+/// The module whose definition of `name` the module `spec` sees through the
+/// modules it extends and instances without a name, transitively, as
+/// [`merge_extended_declarations`] merges them: a module's own definition wins
+/// over the ones it brings in, and a later module over an earlier one. `None` when
+/// none of them defines `name`.
+pub fn definition_home(spec: &Spec, name: &str, spec_path: &Path) -> Option<Arc<str>> {
+    let mut registry = ModuleRegistry::new();
+    home_among(
+        &imported_modules(&spec.extends, &spec.instances),
+        name,
+        spec_path,
+        &mut registry,
+        &mut Vec::new(),
+    )
+}
+
+fn imported_modules(extends: &[Arc<str>], instances: &[InstanceDecl]) -> Vec<Arc<str>> {
+    let unnamed = instances
+        .iter()
+        .filter(|inst| inst.alias.is_none())
+        .map(|inst| &inst.module_name);
+    extends
+        .iter()
+        .chain(unnamed)
+        .filter(|module| !crate::stdlib::is_stdlib_module(module))
+        .cloned()
+        .collect()
+}
+
+fn home_among(
+    modules: &[Arc<str>],
+    name: &str,
+    spec_path: &Path,
+    registry: &mut ModuleRegistry,
+    visiting: &mut Vec<Arc<str>>,
+) -> Option<Arc<str>> {
+    let mut home = None;
+    for module in modules {
+        if visiting.contains(module) {
+            continue;
+        }
+        let Ok(loaded) = registry.load(module, spec_path) else {
+            continue;
+        };
+        if loaded.definitions.contains_key(name) {
+            home = Some(module.clone());
+            continue;
+        }
+        let imported = imported_modules(&loaded.extends, &loaded.instances);
+        visiting.push(module.clone());
+        if let Some(found) = home_among(&imported, name, spec_path, registry, visiting) {
+            home = Some(found);
+        }
+        visiting.pop();
+    }
+    home
 }
 
 #[derive(Default)]
@@ -268,9 +333,9 @@ struct InstanceResolver {
 }
 
 impl InstanceResolver {
-    fn new(spec_path: &Path) -> Self {
+    fn new(spec_path: &Path, overrides: parser::OperatorOverrides) -> Self {
         Self {
-            registry: ModuleRegistry::new(),
+            registry: ModuleRegistry::with_overrides(overrides),
             spec_path: spec_path.to_path_buf(),
             copies: 0,
             deferred_modules: Vec::new(),
@@ -653,6 +718,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
 
         let mut registry = ModuleRegistry::new();
@@ -690,6 +756,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
 
         let (resolved, parameterized, _vars) = resolve_instances(&spec, &registry).unwrap();

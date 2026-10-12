@@ -17,7 +17,8 @@ use tla_checker::checker::{
     unchecked_predicate_warning, write_trace_json,
 };
 use tla_checker::config::{
-    apply_config, legacy_temporal_warning, parse_cfg, parse_constant_value, split_top_level,
+    apply_config, legacy_temporal_warning, override_operators, parse_cfg, parse_constant_value,
+    split_top_level,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use tla_checker::demo::{Manifest, render_doc, render_explorable, render_html, run_beat};
@@ -874,6 +875,13 @@ fn main() -> ExitCode {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("error parsing {}: {}", cfg_file.display(), e);
+                return ExitCode::FAILURE;
+            }
+        };
+        spec = match override_operators(&tlc_cfg, spec, &input, Some(Path::new(&spec_path))) {
+            Ok(spec) => spec,
+            Err(e) => {
+                eprintln!("error applying {}: {}", cfg_file.display(), e);
                 return ExitCode::FAILURE;
             }
         };

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tla_checker::ast::{Env, Value};
 use tla_checker::checker::{CheckResult, CheckerConfig, PrepareSpecError, check};
-use tla_checker::config::{apply_config, parse_cfg};
+use tla_checker::config::{apply_config, override_operators, parse_cfg};
 use tla_checker::parser::parse;
 
 /// The suite runs under the walker by default; `TLA_ENGINE=inference` runs the
@@ -51,6 +51,12 @@ fn check_loaded(path: &Path, mut config: CheckerConfig) -> CheckResult {
     if cfg_path.exists() {
         let cfg_input = fs::read_to_string(&cfg_path).expect("failed to read cfg file");
         let tlc_cfg = parse_cfg(&cfg_input).expect("failed to parse cfg");
+        spec = match override_operators(&tlc_cfg, spec, &input, Some(path)) {
+            Ok(spec) => spec,
+            Err(message) => {
+                return CheckResult::PrepareError(PrepareSpecError::ConstantSubstitution(message));
+            }
+        };
         apply_config(
             &tlc_cfg,
             &mut spec,
@@ -2293,6 +2299,37 @@ fn test_should_pass_prime_parameters() {
     match check_spec_file(path) {
         CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 4),
         other => panic!("prime_parameters.tla should pass, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_pass_operator_substitution() {
+    let path = Path::new("test_cases/should_pass/operator_substitution/operator_substitution.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 5),
+        other => panic!("operator_substitution.tla should pass, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_pass_operator_substitution_scope() {
+    let path = Path::new(
+        "test_cases/should_pass/operator_substitution_scope/operator_substitution_scope.tla",
+    );
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("operator_substitution_scope.tla should pass, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_pass_operator_substitution_fairness() {
+    let path = Path::new(
+        "test_cases/should_pass/operator_substitution_fairness/operator_substitution_fairness.tla",
+    );
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 4),
+        other => panic!("operator_substitution_fairness.tla should pass, got: {other:?}"),
     }
 }
 

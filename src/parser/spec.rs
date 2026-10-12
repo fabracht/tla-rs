@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use crate::ast::{Expr, InstanceDecl, LivenessProperty, Spec, UnparsedDefinition};
+use crate::ast::{
+    Expr, FairnessConstraint, InstanceDecl, LivenessProperty, Spec, UnparsedDefinition,
+};
 use crate::lexer::Token;
 use crate::span::Span;
 
@@ -42,7 +44,8 @@ impl Parser {
             match self.peek() {
                 Token::Module => {
                     self.advance();
-                    self.expect_ident()?;
+                    let name = self.expect_ident()?;
+                    self.module_name.get_or_insert(name);
                 }
                 Token::Extends => {
                     self.advance();
@@ -148,6 +151,21 @@ impl Parser {
                         }
                         Definition::Instance(inst) => self.instances.push(inst),
                         Definition::Operator { params, body } => {
+                            let replaced = self
+                                .operator_overrides
+                                .get(&name)
+                                .filter(|replaced| self.holds(replaced))
+                                .map(|replaced| replaced.target.clone());
+                            let body = match replaced {
+                                Some(target) => match &params {
+                                    Some(params) => Expr::FnCall(
+                                        target,
+                                        params.iter().cloned().map(Expr::Var).collect(),
+                                    ),
+                                    None => Expr::Var(target),
+                                },
+                                None => body,
+                            };
                             let is_zero_arg = params.is_none();
                             if is_zero_arg && name.ends_with("Spec") {
                                 self.extract_fairness_and_liveness(&name, &body);
@@ -197,6 +215,78 @@ impl Parser {
             }
         }
 
+        if !self.operator_overrides.is_empty() {
+            let rename = |expr: &Expr| self.rename_overridden(expr, &[]);
+            init = init.as_ref().map(rename);
+            next = next.as_ref().map(rename);
+            invariants = invariants.iter().map(rename).collect();
+            let fn_definitions = self
+                .fn_definitions
+                .iter()
+                .map(|(name, (params, body))| {
+                    let body = self.rename_overridden(body, params);
+                    (name.clone(), (params.clone(), body))
+                })
+                .collect();
+            let definitions = self
+                .definitions
+                .iter()
+                .map(|(name, body)| (name.clone(), rename(body)))
+                .collect();
+            let assumes = self.assumes.iter().map(rename).collect();
+            let fairness = self
+                .fairness
+                .iter()
+                .map(|constraint| match constraint {
+                    FairnessConstraint::Weak(vars, action) => {
+                        FairnessConstraint::Weak(rename(vars), rename(action))
+                    }
+                    FairnessConstraint::Strong(vars, action) => {
+                        FairnessConstraint::Strong(rename(vars), rename(action))
+                    }
+                })
+                .collect();
+            let quantified_fairness = self
+                .quantified_fairness
+                .iter()
+                .map(|(var, domain, constraint)| {
+                    let bound = std::slice::from_ref(var);
+                    (
+                        var.clone(),
+                        rename(domain),
+                        self.rename_overridden(constraint, bound),
+                    )
+                })
+                .collect();
+            let liveness_properties = self
+                .liveness_properties
+                .iter()
+                .map(|property| LivenessProperty {
+                    formula: rename(&property.formula),
+                    ..property.clone()
+                })
+                .collect();
+            let instances = self
+                .instances
+                .iter()
+                .map(|instance| InstanceDecl {
+                    substitutions: instance
+                        .substitutions
+                        .iter()
+                        .map(|(param, expr)| (param.clone(), rename(expr)))
+                        .collect(),
+                    ..instance.clone()
+                })
+                .collect();
+            self.fn_definitions = fn_definitions;
+            self.definitions = definitions;
+            self.assumes = assumes;
+            self.fairness = fairness;
+            self.quantified_fairness = quantified_fairness;
+            self.liveness_properties = liveness_properties;
+            self.instances = instances;
+        }
+
         let mut all_defs: crate::eval::Definitions = self
             .fn_definitions
             .iter()
@@ -223,6 +313,7 @@ impl Parser {
             safety_properties: Vec::new(),
             temporal_assumptions: Vec::new(),
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         })
     }
 

@@ -699,6 +699,83 @@ fn unparsed_directive<'a>(cfg: &'a TlcConfig, spec: &Spec) -> Option<String> {
     })
 }
 
+/// The spec parsed again from `source` when the cfg substitutes an operator
+/// (`Op <- Def` for an `Op` that is not a declared constant), with every use of
+/// the definition of `Op` the root module sees referring to `Def`, as TLC replaces
+/// that definition wherever it is used. The modules inline the operators they use
+/// as they are parsed, so the replacement has to be made then. `spec` is the spec
+/// parsed without it, which tells constants from operators and the arity each
+/// operator takes; it is returned unchanged when the cfg substitutes only
+/// constants. Call it before [`apply_config`], which then binds only the
+/// substituted constants.
+pub fn override_operators(
+    cfg: &TlcConfig,
+    spec: Spec,
+    source: &str,
+    spec_path: Option<&std::path::Path>,
+) -> Result<Spec, String> {
+    let replaced: Vec<&(Arc<str>, Arc<str>)> = cfg
+        .substitutions
+        .iter()
+        .filter(|(name, _)| !spec.constants.contains(name))
+        .collect();
+    if replaced.is_empty() {
+        return Ok(spec);
+    }
+    let arity = |name: &Arc<str>| match spec.definitions.get(name) {
+        Some((params, _)) => Some(params.len()),
+        None => crate::parser::builtin_arity(name),
+    };
+    for (name, target) in &replaced {
+        let Some(expected) = arity(name) else {
+            return Err(format!(
+                "substitution '{name} <- {target}': '{name}' is neither a CONSTANT nor an operator that can be substituted"
+            ));
+        };
+        let found = match target.as_ref() {
+            "Nat" | "Int" | "BOOLEAN" | "STRING" if !spec.definitions.contains_key(target) => 0,
+            _ => match spec.definitions.get(target) {
+                Some((params, _)) => params.len(),
+                None => {
+                    return Err(format!(
+                        "substitution '{name} <- {target}': no definition '{target}'"
+                    ));
+                }
+            },
+        };
+        if found != expected {
+            return Err(format!(
+                "substitution '{name} <- {target}': '{target}' must take as many arguments as '{name}' ({expected}), not {found}"
+            ));
+        }
+    }
+    let root = crate::parser::parse(source)
+        .map_err(|error| format!("parse error with the cfg's operator substitutions: {error}"))?;
+    let root_name = crate::parser::module_name(source);
+    let overrides: crate::parser::OperatorOverrides = replaced
+        .into_iter()
+        .map(|(name, target)| {
+            let home = match spec_path {
+                _ if root.definitions.contains_key(name) => root_name.clone(),
+                #[cfg(not(target_arch = "wasm32"))]
+                Some(spec_path) => crate::modules::definition_home(&root, name, spec_path),
+                _ => None,
+            };
+            let target = target.clone();
+            (name.clone(), crate::parser::Override { target, home })
+        })
+        .collect();
+    let (mut overridden, _) = crate::parser::parse_with_overrides(source, &overrides)
+        .map_err(|error| format!("parse error with the cfg's operator substitutions: {error}"))?;
+    overridden.operator_overrides = overrides;
+    match spec_path {
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(spec_path) => crate::modules::merge_extended_declarations(&mut overridden, spec_path)?,
+        _ => {}
+    }
+    Ok(overridden)
+}
+
 pub fn apply_config(
     cfg: &TlcConfig,
     spec: &mut Spec,
@@ -731,7 +808,9 @@ pub fn apply_config(
     }
 
     for (name, target) in &cfg.substitutions {
-        if cli_constants.iter().any(|(n, _)| n == name) {
+        if cli_constants.iter().any(|(n, _)| n == name)
+            || spec.operator_overrides.contains_key(name)
+        {
             continue;
         }
         if cfg.constants.iter().any(|(n, _)| n == name) {
@@ -1093,6 +1172,23 @@ fn collect_assumptions(expr: &Expr, out: &mut Vec<Expr>) {
     }
 }
 
+/// The body `expr` stands for when it only names another zero-parameter
+/// definition, as the definition of an operator a cfg substitution replaces does,
+/// followed until it names none.
+fn referenced_definition(expr: &Arc<Expr>, definitions: &crate::ast::DefinitionMap) -> Arc<Expr> {
+    let mut body = expr.clone();
+    for _ in 0..definitions.len() {
+        match body.as_ref() {
+            Expr::Var(name) => match definitions.get(name) {
+                Some((params, referenced)) if params.is_empty() => body = referenced.clone(),
+                _ => break,
+            },
+            _ => break,
+        }
+    }
+    body
+}
+
 fn resolve_specification(
     spec_name: &Arc<str>,
     spec: &mut Spec,
@@ -1100,7 +1196,7 @@ fn resolve_specification(
     engine: LivenessEngine,
 ) -> Result<Vec<String>, String> {
     let expr_clone = match spec.definitions.get(spec_name.as_ref()) {
-        Some((params, expr)) if params.is_empty() => expr.clone(),
+        Some((params, expr)) if params.is_empty() => referenced_definition(expr, &spec.definitions),
         Some(_) => {
             return Err(format!(
                 "SPECIFICATION definition '{}' must have zero parameters",
@@ -1160,6 +1256,60 @@ fn resolve_specification(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn override_error(module: &str, cfg: &str) -> String {
+        let spec = crate::parser::parse(module).unwrap();
+        let cfg = parse_cfg(cfg).unwrap();
+        match override_operators(&cfg, spec, module, None) {
+            Ok(_) => panic!("the substitution should be rejected"),
+            Err(error) => error,
+        }
+    }
+
+    #[test]
+    fn operator_substitution_needs_the_same_arity() {
+        let module = "---- MODULE M ----\nEXTENDS Naturals\nBump(n) == n + 1\nTwo == 2\n====\n";
+        let error = override_error(module, "CONSTANT Bump <- Two\n");
+        assert!(
+            error.contains("'Two' must take as many arguments as 'Bump' (1), not 0"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn operator_substitution_needs_a_known_operator() {
+        let module = "---- MODULE M ----\nEXTENDS Naturals\nTwo == 2\n====\n";
+        let error = override_error(module, "CONSTANT Natural <- Two\n");
+        assert!(
+            error.contains(
+                "'Natural' is neither a CONSTANT nor an operator that can be substituted"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn operator_substitution_replaces_uses_and_the_definition() {
+        let module = "---- MODULE M ----\nEXTENDS Naturals\nBump(n) == n + 1\n\
+                      MCBump(n) == n + 2\nUse == Bump(1)\n====\n";
+        let spec = crate::parser::parse(module).unwrap();
+        let cfg = parse_cfg("CONSTANT Bump <- MCBump\n").unwrap();
+        let Ok(spec) = override_operators(&cfg, spec, module, None) else {
+            panic!("the substitution should apply");
+        };
+        let body = |name: &str| spec.definitions.get(name).map(|(_, body)| (**body).clone());
+        assert_eq!(
+            body("Bump"),
+            Some(Expr::FnCall("MCBump".into(), vec![Expr::Var("n".into())]))
+        );
+        assert_eq!(
+            body("Use"),
+            Some(Expr::FnCall(
+                "MCBump".into(),
+                vec![Expr::Lit(Value::Int(1))]
+            ))
+        );
+    }
 
     #[test]
     fn parse_init_next() {
@@ -1663,6 +1813,7 @@ mod tests {
             temporal_assumptions: vec![],
             constants: vec![],
             constant_substitutions: vec![],
+            operator_overrides: Default::default(),
         };
         spec.definitions.insert(
             Arc::from("Perms"),
@@ -1709,6 +1860,7 @@ mod tests {
             temporal_assumptions: vec![],
             constants: vec![],
             constant_substitutions: vec![],
+            operator_overrides: Default::default(),
         };
 
         let inner = Expr::Eq(
@@ -1763,6 +1915,7 @@ mod tests {
             temporal_assumptions: vec![],
             constants: vec![],
             constant_substitutions: vec![],
+            operator_overrides: Default::default(),
         };
 
         let p = Box::new(Expr::Eq(
@@ -1819,6 +1972,7 @@ mod tests {
             temporal_assumptions: vec![],
             constants: vec![],
             constant_substitutions: vec![],
+            operator_overrides: Default::default(),
         };
 
         let init_expr = Expr::Var(Arc::from("MyInit"));
@@ -1877,6 +2031,7 @@ mod tests {
             temporal_assumptions: vec![],
             constants: vec![],
             constant_substitutions: vec![],
+            operator_overrides: Default::default(),
         };
 
         let init_part_1 = Expr::In(
@@ -1981,6 +2136,7 @@ mod tests {
             temporal_assumptions: vec![],
             constants: vec![],
             constant_substitutions: vec![],
+            operator_overrides: Default::default(),
         };
 
         spec.definitions.insert(

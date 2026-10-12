@@ -406,7 +406,7 @@ pub fn prepare_spec(
     let mut extended_defs: Definitions = BTreeMap::new();
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(spec_path) = spec_path {
-        let mut registry = ModuleRegistry::new();
+        let mut registry = ModuleRegistry::with_overrides(spec.operator_overrides.clone());
         let mut ancestors: Vec<Arc<str>> = Vec::new();
         for module in &spec.extends {
             if stdlib::is_stdlib_module(module) {
@@ -439,7 +439,7 @@ pub fn prepare_spec(
     if !spec.instances.is_empty()
         && let Some(spec_path) = spec_path
     {
-        let mut registry = ModuleRegistry::new();
+        let mut registry = ModuleRegistry::with_overrides(spec.operator_overrides.clone());
         for inst in &spec.instances {
             if stdlib::is_stdlib_module(&inst.module_name) {
                 continue;
@@ -3025,6 +3025,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
         let result = CheckResult::InitError(EvalError::domain_error("line one\nline \"two\"\t"));
         let json = check_result_to_json(&result, &spec);
@@ -3118,6 +3119,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
 
         let domains = Env::new();
@@ -3158,6 +3160,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
 
         let domains = Env::new();
@@ -3204,6 +3207,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         }
     }
 
@@ -3263,6 +3267,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
         assert!(
             unchecked_predicate_warning(&spec, false).is_none(),
@@ -3299,6 +3304,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
         assert!(
             unchecked_predicate_warning(&spec, false).is_none(),
@@ -3328,6 +3334,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
 
         let domains = Env::new();
@@ -3374,6 +3381,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
 
         let domains = Env::new();
@@ -3418,6 +3426,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
 
         let domains = Env::new();
@@ -3475,6 +3484,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
 
         let domains = Env::new();
@@ -3513,6 +3523,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
 
         let domains = Env::new();
@@ -3553,6 +3564,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
 
         let result = check(&spec, &Env::new(), &CheckerConfig::default());
@@ -3611,6 +3623,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
 
         let result1 = check(&spec1, &Env::new(), &CheckerConfig::default());
@@ -3658,6 +3671,7 @@ mod tests {
             safety_properties: vec![],
             temporal_assumptions: vec![],
             constant_substitutions: Vec::new(),
+            operator_overrides: Default::default(),
         };
 
         let result2 = check(&spec2, &Env::new(), &CheckerConfig::default());

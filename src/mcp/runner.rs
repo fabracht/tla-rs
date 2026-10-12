@@ -9,7 +9,7 @@ use crate::checker::{
     CheckResult, CheckStats, CheckerConfig, Counterexample, LivenessEngine, PrepareSpecError,
     PropertyStats, PropertyViolationKind, check,
 };
-use crate::config::{apply_config, parse_cfg, parse_constant_value};
+use crate::config::{apply_config, override_operators, parse_cfg, parse_constant_value};
 use crate::demo::{self, Beat, BeatReport, Manifest, run_beat};
 use crate::liveness::LivenessViolation;
 use crate::parser::{parse_expr, parse_with_warnings};
@@ -95,6 +95,8 @@ pub fn prepare(
         })?;
         let cfg_parsed = parse_cfg(&cfg_contents)
             .map_err(|e| StructuredError::config(format!("cfg parse error: {}", e)))?;
+        spec = override_operators(&cfg_parsed, spec, &contents, Some(&path))
+            .map_err(|e| StructuredError::config(format!("cfg apply error: {}", e)))?;
         let cfg_warnings = apply_config(
             &cfg_parsed,
             &mut spec,
