@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tla_checker::ast::{Env, Value};
 use tla_checker::checker::{CheckResult, CheckerConfig, PrepareSpecError, check};
 use tla_checker::config::{apply_config, override_operators, parse_cfg};
+use tla_checker::eval::EvalError;
 use tla_checker::parser::parse;
 
 /// The suite runs under the walker by default; `TLA_ENGINE=inference` runs the
@@ -2330,6 +2331,24 @@ fn test_should_pass_operator_substitution_fairness() {
     match check_spec_file(path) {
         CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 4),
         other => panic!("operator_substitution_fairness.tla should pass, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_pass_set_membership() {
+    let path = Path::new("test_cases/should_pass/set_membership/set_membership.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("set_membership.tla should pass, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_should_error_constant_filter_error() {
+    let path = Path::new("test_cases/should_error/constant_filter_error.tla");
+    match check_spec_file(path) {
+        CheckResult::InvariantError(EvalError::DivisionByZero { .. }, _, _) => {}
+        other => panic!("expected InvariantError, got: {other:?}"),
     }
 }
 

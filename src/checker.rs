@@ -558,6 +558,7 @@ fn check_with_state_vars(spec: &Spec, domains: &Env, config: &CheckerConfig) -> 
         Ok(r) => r,
         Err(e) => return CheckResult::PrepareError(e),
     };
+    let _constants = crate::eval::cache_constant_expressions(spec, &defs, &domains);
 
     let mut symmetry = SymmetryConfig::new();
     for sym_const in &config.symmetric_constants {

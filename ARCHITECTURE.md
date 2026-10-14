@@ -89,6 +89,7 @@ Release builds use `lto = "fat"`, `codegen-units = 1`, `strip = true`, `panic = 
 | `state.rs` | `next_states`, `next_states_with_guards`, `is_action_enabled`, `is_angle_action_enabled`, `angle_action_enabled_in` |
 | `context.rs` | `eval_with_context` (evaluation with state variables in scope), `eval_with_instances` |
 | `recursive.rs` | Recursive function definitions, memoized through a thread-local stack of active functions |
+| `constant_cache.rs` | Values of constant expressions for one run (`cache_constant_expressions`): a closed expression of the spec or its definitions that reads no state variable, prime or run-dependent built-in is evaluated once and kept until the run ends, as TLC does for constant definitions |
 | `global_state.rs` | Thread-locals: resolved and parameterized instances, TLCGet/TLCSet state, checker statistics, RNG seed, state variables in scope, `SYMBOLIC_INTEGERS`, enumeration caps |
 | `combinatorics.rs` | Permutations, k-combinations, sub-bag enumeration, `SUBSET` with cardinality constraints |
 | `helpers.rs` | Typed eval helpers, symbolic set membership (`in_set_symbolic`), nested function update |
@@ -144,7 +145,7 @@ Release builds use `lto = "fat"`, `codegen-units = 1`, `strip = true`, `panic = 
 2. **EXTENDS merge.** `modules::merge_extended_declarations` adds the variables, constants and definitions of extended user modules (transitively; the extending module's definitions win).
 3. **Configuration.** The cfg (explicit `--config`, else `<Spec>.cfg` next to the spec) is parsed and applied. CLI constants override cfg constants. A cfg `Op <- Def` whose `Op` is not a declared constant replaces an operator: `config::override_operators` finds the module whose definition of `Op` the root sees (`modules::definition_home`) and parses the spec and its modules again (`parser::parse_with_overrides`, `ModuleRegistry::with_overrides`). The parser inlines operators as it reads them, so in each module that uses that definition it leaves `Op` uninlined and, once the module is parsed, renames its unbound uses to `Def` (`substitute_expr`); the module holding the definition also defines `Op` as `Def`.
 4. **Preparation.** `checker::prepare_spec` loads built-in modules, loads and resolves `EXTENDS`/`INSTANCE` modules from the spec's directory, evaluates cfg `Name <- Def` substitutions of constants, reports missing constants, and evaluates `ASSUME`.
-5. **Search.** `checker::check` runs the BFS and, if needed, liveness checking, returning a `CheckResult`.
+5. **Search.** `checker::check` runs the BFS and, if needed, liveness checking, returning a `CheckResult`. For the length of the run, each constant expression of the spec (a set filter, a `CHOOSE`, an operator call, …, closed and with no state variable) is evaluated once and its value reused (`eval::cache_constant_expressions`); one that fails is evaluated again where it is used.
 
 ## Binary & CLI
 

@@ -3,6 +3,7 @@ use super::combinatorics::{
     detect_cardinality_constraint, enumerate_subbags, generate_subsets_with_constraint,
     permutations,
 };
+use super::constant_cache::{self, Lookup};
 use super::error::{EvalError, Result};
 #[cfg(feature = "profiling")]
 use super::global_state::PROFILING_STATS;
@@ -177,6 +178,31 @@ fn eval_in_next_state(
 }
 
 fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
+    if constant_cache::is_cacheable(expr) {
+        return eval_cached(expr, env, |env| eval_node(expr, env, defs));
+    }
+    eval_node(expr, env, defs)
+}
+
+/// `compute`'s value, or the value it had the first time when `expr` is a constant
+/// expression of the run (see [`constant_cache`]).
+fn eval_cached(
+    expr: &Expr,
+    env: &mut Env,
+    compute: impl FnOnce(&mut Env) -> Result<Value>,
+) -> Result<Value> {
+    match constant_cache::lookup(expr) {
+        Lookup::Cached(value) => Ok(value),
+        Lookup::Registered => {
+            let value = compute(env)?;
+            constant_cache::store(expr, &value);
+            Ok(value)
+        }
+        Lookup::Unregistered => compute(env),
+    }
+}
+
+fn eval_node(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
     #[cfg(feature = "profiling")]
     PROFILING_STATS.with(|s| s.borrow_mut().eval_calls += 1);
 
@@ -190,7 +216,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Some((params, body)) = defs.get(name)
                 && params.is_empty()
             {
-                return eval(body, env, defs);
+                return eval_cached(expr, env, |env| eval(body, env, defs));
             }
             Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
         }

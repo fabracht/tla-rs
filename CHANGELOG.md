@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.24.8] - 2026-10-13
+
+### Fixed
+
+- A constant set was built again on every state, so checking membership in a large one was slow (#233): `TypeOK == seq \in SortedSeqs` in MCBinarySearch from tlaplus/Examples did not finish in 120s, where TLC takes 2s. As TLC does for a constant definition, each expression of the spec that is closed and reads no state variable, prime or run-dependent built-in (a set filter, a `UNION`, a `CHOOSE`, a call with constant arguments, …) is now evaluated once per run and its value reused. MCBinarySearch now finishes in 4s with TLC's 27,953 states. An evaluation that fails is not kept, so the error is still reported where the expression is used.
+
 ## [0.24.7] - 2026-10-11
 
 ### Fixed

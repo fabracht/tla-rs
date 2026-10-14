@@ -1,6 +1,7 @@
 mod ast_utils;
 mod candidates;
 mod combinatorics;
+mod constant_cache;
 mod context;
 mod core;
 mod diagnostics;
@@ -54,6 +55,7 @@ pub(crate) use self::ast_utils::{
     parameterized_let_op, primes_parameter, reaches_temporal, references_state,
     uses_run_dependent_builtin,
 };
+pub(crate) use self::constant_cache::cache_constant_expressions;
 pub(crate) use self::global_state::with_state_vars;
 pub(crate) use self::helpers::eval_set;
 pub(crate) use self::state::angle_action_enabled_in;
