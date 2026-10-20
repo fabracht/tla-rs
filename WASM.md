@@ -1,6 +1,17 @@
 # WebAssembly
 
-The core library compiles to WASM for browser embedding. Every [GitHub release](https://github.com/fabracht/tla-rs/releases/latest) ships the built engine as `tla_checker.js` and `tla_checker_bg.wasm`. To build it from a working copy (needs [cargo-make](https://github.com/sagiegurari/cargo-make) and the `wasm32-unknown-unknown` target; a `wasm-bindgen-cli` matching `Cargo.lock` is installed into `.wasm-tools/` when missing):
+The core library compiles to WASM for browser embedding. Every [GitHub release](https://github.com/fabracht/tla-rs/releases/latest) ships the built engine as `tla_checker.js` and `tla_checker_bg.wasm`, and publishes it to npm as [`tla-checker`](https://www.npmjs.com/package/tla-checker), with TypeScript declarations:
+
+```bash
+npm install tla-checker
+```
+
+```js
+import init, { check_spec } from "tla-checker";
+await init();
+```
+
+To build it from a working copy (needs [cargo-make](https://github.com/sagiegurari/cargo-make) and the `wasm32-unknown-unknown` target; a `wasm-bindgen-cli` matching `Cargo.lock` is installed into `.wasm-tools/` when missing):
 
 ```bash
 cargo make wasm
@@ -54,7 +65,7 @@ if (result.dot) {
 
 ## Stepping API
 
-For step-by-step exploration there are four additional bindings. `explore_init`, `explore_next`, and `explore_invariants` power the [`--explorable` HTML export](CLI_GUIDE.md#demo-walkthroughs); `explore_eval` is available for embedders that want to evaluate an arbitrary expression at a state:
+For step-by-step exploration there are four additional bindings. `explore_init`, `explore_next`, and `explore_invariants` power the [`--explorable` HTML export](https://github.com/fabracht/tla-rs/blob/main/CLI_GUIDE.md#demo-walkthroughs); `explore_eval` is available for embedders that want to evaluate an arbitrary expression at a state:
 
 | Binding | Returns |
 |---------|---------|
