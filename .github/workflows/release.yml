@@ -73,6 +73,70 @@ jobs:
           path: |
             pkg/tla_checker_bg.wasm
             pkg/tla_checker.js
+            pkg/tla_checker.d.ts
+            pkg/tla_checker_bg.wasm.d.ts
+
+  publish-npm:
+    name: Publish to npm
+    needs: build-wasm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download wasm pkg
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-pkg
+          path: pkg
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install npm with trusted publishing
+        run: npm install -g npm@^11.5.1
+
+      - name: Publish wasm package
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          if npm view "tla-checker@$VERSION" version > /dev/null 2>&1; then
+            echo "tla-checker $VERSION is already on npm; skipping."
+            exit 0
+          fi
+          cat > pkg/package.json << PKGJSON
+          {
+            "name": "tla-checker",
+            "version": "$VERSION",
+            "type": "module",
+            "description": "A TLA+ model checker compiled to WebAssembly",
+            "license": "MIT OR Apache-2.0",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/fabracht/tla-rs.git"
+            },
+            "homepage": "https://github.com/fabracht/tla-rs#readme",
+            "bugs": {
+              "url": "https://github.com/fabracht/tla-rs/issues"
+            },
+            "main": "tla_checker.js",
+            "types": "tla_checker.d.ts",
+            "files": [
+              "tla_checker_bg.wasm",
+              "tla_checker.js",
+              "tla_checker.d.ts",
+              "tla_checker_bg.wasm.d.ts"
+            ],
+            "keywords": ["tla", "model-checking", "formal-verification", "wasm"]
+          }
+          PKGJSON
+          cp README.md pkg/README.md
+          cd pkg
+          npm publish
 
   build-binaries:
     name: Build CLI Binaries
