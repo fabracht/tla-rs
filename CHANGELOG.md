@@ -4,7 +4,7 @@
 
 ### Changed
 
-- A release publishes the WebAssembly package `tla-checker` to npm again, through npm trusted publishing (OIDC) from the release workflow, so no npm token is stored in the repository; npm generates provenance for it. The package's version now follows the crate's (npm had 0.9.0) and includes the TypeScript declarations.
+- A release publishes the WebAssembly package `tla-checker` to npm again, through npm trusted publishing (OIDC) from the release workflow, so no npm token is stored in the repository; npm generates provenance for it. The package's version now follows the crate's (npm had 0.9.0) and includes the TypeScript declarations. Its README is `WASM.md`, which now covers installing it from npm. A prerelease version is published under the `next` dist-tag.
 
 ## [0.24.7] - 2026-10-11
 

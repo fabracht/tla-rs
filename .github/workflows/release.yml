@@ -78,7 +78,7 @@ jobs:
 
   publish-npm:
     name: Publish to npm
-    needs: build-wasm
+    needs: [build-wasm, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -98,13 +98,12 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install npm with trusted publishing
-        run: npm install -g npm@^11.5.1
-
       - name: Publish wasm package
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          if npm view "tla-checker@$VERSION" version > /dev/null 2>&1; then
+          echo "npm $(npm --version)"
+          PUBLISHED=$(npm view tla-checker versions --json)
+          if node -e 'process.exit([].concat(JSON.parse(process.argv[1])).includes(process.argv[2]) ? 0 : 1)' "$PUBLISHED" "$VERSION"; then
             echo "tla-checker $VERSION is already on npm; skipping."
             exit 0
           fi
@@ -134,9 +133,13 @@ jobs:
             "keywords": ["tla", "model-checking", "formal-verification", "wasm"]
           }
           PKGJSON
-          cp README.md pkg/README.md
+          case "$VERSION" in
+            *-*) DIST_TAG=next ;;
+            *) DIST_TAG=latest ;;
+          esac
+          cp WASM.md pkg/README.md
           cd pkg
-          npm publish
+          npm publish --tag "$DIST_TAG"
 
   build-binaries:
     name: Build CLI Binaries
@@ -215,7 +218,7 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release
-          find artifacts -type f -exec cp {} release/ \;
+          find artifacts -type f ! -name '*.d.ts' -exec cp {} release/ \;
           cd release
           sha256sum * > SHA256SUMS
           ls -la
