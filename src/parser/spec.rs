@@ -326,6 +326,15 @@ impl Parser {
     }
 
     fn parse_definition(&mut self, name: &Arc<str>, column: u32) -> Result<Definition> {
+        if *self.peek() == Token::LBracket {
+            self.advance();
+            let binders = self.parse_function_binders()?;
+            self.expect(Token::RBracket)?;
+            self.expect(Token::EqEq)?;
+            let body = self.parse_definition_body(column)?;
+            let body = self.function_of(binders, body)?;
+            return Ok(Definition::Operator { params: None, body });
+        }
         let params = if *self.peek() == Token::LParen {
             self.advance();
             let params = self.parse_var_list()?;

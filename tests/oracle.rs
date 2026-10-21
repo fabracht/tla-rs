@@ -2341,6 +2341,19 @@ fn test_should_pass_named_instance_in_extended_module() {
     }
 }
 
+/// Top-level function definitions, recursive over `Nat` and of two arguments;
+/// constructors with several bound variables, `a, b \in S` and tuple binders;
+/// application and `EXCEPT` with several arguments; and a parenthesized product
+/// as a component of a product (TLC: 3 distinct states, every invariant holds).
+#[test]
+fn test_should_pass_function_syntax() {
+    let path = Path::new("test_cases/should_pass/function_syntax/function_syntax.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("function_syntax.tla should pass, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_should_pass_prime_parameters() {
     let path = Path::new("test_cases/should_pass/prime_parameters/prime_parameters.tla");

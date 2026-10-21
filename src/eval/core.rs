@@ -14,7 +14,7 @@ use super::helpers::{
     eval_set, eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_symbolic_set_expr,
     subseq_range, update_nested_value,
 };
-use super::recursive::{apply_active_function, eval_fn_def_recursive};
+use super::recursive::{apply_active_function, apply_function_definition, eval_fn_def_recursive};
 use crate::ast::{Env, Expr, Value};
 use crate::checker::format_value;
 use crate::substitution::substitute_expr;
@@ -190,6 +190,11 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Some((params, body)) = defs.get(name)
                 && params.is_empty()
             {
+                if let Expr::FnDef(param, domain, fn_body) = body.as_ref() {
+                    let domain = eval_set(domain, env, defs)?;
+                    let function = eval_fn_def_recursive(name, param, domain, fn_body, env, defs)?;
+                    return Ok(Value::func(function));
+                }
                 return eval(body, env, defs);
             }
             Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
@@ -514,8 +519,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             Ok(Value::set(ls.difference(&rs).cloned().collect()))
         }
 
-        Expr::Cartesian(l, r) => {
-            let operands = super::ast_utils::cartesian_operands(l, r);
+        Expr::Cartesian(operands) => {
             let sets: Vec<BTreeSet<Value>> = operands
                 .iter()
                 .map(|op| eval_set(op, env, defs))
@@ -736,10 +740,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 }
                 return result;
             }
-            if let Expr::Var(name) = f.as_ref()
-                && !env.contains_key(name)
-                && let Some(result) = apply_active_function(name, arg, env, defs)
-            {
+            if let Some(result) = apply_function_definition_at(f, arg, env, defs) {
                 return result;
             }
             let fval = eval(f, env, defs)?;
@@ -1088,6 +1089,10 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::TupleAccess(tup, idx) => {
+            let position = Expr::Lit(Value::Int((*idx + 1) as i64));
+            if let Some(result) = apply_function_definition_at(tup, &position, env, defs) {
+                return result;
+            }
             let v = eval(tup, env, defs)?;
             match v {
                 Value::Tuple(tv) => tv.get(*idx).cloned().ok_or_else(|| {
@@ -1609,12 +1614,10 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 local_defs.insert(var.clone(), (params, Arc::new(op_body.clone())));
                 return eval(body, env, &local_defs);
             }
-            if let Expr::FnDef(param, domain_expr, fn_body) = binding.as_ref() {
+            if let Expr::FnDef(..) = binding.as_ref() {
                 let mut local_defs = defs.clone();
                 local_defs.insert(var.clone(), (vec![], Arc::new((**binding).clone())));
-                let dom = eval_set(domain_expr, env, &local_defs)?;
-                let fn_result = eval_fn_def_recursive(var, param, dom, fn_body, env, &local_defs)?;
-                let prev = env.insert(var.clone(), Value::func(fn_result));
+                let prev = env.remove(var);
                 let result = eval(body, env, &local_defs);
                 match prev {
                     Some(old) => {
@@ -1863,6 +1866,43 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         },
 
         Expr::LabeledAction(_label, action) => eval(action, env, defs),
+    }
+}
+
+/// `f[arg]` when `f` is a function definition, `f[x \in S] == e` or
+/// `[x \in S |-> e]`, applied without building the whole function; `None` when
+/// `f` is a value to evaluate first.
+fn apply_function_definition_at(
+    f: &Expr,
+    arg: &Expr,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Option<Result<Value>> {
+    match f {
+        Expr::Var(name) if !env.contains_key(name) => {
+            if let Some(result) = apply_active_function(name, arg, env, defs) {
+                return Some(result);
+            }
+            match defs.get(name) {
+                Some((params, definition)) if params.is_empty() => match definition.as_ref() {
+                    Expr::FnDef(param, domain, body) => Some(apply_function_definition(
+                        name, param, domain, body, arg, env, defs,
+                    )),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        Expr::FnDef(param, domain, body) => Some(apply_function_definition(
+            &Arc::from(""),
+            param,
+            domain,
+            body,
+            arg,
+            env,
+            defs,
+        )),
+        _ => None,
     }
 }
 

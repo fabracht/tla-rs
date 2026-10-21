@@ -116,7 +116,7 @@ fn prime_expr(expr: &Expr) -> Expr {
         Expr::Union(l, r) => Expr::Union(p(l), p(r)),
         Expr::Intersect(l, r) => Expr::Intersect(p(l), p(r)),
         Expr::SetMinus(l, r) => Expr::SetMinus(p(l), p(r)),
-        Expr::Cartesian(l, r) => Expr::Cartesian(p(l), p(r)),
+        Expr::Cartesian(sets) => Expr::Cartesian(sets.iter().map(prime_expr).collect()),
         Expr::Subset(l, r) => Expr::Subset(p(l), p(r)),
         Expr::ProperSubset(l, r) => Expr::ProperSubset(p(l), p(r)),
         Expr::Powerset(e) => Expr::Powerset(p(e)),
@@ -355,10 +355,9 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
             Box::new(substitute_expr(l, subs)),
             Box::new(substitute_expr(r, subs)),
         ),
-        Expr::Cartesian(l, r) => Expr::Cartesian(
-            Box::new(substitute_expr(l, subs)),
-            Box::new(substitute_expr(r, subs)),
-        ),
+        Expr::Cartesian(sets) => {
+            Expr::Cartesian(sets.iter().map(|e| substitute_expr(e, subs)).collect())
+        }
         Expr::Subset(l, r) => Expr::Subset(
             Box::new(substitute_expr(l, subs)),
             Box::new(substitute_expr(r, subs)),

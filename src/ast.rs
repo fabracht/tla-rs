@@ -182,7 +182,7 @@ pub enum Expr {
     Union(Box<Expr>, Box<Expr>),
     Intersect(Box<Expr>, Box<Expr>),
     SetMinus(Box<Expr>, Box<Expr>),
-    Cartesian(Box<Expr>, Box<Expr>),
+    Cartesian(Vec<Expr>),
     Subset(Box<Expr>, Box<Expr>),
     ProperSubset(Box<Expr>, Box<Expr>),
     Powerset(Box<Expr>),

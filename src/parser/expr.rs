@@ -448,6 +448,7 @@ impl Parser {
 
     pub(super) fn parse_additive(&mut self) -> Result<Expr> {
         let mut left = self.parse_multiplicative()?;
+        let mut in_product = false;
         loop {
             match self.peek() {
                 Token::Plus => {
@@ -478,7 +479,15 @@ impl Parser {
                 Token::Times => {
                     self.advance();
                     let right = self.parse_multiplicative()?;
-                    left = Expr::Cartesian(Box::new(left), Box::new(right));
+                    left = match left {
+                        Expr::Cartesian(mut sets) if in_product => {
+                            sets.push(right);
+                            Expr::Cartesian(sets)
+                        }
+                        other => Expr::Cartesian(vec![other, right]),
+                    };
+                    in_product = true;
+                    continue;
                 }
                 Token::Concat => {
                     self.advance();
@@ -515,6 +524,7 @@ impl Parser {
                 }
                 _ => break,
             }
+            in_product = false;
         }
         Ok(left)
     }
@@ -1003,7 +1013,6 @@ impl Parser {
             Union(l, r) => Union(un(l, bound), un(r, bound)),
             Intersect(l, r) => Intersect(un(l, bound), un(r, bound)),
             SetMinus(l, r) => SetMinus(un(l, bound), un(r, bound)),
-            Cartesian(l, r) => Cartesian(un(l, bound), un(r, bound)),
             Subset(l, r) => Subset(un(l, bound), un(r, bound)),
             ProperSubset(l, r) => ProperSubset(un(l, bound), un(r, bound)),
             FnApp(l, r) => FnApp(un(l, bound), un(r, bound)),
@@ -1092,6 +1101,11 @@ impl Parser {
                     .map(|e| self.prime_distribute(e, bound))
                     .collect(),
             ),
+            Cartesian(sets) => Cartesian(
+                sets.iter()
+                    .map(|e| self.prime_distribute(e, bound))
+                    .collect(),
+            ),
             RecordLit(fields) => RecordLit(
                 fields
                     .iter()
@@ -1163,7 +1177,7 @@ impl Parser {
                         self.expect(Token::RBracket)?;
                         expr = Expr::Except(Box::new(expr), updates);
                     } else {
-                        let idx = self.parse_expr()?;
+                        let idx = self.parse_arguments()?;
                         self.expect(Token::RBracket)?;
                         if let Expr::Lit(Value::Int(n)) = &idx {
                             if *n > 0 {

@@ -8,13 +8,48 @@ use crate::ast::{Env, Expr, Value};
 use super::Definitions;
 use super::core::{STACK_GROWTH, STACK_RED_ZONE, eval};
 use super::error::{EvalError, Result, value_type_name};
-use super::helpers::apply_fn_value;
 use crate::checker::format_value;
 
 struct RecursiveFunction {
     name: Arc<str>,
-    domain: BTreeSet<Value>,
+    body: *const Expr,
+    domain: FunctionDomain,
     values: RefCell<BTreeMap<Value, Value>>,
+}
+
+/// The domain of a function being evaluated: the values it is built for, or, for
+/// a function applied to an argument, the set its argument must belong to, so
+/// only the points the application needs are evaluated, as in TLC.
+enum FunctionDomain {
+    Values(BTreeSet<Value>),
+    Set(Expr),
+}
+
+impl RecursiveFunction {
+    /// Whether `name` refers to this function in `defs`, and not to another
+    /// function of the same name, as a `LET` inside its evaluation may define.
+    fn is(&self, name: &Arc<str>, body: &Expr) -> bool {
+        &self.name == name && std::ptr::eq(self.body, body)
+    }
+}
+
+impl FunctionDomain {
+    fn contains(&self, key: &Value, env: &mut Env, defs: &Definitions) -> Result<bool> {
+        match self {
+            FunctionDomain::Values(values) => Ok(values.contains(key)),
+            FunctionDomain::Set(set) => {
+                let membership = Expr::In(Box::new(Expr::Lit(key.clone())), Box::new(set.clone()));
+                match eval(&membership, env, defs)? {
+                    Value::Bool(member) => Ok(member),
+                    other => Err(EvalError::type_mismatch_ctx(
+                        "Bool",
+                        other,
+                        "function domain",
+                    )),
+                }
+            }
+        }
+    }
 }
 
 thread_local! {
@@ -46,12 +81,13 @@ pub(crate) fn eval_fn_def_recursive(
 ) -> Result<BTreeMap<Value, Value>> {
     let function = Rc::new(RecursiveFunction {
         name: fn_name.clone(),
-        domain,
+        body,
+        domain: FunctionDomain::Values(domain.clone()),
         values: RefCell::new(BTreeMap::new()),
     });
     let active = ActiveFunction::enter(&function);
     let prev = env.remove(param);
-    let result = function.domain.iter().try_for_each(|val| {
+    let result = domain.iter().try_for_each(|val| {
         if function.values.borrow().contains_key(val) {
             return Ok(());
         }
@@ -72,15 +108,40 @@ pub(crate) fn eval_fn_def_recursive(
     result.map(|()| function.values.take())
 }
 
+/// `name[arg]` for the function `name[param \in domain] == body`, evaluated
+/// only at the points the application reaches, each once: `fact[n \in Nat]`
+/// applied to 4 evaluates `fact` at 4, 3, 2, 1 and 0.
+pub(crate) fn apply_function_definition(
+    name: &Arc<str>,
+    param: &Arc<str>,
+    domain: &Expr,
+    body: &Expr,
+    arg: &Expr,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<Value> {
+    let key = eval(arg, env, defs)?;
+    let function = Rc::new(RecursiveFunction {
+        name: name.clone(),
+        body,
+        domain: FunctionDomain::Set(domain.clone()),
+        values: RefCell::new(BTreeMap::new()),
+    });
+    let active = ActiveFunction::enter(&function);
+    let result = apply_memoized(param, body, key, env, defs, &function);
+    drop(active);
+    result
+}
+
 pub(crate) fn apply_active_function(
     name: &Arc<str>,
     arg: &Expr,
     env: &mut Env,
     defs: &Definitions,
 ) -> Option<Result<Value>> {
-    let function = ACTIVE_FUNCTIONS
-        .with_borrow(|active| active.iter().rev().find(|f| &f.name == name).cloned())?;
     let (param, body) = recursive_definition(name, defs)?;
+    let function = ACTIVE_FUNCTIONS
+        .with_borrow(|active| active.iter().rev().find(|f| f.is(name, body)).cloned())?;
     Some(
         eval(arg, env, defs).and_then(|key| apply_memoized(param, body, key, env, defs, &function)),
     )
@@ -107,7 +168,7 @@ fn apply_memoized(
     defs: &Definitions,
     function: &RecursiveFunction,
 ) -> Result<Value> {
-    if !function.domain.contains(&key) {
+    if !function.domain.contains(&key, env, defs)? {
         return Err(EvalError::domain_error(format!(
             "key {} not in function domain",
             format_value(&key)
@@ -152,15 +213,13 @@ fn eval_with_memo_inner(
     match expr {
         Expr::FnApp(f, arg) => {
             if let Expr::Var(name) = f.as_ref()
-                && name == &function.name
                 && let Some((param, body)) = recursive_definition(name, defs)
+                && function.is(name, body)
             {
                 let key = eval_with_memo(arg, env, defs, function)?;
                 return apply_memoized(param, body, key, env, defs, function);
             }
-            let fval = eval_with_memo(f, env, defs, function)?;
-            let av = eval_with_memo(arg, env, defs, function)?;
-            apply_fn_value(fval, av)
+            eval(expr, env, defs)
         }
 
         Expr::Let(var, binding, body) => {
@@ -237,12 +296,15 @@ fn eval_with_memo_inner(
             if let Some(val) = env.get(name) {
                 return Ok(val.clone());
             }
-            if let Some((params, body)) = defs.get(name)
-                && params.is_empty()
-            {
-                return eval_with_memo(body, env, defs, function);
+            match defs.get(name) {
+                Some((params, body))
+                    if params.is_empty() && !matches!(body.as_ref(), Expr::FnDef(..)) =>
+                {
+                    eval_with_memo(body, env, defs, function)
+                }
+                Some(_) => eval(expr, env, defs),
+                None => Err(EvalError::undefined_var_with_env(name.clone(), env, defs)),
             }
-            Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
         }
 
         _ => eval(expr, env, defs),
