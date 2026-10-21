@@ -324,6 +324,19 @@ mod tests {
     }
 
     #[test]
+    fn a_function_definition_is_not_taken_for_an_invariant_or_the_behavior() {
+        let spec = parse(
+            "VARIABLE x\nInvCount[i \\in 1..2] == i * 2\nInit[i \\in 1..2] == i\nPairSpec[i \\in 1..2] == i\nInv == x = 0",
+        )
+        .expect("the functions parse");
+        assert_eq!(spec.invariants.len(), 1);
+        assert!(spec.init.is_none());
+        for name in ["InvCount", "Init", "PairSpec"] {
+            assert!(spec.definitions.contains_key(name), "{name}");
+        }
+    }
+
+    #[test]
     fn parse_record() {
         let expr = parse_expr("[a |-> 1, b |-> 2]").unwrap();
         if let Expr::RecordLit(fields) = expr {

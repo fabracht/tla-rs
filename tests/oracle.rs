@@ -2354,6 +2354,18 @@ fn test_should_pass_function_syntax() {
     }
 }
 
+/// A function definition of an instanced module applied through the instance,
+/// named and parameterized, a function definition named like an invariant, and
+/// a recursive `LET` function in an action (TLC: 3 distinct states).
+#[test]
+fn test_should_pass_function_instance() {
+    let path = Path::new("test_cases/should_pass/function_instance/function_instance.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("function_instance.tla should pass, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_should_pass_prime_parameters() {
     let path = Path::new("test_cases/should_pass/prime_parameters/prime_parameters.tla");

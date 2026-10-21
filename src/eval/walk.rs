@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use super::Definitions;
-use super::ast_utils::{collect_disjuncts_with_labels, contains_prime_ref, parameterized_let_op};
+use super::ast_utils::{collect_disjuncts_with_labels, contains_prime_ref, let_definition};
 use super::core::{STACK_GROWTH, STACK_RED_ZONE, eval, expand_unchanged_vars};
 use super::error::{EvalError, Result};
 use super::helpers::{
@@ -443,7 +443,7 @@ fn walk_inner(
         }
 
         Expr::Let(name, binding, body) => {
-            if let Some((params, op_body)) = parameterized_let_op(binding) {
+            if let Some((params, op_body)) = let_definition(binding) {
                 let mut merged = ctx.defs.clone();
                 merged.insert(name.clone(), (params, Arc::new(op_body.clone())));
                 let sub_ctx = WalkCtx {

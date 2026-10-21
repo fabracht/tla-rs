@@ -20,6 +20,7 @@ enum Definition {
         body: Expr,
     },
     Instance(InstanceDecl),
+    Function(Expr),
 }
 
 impl Parser {
@@ -150,13 +151,12 @@ impl Parser {
                             self.fn_definitions.insert(symbol, (vec![name, rhs], body));
                         }
                         Definition::Instance(inst) => self.instances.push(inst),
+                        Definition::Function(body) => {
+                            let body = self.replacement(&name).map_or(body, Expr::Var);
+                            self.definitions.insert(name, body);
+                        }
                         Definition::Operator { params, body } => {
-                            let replaced = self
-                                .operator_overrides
-                                .get(&name)
-                                .filter(|replaced| self.holds(replaced))
-                                .map(|replaced| replaced.target.clone());
-                            let body = match replaced {
+                            let body = match self.replacement(&name) {
                                 Some(target) => match &params {
                                     Some(params) => Expr::FnCall(
                                         target,
@@ -325,6 +325,14 @@ impl Parser {
         Ok(Definition::Infix { symbol, rhs, body })
     }
 
+    /// The definition a cfg `name <- target` substitution puts in place of `name`.
+    fn replacement(&self, name: &Arc<str>) -> Option<Arc<str>> {
+        self.operator_overrides
+            .get(name)
+            .filter(|replaced| self.holds(replaced))
+            .map(|replaced| replaced.target.clone())
+    }
+
     fn parse_definition(&mut self, name: &Arc<str>, column: u32) -> Result<Definition> {
         if *self.peek() == Token::LBracket {
             self.advance();
@@ -333,7 +341,7 @@ impl Parser {
             self.expect(Token::EqEq)?;
             let body = self.parse_definition_body(column)?;
             let body = self.function_of(binders, body)?;
-            return Ok(Definition::Operator { params: None, body });
+            return Ok(Definition::Function(body));
         }
         let params = if *self.peek() == Token::LParen {
             self.advance();

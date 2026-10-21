@@ -14,7 +14,9 @@ use super::helpers::{
     eval_set, eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_symbolic_set_expr,
     subseq_range, update_nested_value,
 };
-use super::recursive::{apply_active_function, apply_function_definition, eval_fn_def_recursive};
+use super::recursive::{
+    FunctionDefinition, apply_function, function_definition, function_value, with_function,
+};
 use crate::ast::{Env, Expr, Value};
 use crate::checker::format_value;
 use crate::substitution::substitute_expr;
@@ -190,12 +192,10 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Some((params, body)) = defs.get(name)
                 && params.is_empty()
             {
-                if let Expr::FnDef(param, domain, fn_body) = body.as_ref() {
-                    let domain = eval_set(domain, env, defs)?;
-                    let function = eval_fn_def_recursive(name, param, domain, fn_body, env, defs)?;
-                    return Ok(Value::func(function));
-                }
-                return eval(body, env, defs);
+                return match FunctionDefinition::of(body) {
+                    Some(definition) => function_value(Some(name), &definition, env, defs),
+                    None => eval(body, env, defs),
+                };
             }
             Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
         }
@@ -740,7 +740,9 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 }
                 return result;
             }
-            if let Some(result) = apply_function_definition_at(f, arg, env, defs) {
+            if let Some(result) =
+                apply_function_definition_at(f, |env| eval(arg, env, defs), env, defs)
+            {
                 return result;
             }
             let fval = eval(f, env, defs)?;
@@ -752,11 +754,13 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             "lambda expression cannot be evaluated directly; must be applied",
         )),
 
-        Expr::FnDef(var, domain, body) => {
-            let dom = eval_set(domain, env, defs)?;
-            let placeholder_name: Arc<str> = "".into();
-            let result = eval_fn_def_recursive(&placeholder_name, var, dom, body, env, defs)?;
-            Ok(Value::func(result))
+        Expr::FnDef(param, domain, body) => {
+            let definition = FunctionDefinition {
+                param,
+                domain,
+                body,
+            };
+            function_value(None, &definition, env, defs)
         }
 
         Expr::FnCall(name, args) => {
@@ -1089,8 +1093,8 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::TupleAccess(tup, idx) => {
-            let position = Expr::Lit(Value::Int((*idx + 1) as i64));
-            if let Some(result) = apply_function_definition_at(tup, &position, env, defs) {
+            let position = |_: &mut Env| Ok(Value::Int((*idx + 1) as i64));
+            if let Some(result) = apply_function_definition_at(tup, position, env, defs) {
                 return result;
             }
             let v = eval(tup, env, defs)?;
@@ -1618,7 +1622,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 let mut local_defs = defs.clone();
                 local_defs.insert(var.clone(), (vec![], Arc::new((**binding).clone())));
                 let prev = env.remove(var);
-                let result = eval(body, env, &local_defs);
+                let result = with_function(var, &local_defs, || eval(body, env, &local_defs));
                 match prev {
                     Some(old) => {
                         env.insert(var.clone(), old);
@@ -1869,41 +1873,68 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
     }
 }
 
-/// `f[arg]` when `f` is a function definition, `f[x \in S] == e` or
-/// `[x \in S |-> e]`, applied without building the whole function; `None` when
-/// `f` is a value to evaluate first.
+/// `f[key]` when `f` is a function definition, `f[x \in S] == e`, an instance's
+/// `I!f`, or `[x \in S |-> e]`, applied without building the whole function;
+/// `None` when `f` is a value to evaluate first.
 fn apply_function_definition_at(
     f: &Expr,
-    arg: &Expr,
+    key: impl FnOnce(&mut Env) -> Result<Value>,
     env: &mut Env,
     defs: &Definitions,
 ) -> Option<Result<Value>> {
     match f {
         Expr::Var(name) if !env.contains_key(name) => {
-            if let Some(result) = apply_active_function(name, arg, env, defs) {
-                return Some(result);
-            }
-            match defs.get(name) {
-                Some((params, definition)) if params.is_empty() => match definition.as_ref() {
-                    Expr::FnDef(param, domain, body) => Some(apply_function_definition(
-                        name, param, domain, body, arg, env, defs,
-                    )),
-                    _ => None,
-                },
-                _ => None,
-            }
+            let definition = function_definition(name, defs)?;
+            Some(key(env).and_then(|key| apply_function(Some(name), &definition, key, env, defs)))
         }
-        Expr::FnDef(param, domain, body) => Some(apply_function_definition(
-            &Arc::from(""),
-            param,
-            domain,
-            body,
-            arg,
-            env,
-            defs,
-        )),
+        Expr::FnDef(..) => {
+            let definition = FunctionDefinition::of(f)?;
+            Some(key(env).and_then(|key| apply_function(None, &definition, key, env, defs)))
+        }
+        Expr::QualifiedCall(instance, op, args) if args.is_empty() => {
+            let instance_defs = match instance_definitions(instance, env, defs)? {
+                Ok(instance_defs) => instance_defs,
+                Err(error) => return Some(Err(error)),
+            };
+            let definition = function_definition(op, &instance_defs)?;
+            Some(
+                key(env).and_then(|key| {
+                    apply_function(Some(op), &definition, key, env, &instance_defs)
+                }),
+            )
+        }
         _ => None,
     }
+}
+
+/// `defs` with the definitions of the instance `I` or `P(args)` over them, as a
+/// qualified call `I!Op` evaluates `Op`; `None` when there is no such instance.
+fn instance_definitions(
+    instance: &Expr,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Option<Result<Definitions>> {
+    let instance_defs = match instance {
+        Expr::Var(name) => {
+            RESOLVED_INSTANCES.with(|instances| instances.borrow().get(name).cloned())?
+        }
+        Expr::FnCall(name, args) => {
+            let parameterized =
+                PARAMETERIZED_INSTANCES.with(|instances| instances.borrow().get(name).cloned())?;
+            if parameterized.params.len() != args.len() {
+                return None;
+            }
+            let values = match args.iter().map(|arg| eval(arg, env, defs)).collect() {
+                Ok(values) => values,
+                Err(error) => return Some(Err(error)),
+            };
+            super::resolve_parameterized_defs(&parameterized, values)
+        }
+        _ => return None,
+    };
+    let mut merged = defs.clone();
+    merged.extend(instance_defs);
+    Some(Ok(merged))
 }
 
 fn try_eval_unbounded_choose(
