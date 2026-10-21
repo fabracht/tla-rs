@@ -2024,6 +2024,28 @@ fn test_refinement_implicit_var_violates() {
     );
 }
 
+/// The abstract variable `y` is declared in a module the abstract module extends,
+/// so the refinement mapping must include it: a step moving `x` by two is not an
+/// abstract step (TLC: the action property `[][Next]_y` of the abstract module is
+/// violated after 2 states).
+#[test]
+fn test_refinement_extended_var_violates() {
+    let path =
+        Path::new("test_cases/should_violate/refinement_extended_var/refinement_extended_var.tla");
+    let config = CheckerConfig {
+        allow_deadlock: true,
+        check_refinement: Some("A".into()),
+        ..Default::default()
+    };
+    assert!(
+        matches!(
+            check_spec_file_with_config(path, config),
+            CheckResult::RefinementViolation(..)
+        ),
+        "an abstract variable from an extended module must be part of the refinement mapping"
+    );
+}
+
 /// Refinement checking runs on the (possibly symmetry-reduced) reachable graph,
 /// so combining it with `--symmetry` could hide a refinement violation on a
 /// pruned symmetric sibling — a false pass for a verification tool. The two must
@@ -2290,6 +2312,32 @@ fn test_should_pass_instance_scoping() {
     match check_spec_file(path) {
         CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 1),
         other => panic!("instance_scoping.tla should pass, got: {other:?}"),
+    }
+}
+
+/// A named instance of a module includes what the module extends and instances,
+/// with its `WITH` substitution reaching an extended variable, and keeps its scope
+/// against the root's `Foo` (TLC: 3 distinct states, every invariant holds).
+#[test]
+fn test_should_pass_named_instance_extends() {
+    let path =
+        Path::new("test_cases/should_pass/named_instance_extends/named_instance_extends.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("named_instance_extends.tla should pass, got: {other:?}"),
+    }
+}
+
+/// A named instance declared in an extended module resolves in that module's
+/// definitions and in the root's (TLC: 3 distinct states, both invariants hold).
+#[test]
+fn test_should_pass_named_instance_in_extended_module() {
+    let path = Path::new(
+        "test_cases/should_pass/named_instance_in_extended_module/named_instance_in_extended_module.tla",
+    );
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("named_instance_in_extended_module.tla should pass, got: {other:?}"),
     }
 }
 

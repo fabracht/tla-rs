@@ -124,6 +124,17 @@ impl ModuleRegistry {
     pub fn get(&self, name: &str) -> Option<&Spec> {
         self.modules.get(name)
     }
+
+    /// Completes the loaded module `name` with what it extends and instances, as
+    /// [`merge_extended_declarations`] does for the root, so an instance of it
+    /// sees every definition of the module and not only those written in it.
+    pub fn merge_declarations(&mut self, name: &str, base_path: &Path) -> Result<(), String> {
+        let Some(module) = self.modules.get_mut(name) else {
+            return Ok(());
+        };
+        module.operator_overrides = self.overrides.clone();
+        merge_extended_declarations(module, base_path)
+    }
 }
 
 impl Default for ModuleRegistry {
@@ -147,7 +158,9 @@ impl Default for ModuleRegistry {
 /// names inside them are rewritten to those keys, so a definition of the
 /// instancing module never replaces one M relies on. M's definitions are then
 /// added under their own names, except those of a `LOCAL INSTANCE` in an extended
-/// module, which only the definitions of that module see. The standard modules
+/// module, which only the definitions of that module see. A named `I == INSTANCE M`
+/// in an extended module is added to `spec.instances`, unless the spec declares
+/// its own `I`, so `I!Op` resolves in the definitions it brings in. The standard modules
 /// instanced modules depend on, and those that cannot be found or read, are added
 /// to `spec.instances`, for [`crate::checker::prepare_spec`] to load or warn about.
 pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<(), String> {
@@ -163,6 +176,11 @@ pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<
     spec.vars = declarations.vars;
     spec.constants = declarations.constants;
     spec.definitions = declarations.definitions;
+    for inst in declarations.instances {
+        if !spec.instances.iter().any(|own| own.alias == inst.alias) {
+            spec.instances.push(inst);
+        }
+    }
     for module in resolver.deferred_modules {
         let loaded = spec.extends.contains(&module)
             || spec.instances.iter().any(|inst| inst.module_name == module);
@@ -242,6 +260,7 @@ struct Declarations {
     vars: Vec<Arc<str>>,
     constants: Vec<Arc<str>>,
     definitions: DefinitionMap,
+    instances: Vec<InstanceDecl>,
 }
 
 impl Declarations {
@@ -296,6 +315,12 @@ fn collect_declarations(
     );
     for inner in &extends {
         collect_declarations(inner, resolver, visited, declarations)?;
+    }
+    for inst in instances.iter().filter(|inst| inst.alias.is_some()) {
+        declarations
+            .instances
+            .retain(|earlier| earlier.alias != inst.alias);
+        declarations.instances.push(inst.clone());
     }
     let imports = resolver.imports(&instances, &mut Vec::new())?;
     declarations.import(&imports, imports.links.iter().filter(|link| !link.local));
