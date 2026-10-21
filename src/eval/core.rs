@@ -126,6 +126,14 @@ fn eval_in_next_state(
     env: &mut Env,
     defs: &Definitions,
 ) -> Result<Value> {
+    in_next_state(name, env, |env| eval(body, env, defs))
+}
+
+fn in_next_state(
+    name: &Arc<str>,
+    env: &mut Env,
+    evaluate: impl FnOnce(&mut Env) -> Result<Value>,
+) -> Result<Value> {
     let vars = super::global_state::state_vars_in_scope().unwrap_or_else(|| {
         env.keys()
             .filter_map(|key| key.strip_suffix('\'').map(crate::intern::intern))
@@ -155,7 +163,7 @@ fn eval_in_next_state(
             }
         }
     }
-    let result = eval(body, env, defs);
+    let result = evaluate(env);
     for (key, value) in saved {
         match value {
             Some(value) => {
@@ -1887,12 +1895,20 @@ fn apply_function_definition_at(
             let definition = function_definition(name, defs)?;
             Some(key(env).and_then(|key| apply_function(Some(name), &definition, key, env, defs)))
         }
+        Expr::Prime(name) if !env.contains_key(&crate::intern::primed_name(name)) => {
+            let definition = function_definition(name, defs)?;
+            Some(key(env).and_then(|key| {
+                in_next_state(name, env, |env| {
+                    apply_function(Some(name), &definition, key, env, defs)
+                })
+            }))
+        }
         Expr::FnDef(..) => {
             let definition = FunctionDefinition::of(f)?;
             Some(key(env).and_then(|key| apply_function(None, &definition, key, env, defs)))
         }
         Expr::QualifiedCall(instance, op, args) if args.is_empty() => {
-            let instance_defs = match instance_definitions(instance, env, defs)? {
+            let instance_defs = match instance_definitions(instance, op, env, defs)? {
                 Ok(instance_defs) => instance_defs,
                 Err(error) => return Some(Err(error)),
             };
@@ -1908,19 +1924,28 @@ fn apply_function_definition_at(
 }
 
 /// `defs` with the definitions of the instance `I` or `P(args)` over them, as a
-/// qualified call `I!Op` evaluates `Op`; `None` when there is no such instance.
+/// qualified call `I!Op` evaluates `Op`, when `op` is a function definition of
+/// the instance; `None` otherwise, leaving the call to the qualified-call path.
 fn instance_definitions(
     instance: &Expr,
+    op: &Arc<str>,
     env: &mut Env,
     defs: &Definitions,
 ) -> Option<Result<Definitions>> {
     let instance_defs = match instance {
-        Expr::Var(name) => {
-            RESOLVED_INSTANCES.with(|instances| instances.borrow().get(name).cloned())?
-        }
+        Expr::Var(name) => RESOLVED_INSTANCES.with(|instances| {
+            let instances = instances.borrow();
+            let instance_defs = instances.get(name)?;
+            function_definition(op, instance_defs)?;
+            Some(instance_defs.clone())
+        })?,
         Expr::FnCall(name, args) => {
-            let parameterized =
-                PARAMETERIZED_INSTANCES.with(|instances| instances.borrow().get(name).cloned())?;
+            let parameterized = PARAMETERIZED_INSTANCES.with(|instances| {
+                let instances = instances.borrow();
+                let parameterized = instances.get(name)?;
+                function_definition(op, &parameterized.module_defs)?;
+                Some(parameterized.clone())
+            })?;
             if parameterized.params.len() != args.len() {
                 return None;
             }

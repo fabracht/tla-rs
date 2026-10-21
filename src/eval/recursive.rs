@@ -1,14 +1,14 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::ast::{Env, Expr, Value};
+use crate::ast::{Env, Expr, IntDomain, Value};
 
 use super::Definitions;
 use super::core::{STACK_GROWTH, STACK_RED_ZONE, eval};
 use super::error::{EvalError, Result, value_type_name};
-use super::helpers::{eval_set, in_set_symbolic};
+use super::helpers::{eval_set, in_set_symbolic, is_symbolic_set_expr};
 use crate::checker::format_value;
 
 /// A function definition `f[param \in domain] == body`, or the constructor
@@ -44,16 +44,37 @@ pub(crate) fn function_definition<'a>(
     }
 }
 
-/// A named function being evaluated, with the values computed so far. `domain`
-/// holds the values it is built for when its whole value is needed; without it,
-/// an argument is checked by membership in the definition's domain, so only the
+/// A named function being evaluated, with the values computed so far. Its
+/// domain is resolved once, the first time an argument is checked: only the
 /// points an application reaches are evaluated, as in TLC.
 struct RecursiveFunction {
     name: Arc<str>,
     body: *const Expr,
-    domain: Option<BTreeSet<Value>>,
+    domain: RefCell<Option<ResolvedDomain>>,
     values: RefCell<BTreeMap<Value, Value>>,
     whole: RefCell<Option<Value>>,
+    filled: Cell<bool>,
+}
+
+/// A function's domain: its values, an infinite set of integers, or a set
+/// whose membership is decided without enumerating it.
+enum ResolvedDomain {
+    Values(BTreeSet<Value>),
+    Integers(IntDomain),
+    Symbolic,
+}
+
+impl ResolvedDomain {
+    fn resolve(domain: &Expr, env: &mut Env, defs: &Definitions) -> Result<Self> {
+        if is_symbolic_set_expr(domain, env, defs)? {
+            return Ok(ResolvedDomain::Symbolic);
+        }
+        match eval(domain, env, defs)? {
+            Value::Set(values) => Ok(ResolvedDomain::Values(Arc::unwrap_or_clone(values))),
+            Value::IntSet(integers) => Ok(ResolvedDomain::Integers(integers)),
+            other => Err(EvalError::type_mismatch("Set", other)),
+        }
+    }
 }
 
 impl RecursiveFunction {
@@ -65,9 +86,10 @@ impl RecursiveFunction {
         RecursiveFunction {
             name,
             body: definition.body,
-            domain,
+            domain: RefCell::new(domain.map(ResolvedDomain::Values)),
             values: RefCell::new(BTreeMap::new()),
             whole: RefCell::new(None),
+            filled: Cell::new(false),
         }
     }
 
@@ -77,6 +99,19 @@ impl RecursiveFunction {
         &self.name == name && std::ptr::eq(self.body, body)
     }
 
+    /// The points of a finite domain before `key`, in order, the first time a
+    /// point is missing: a recursion that reads the points below the one asked
+    /// for then finds them computed instead of descending through all of them.
+    fn points_before(&self, key: &Value) -> Vec<Value> {
+        if self.filled.replace(true) {
+            return Vec::new();
+        }
+        match self.domain.borrow().as_ref() {
+            Some(ResolvedDomain::Values(values)) => values.range(..key).cloned().collect(),
+            _ => Vec::new(),
+        }
+    }
+
     fn contains(
         &self,
         key: &Value,
@@ -84,8 +119,17 @@ impl RecursiveFunction {
         env: &mut Env,
         defs: &Definitions,
     ) -> Result<bool> {
-        match &self.domain {
-            Some(values) => Ok(values.contains(key)),
+        if self.domain.borrow().is_none() {
+            let resolved = ResolvedDomain::resolve(definition.domain, env, defs)?;
+            self.domain.replace(Some(resolved));
+        }
+        let decided = match self.domain.borrow().as_ref() {
+            Some(ResolvedDomain::Values(values)) => Some(values.contains(key)),
+            Some(ResolvedDomain::Integers(integers)) => Some(integers.contains(key)),
+            Some(ResolvedDomain::Symbolic) | None => None,
+        };
+        match decided {
+            Some(member) => Ok(member),
             None => in_set_symbolic(key, definition.domain, env, defs),
         }
     }
@@ -153,7 +197,12 @@ pub(crate) fn function_value(
     }
     let domain = eval_set(definition.domain, env, defs)?;
     let function = match active {
-        Some(function) => function,
+        Some(function) => {
+            function
+                .domain
+                .replace(Some(ResolvedDomain::Values(domain.clone())));
+            function
+        }
         None => Rc::new(RecursiveFunction::new(
             name.cloned().unwrap_or_else(|| Arc::from("")),
             definition,
@@ -216,6 +265,25 @@ fn apply_memoized(
             format_value(&key)
         )));
     }
+    for point in function.points_before(&key) {
+        let missing = !function.values.borrow().contains_key(&point);
+        if missing {
+            evaluate_point(definition, point, env, defs, function).ok();
+        }
+    }
+    evaluate_point(definition, key, env, defs, function)
+}
+
+/// The value of the function at `key`, recorded for later applications; a point
+/// whose value fails to evaluate is not recorded, so its error is reported only
+/// where the point is needed.
+fn evaluate_point(
+    definition: &FunctionDefinition,
+    key: Value,
+    env: &mut Env,
+    defs: &Definitions,
+    function: &RecursiveFunction,
+) -> Result<Value> {
     let param = definition.param;
     let prev = env.insert(param.clone(), key.clone());
     let result = eval_with_memo(definition.body, env, defs, function);

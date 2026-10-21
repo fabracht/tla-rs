@@ -135,7 +135,7 @@ impl WalkCtx<'_> {
     /// key path.
     fn assign_target(&self, expr: &Expr) -> Option<(Arc<str>, Vec<Expr>)> {
         match self.phase {
-            Phase::Next => prime_target(expr),
+            Phase::Next => prime_target(expr, self.vars),
             Phase::Init => init_target(expr, self.vars),
         }
     }
@@ -971,9 +971,9 @@ fn key_path_target(
     }
 }
 
-fn prime_target(expr: &Expr) -> Option<(Arc<str>, Vec<Expr>)> {
+fn prime_target(expr: &Expr, vars: &[Arc<str>]) -> Option<(Arc<str>, Vec<Expr>)> {
     key_path_target(expr, &|e| match e {
-        Expr::Prime(name) => Some(name.clone()),
+        Expr::Prime(name) if vars.contains(name) => Some(name.clone()),
         _ => None,
     })
 }

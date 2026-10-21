@@ -177,6 +177,7 @@ impl Parser {
                     Ok(Expr::Var(name))
                 } else if !self.let_scope.contains(&name)
                     && let Some(def) = self.definitions.get(&name)
+                    && !matches!(def, Expr::FnDef(..))
                 {
                     Ok(def.clone())
                 } else {
@@ -313,11 +314,20 @@ impl Parser {
     /// An argument that is an operator rather than a value: a `LAMBDA`, the name
     /// of an operator with parameters (as the equivalent `LAMBDA`), or an operator
     /// of an `INSTANCE`, so that a call of the parameter it is passed for becomes a
-    /// call of that operator.
+    /// call of that operator. The name of a function defined at the top level is
+    /// passed as itself too, so applying the parameter applies the function
+    /// without building it (`f[n \in Nat]`); its body refers to no bound variable
+    /// that the operator could rebind.
     fn operator_argument(&self, arg: &Expr) -> Option<Expr> {
         match arg {
             Expr::Lambda(_, _) => Some(arg.clone()),
             Expr::QualifiedCall(_, _, instance_args) if instance_args.is_empty() => {
+                Some(arg.clone())
+            }
+            Expr::Var(name)
+                if !self.let_scope.contains(name)
+                    && matches!(self.definitions.get(name), Some(Expr::FnDef(..))) =>
+            {
                 Some(arg.clone())
             }
             Expr::Var(name) if !self.let_scope.contains(name) => {
