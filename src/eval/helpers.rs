@@ -173,16 +173,19 @@ pub(crate) fn is_non_enumerable_set_expr(
     })
 }
 
-enum ResolvedDomain<'a> {
+/// A set resolved once for repeated membership tests: its values, an infinite
+/// set of integers, or a set whose membership is decided from its expression
+/// without enumerating it.
+pub(crate) enum ResolvedDomain {
     Concrete(BTreeSet<Value>),
     Infinite(IntDomain),
-    Symbolic(&'a Expr),
+    Symbolic,
 }
 
-impl<'a> ResolvedDomain<'a> {
-    fn resolve(expr: &'a Expr, env: &mut Env, defs: &Definitions) -> Result<Self> {
+impl ResolvedDomain {
+    pub(crate) fn resolve(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Self> {
         if is_symbolic_set_expr(expr, env, defs)? {
-            return Ok(ResolvedDomain::Symbolic(expr));
+            return Ok(ResolvedDomain::Symbolic);
         }
         match eval(expr, env, defs)? {
             Value::Set(s) => Ok(ResolvedDomain::Concrete(Arc::unwrap_or_clone(s))),
@@ -191,11 +194,18 @@ impl<'a> ResolvedDomain<'a> {
         }
     }
 
-    fn contains(&self, val: &Value, env: &mut Env, defs: &Definitions) -> Result<bool> {
+    /// Whether `val` belongs to the set `expr` was resolved from.
+    pub(crate) fn contains(
+        &self,
+        val: &Value,
+        expr: &Expr,
+        env: &mut Env,
+        defs: &Definitions,
+    ) -> Result<bool> {
         match self {
             ResolvedDomain::Concrete(s) => Ok(s.contains(val)),
             ResolvedDomain::Infinite(domain) => Ok(domain.contains(val)),
-            ResolvedDomain::Symbolic(e) => in_set_symbolic(val, e, env, defs),
+            ResolvedDomain::Symbolic => in_set_symbolic(val, expr, env, defs),
         }
     }
 }
@@ -212,7 +222,7 @@ pub(crate) fn in_set_symbolic(
             if let Value::Set(s) = val {
                 let inner_domain = ResolvedDomain::resolve(inner, env, defs)?;
                 for member in s.iter() {
-                    if !inner_domain.contains(member, env, defs)? {
+                    if !inner_domain.contains(member, inner, env, defs)? {
                         return Ok(false);
                     }
                 }
@@ -233,7 +243,7 @@ pub(crate) fn in_set_symbolic(
             if let Some(seq) = seq {
                 let domain = ResolvedDomain::resolve(domain_expr, env, defs)?;
                 for e in &seq {
-                    if !domain.contains(e, env, defs)? {
+                    if !domain.contains(e, domain_expr, env, defs)? {
                         return Ok(false);
                     }
                 }

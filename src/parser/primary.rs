@@ -284,7 +284,7 @@ impl Parser {
                 .iter()
                 .enumerate()
                 .any(|(other, a)| other != index && crate::eval::expr_references(a, param));
-            match self.operator_argument(arg) {
+            match self.operator_argument(arg, body) {
                 Some(operator) => substitutions.push((param.clone(), operator)),
                 None if primes(param) => substitutions.push((param.clone(), arg.clone())),
                 None if captured => {
@@ -317,8 +317,10 @@ impl Parser {
     /// call of that operator. The name of a function defined at the top level is
     /// passed as itself too, so applying the parameter applies the function
     /// without building it (`f[n \in Nat]`); its body refers to no bound variable
-    /// that the operator could rebind.
-    fn operator_argument(&self, arg: &Expr) -> Option<Expr> {
+    /// that the operator could rebind. It is passed as a value instead when the
+    /// operator's `body` uses the same name, which could stand for something else
+    /// there.
+    fn operator_argument(&self, arg: &Expr, body: &Expr) -> Option<Expr> {
         match arg {
             Expr::Lambda(_, _) => Some(arg.clone()),
             Expr::QualifiedCall(_, _, instance_args) if instance_args.is_empty() => {
@@ -326,7 +328,8 @@ impl Parser {
             }
             Expr::Var(name)
                 if !self.let_scope.contains(name)
-                    && matches!(self.definitions.get(name), Some(Expr::FnDef(..))) =>
+                    && matches!(self.definitions.get(name), Some(Expr::FnDef(..)))
+                    && !crate::eval::expr_references(body, name) =>
             {
                 Some(arg.clone())
             }

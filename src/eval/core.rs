@@ -15,7 +15,8 @@ use super::helpers::{
     subseq_range, update_nested_value,
 };
 use super::recursive::{
-    FunctionDefinition, apply_function, function_definition, function_value, with_function,
+    FunctionDefinition, apply_function, apply_function_anew, function_definition, function_value,
+    with_function,
 };
 use crate::ast::{Env, Expr, Value};
 use crate::checker::format_value;
@@ -1899,7 +1900,7 @@ fn apply_function_definition_at(
             let definition = function_definition(name, defs)?;
             Some(key(env).and_then(|key| {
                 in_next_state(name, env, |env| {
-                    apply_function(Some(name), &definition, key, env, defs)
+                    apply_function_anew(Some(name), &definition, key, env, defs)
                 })
             }))
         }

@@ -1,6 +1,7 @@
 ---- MODULE function_syntax ----
 EXTENDS Naturals
 VARIABLE x
+Shadow(h) == LET fact == 0 IN h[3] + fact
 fact[n \in Nat] == IF n = 0 THEN 1 ELSE n * fact[n - 1]
 add[a \in 0..3, b \in 0..3] == IF b = 0 THEN a ELSE add[a, b - 1] + 1
 f2 == [a \in 1..2, b \in 1..2 |-> a + b]
@@ -10,10 +11,12 @@ k == [a \in {1}, <<b, c>> \in {<<2, 3>>} |-> a + b + c]
 m == [a \in {1} \X {2}, b \in {3} |-> a[1] + a[2] + b]
 step[s \in 0..2, t \in 0..2] == s + t
 gx[n \in 0..3] == n + x
+steps[n \in 0..20] == IF n = 1 THEN 0 ELSE IF n % 2 = 0 THEN 1 + steps[n \div 2] ELSE 1 + steps[3 * n + 1]
 ApplyAt4(f) == f[4]
 Probe(f) == \A j \in {100} : f[1] = 6
 Init == x = 0
 Next == x < 2 /\ x' = step[x, 1] /\ (fact[x])' > 0 /\ (gx[1])' = x' + 1
+        /\ LET pg[i \in 1..2] == x + i IN pg[1] < (pg[1])'
 InvFact == fact[4] = 24 /\ fact[0] = 1
 InvAdd == add[2, 3] = 5
 InvF2 == f2[1, 2] = 3 /\ f2[<<2, 2>>] = 4 /\ DOMAIN f2 = (1..2) \X (1..2)
@@ -27,5 +30,7 @@ InvState == x = 2 \/ f2[x + 1, 1] = x + 2
 InvPassed == ApplyAt4(fact) = 24
 InvDeep == LET d[n \in 0..500] == IF n = 0 THEN 0 ELSE d[n - 1] + 1 IN d[500] = 500
 InvCapture == \A j \in {5} : LET cg[i \in {1}] == i + j IN Probe(cg)
+InvCollatz == steps[5] = 5
+InvShadow == Shadow(fact) = 6
 InvProduct == <<<<1, 2>>, 3>> \in ({1} \X {2}) \X {3} /\ <<1, 2, 3>> \in {1} \X {2} \X {3} /\ <<1, <<2, 3>>>> \in {1} \X ({2} \X {3})
 ====
