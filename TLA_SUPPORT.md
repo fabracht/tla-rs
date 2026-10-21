@@ -36,7 +36,7 @@ Init ==
 
 `tla test_cases/should_pass/pingpong.tla -c NumberOfClients=2 -c NumberOfPings=2 --allow-deadlock` explores 17 states.
 
-Both static (`Alias == INSTANCE M WITH ...`) and parameterized (`Alias(p) == INSTANCE M WITH ...`) instances are supported. Library modules without Init/Next work as expected. The module file must be in the same directory as the spec.
+Both static (`Alias == INSTANCE M WITH ...`) and parameterized (`Alias(p) == INSTANCE M WITH ...`) instances are supported, declared in the spec or in a module it extends. `Alias!Op` reaches every definition of `M`, including those `M` gets through `EXTENDS`. Library modules without Init/Next work as expected. The module file must be in the same directory as the spec.
 
 ## Spec Structure
 

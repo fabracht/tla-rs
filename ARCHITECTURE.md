@@ -413,7 +413,7 @@ The WASM build has no filesystem: module loading from disk, DOT/trace file outpu
 
 ## Module System
 
-- `INSTANCE M` / `I == INSTANCE M WITH p <- e`: `ModuleRegistry` loads `M.tla` from the spec's directory; `resolve_instances` applies the substitutions to `M`'s definitions (`substitution::apply_substitutions`) and stores them in a thread-local map consulted by `QualifiedCall`.
+- `INSTANCE M` / `I == INSTANCE M WITH p <- e`: `ModuleRegistry` loads `M.tla` from the spec's directory; `ModuleRegistry::merge_declarations` completes `M` with what it extends and instances (as `merge_extended_declarations` does for the root), and `resolve_instances` applies the substitutions to those definitions (`substitution::apply_substitutions`) and stores them in a thread-local map consulted by `QualifiedCall`. A named `INSTANCE` of an extended module is added to the root's `instances` by `merge_extended_declarations`.
 - Parameterized `I(x) == INSTANCE M WITH ...`: stored as a template (`ParameterizedInstance`); parameters and substitutions are applied at each `I(v)!Op` call.
 - `EXTENDS` of user modules: merged into the spec after parsing (`merge_extended_declarations`) and loaded again by `prepare_spec` for evaluation. Redefining an extended operator is accepted (the extending module wins).
 - Standard modules named in `EXTENDS` or `INSTANCE` are handled by `stdlib.rs` and the evaluator rather than loaded from files.

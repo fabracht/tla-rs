@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.9] - 2026-10-21
+
+### Fixed
+
+- A named `I == INSTANCE M` gave only the definitions written in `M` (#237): a definition `M` gets through `EXTENDS` or an unnamed `INSTANCE` failed as `I!Foo` with "operator Foo not found in instance I", and a definition of `M` that used one failed with "undefined variable". As in TLC, an instance of `M` now has every definition of `M`, with its `WITH` substitutions reaching the variables and constants `M` extends.
+- `--check-refinement A` passed a spec that does not refine `A` when the abstract module's variables are declared in a module it extends: they were missing from the refinement mapping, so a concrete step that is no abstract step went unreported. They are now mapped like the abstract module's own variables, and the step is a refinement violation, as in TLC.
+- A named `INSTANCE` declared in a module the spec extends was not found (#231): `Inv == I!Ok` in the extended module, or a use of `I!Ok` in the root, failed with "instance I not found". It is now resolved as if declared in the spec, unless the spec declares its own `I`. This is how MCParReach from tlaplus/Examples uses `R == INSTANCE Reachable` from ParReach; its `PROPERTY Refines` still runs into #213.
+
 ## [0.24.8] - 2026-10-19
 
 ### Changed

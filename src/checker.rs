@@ -445,7 +445,9 @@ pub fn prepare_spec(
                 continue;
             }
             match registry.load(&inst.module_name, spec_path) {
-                Ok(_) => {}
+                Ok(_) => registry
+                    .merge_declarations(&inst.module_name, spec_path)
+                    .map_err(PrepareSpecError::ModuleParse)?,
                 Err(ModuleError::NotFound(_)) => {
                     if !quiet {
                         let module = &inst.module_name;
