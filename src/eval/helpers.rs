@@ -121,19 +121,12 @@ pub(crate) fn is_symbolic_set_expr(expr: &Expr, env: &mut Env, defs: &Definition
         Expr::Union(l, r) | Expr::Intersect(l, r) | Expr::SetMinus(l, r) => {
             is_symbolic_set_expr(l, env, defs)? || is_symbolic_set_expr(r, env, defs)?
         }
-        Expr::Cartesian(sets) => any_set(sets, |set| is_symbolic_set_expr(set, env, defs))?,
+        Expr::Cartesian(sets) => sets.iter().try_fold(false, |found, set| -> Result<bool> {
+            Ok(found || is_symbolic_set_expr(set, env, defs)?)
+        })?,
         Expr::Var(_) => matches!(eval(expr, env, defs)?, Value::IntSet(_)),
         _ => false,
     })
-}
-
-fn any_set(sets: &[Expr], mut test: impl FnMut(&Expr) -> Result<bool>) -> Result<bool> {
-    for set in sets {
-        if test(set)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 fn set_op_is_symbolic(l: &Expr, r: &Expr, env: &mut Env, defs: &Definitions) -> Result<bool> {
@@ -168,7 +161,9 @@ pub(crate) fn is_non_enumerable_set_expr(
         Expr::Union(l, r) | Expr::Intersect(l, r) | Expr::SetMinus(l, r) => {
             is_non_enumerable_set_expr(l, env, defs)? || is_non_enumerable_set_expr(r, env, defs)?
         }
-        Expr::Cartesian(sets) => any_set(sets, |set| is_non_enumerable_set_expr(set, env, defs))?,
+        Expr::Cartesian(sets) => sets.iter().try_fold(false, |found, set| -> Result<bool> {
+            Ok(found || is_non_enumerable_set_expr(set, env, defs)?)
+        })?,
         _ => false,
     })
 }
@@ -281,19 +276,17 @@ pub(crate) fn in_set_symbolic(
         Expr::SetMinus(l, r) if set_op_is_symbolic(l, r, env, defs)? => {
             Ok(in_set_symbolic(val, l, env, defs)? && !in_set_symbolic(val, r, env, defs)?)
         }
-        Expr::Cartesian(sets) if any_set(sets, |set| is_symbolic_set_expr(set, env, defs))? => {
-            match val {
-                Value::Tuple(t) if t.len() == sets.len() => {
-                    for (elem, op) in t.iter().zip(sets.iter()) {
-                        if !in_set_symbolic(elem, op, env, defs)? {
-                            return Ok(false);
-                        }
+        Expr::Cartesian(sets) if is_symbolic_set_expr(set_expr, env, defs)? => match val {
+            Value::Tuple(t) if t.len() == sets.len() => {
+                for (elem, op) in t.iter().zip(sets.iter()) {
+                    if !in_set_symbolic(elem, op, env, defs)? {
+                        return Ok(false);
                     }
-                    Ok(true)
                 }
-                _ => Ok(false),
+                Ok(true)
             }
-        }
+            _ => Ok(false),
+        },
         _ => match eval(set_expr, env, defs)? {
             Value::Set(s) => Ok(s.contains(val)),
             Value::IntSet(d) => Ok(d.contains(val)),

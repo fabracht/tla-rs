@@ -16,7 +16,7 @@ use super::helpers::{
 };
 use super::recursive::{
     FunctionDefinition, apply_function, apply_function_anew, function_definition, function_value,
-    with_function,
+    function_value_anew, with_function,
 };
 use crate::ast::{Env, Expr, Value};
 use crate::checker::format_value;
@@ -217,6 +217,11 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Some((params, body)) = defs.get(name)
                 && params.is_empty()
             {
+                if let Some(definition) = FunctionDefinition::of(body) {
+                    return in_next_state(name, env, |env| {
+                        function_value_anew(Some(name), &definition, env, defs)
+                    });
+                }
                 return eval_in_next_state(name, body, env, defs);
             }
             if let Some(value) = env.get(name)
@@ -749,9 +754,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 }
                 return result;
             }
-            if let Some(result) =
-                apply_function_definition_at(f, |env| eval(arg, env, defs), env, defs)
-            {
+            if let Some(result) = apply_function_definition_at(f, Argument::Expr(arg), env, defs) {
                 return result;
             }
             let fval = eval(f, env, defs)?;
@@ -1011,6 +1014,14 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Domain(f) => {
+            let definition = match f.as_ref() {
+                Expr::Var(name) if !env.contains_key(name) => function_definition(name, defs),
+                Expr::FnDef(..) => FunctionDefinition::of(f),
+                _ => None,
+            };
+            if let Some(definition) = definition {
+                return eval(definition.domain, env, defs);
+            }
             let fv = eval(f, env, defs)?;
             match fv {
                 Value::Fn(fmap) => {
@@ -1102,7 +1113,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::TupleAccess(tup, idx) => {
-            let position = |_: &mut Env| Ok(Value::Int((*idx + 1) as i64));
+            let position = Argument::Value(Value::Int((*idx + 1) as i64));
             if let Some(result) = apply_function_definition_at(tup, position, env, defs) {
                 return result;
             }
@@ -1778,6 +1789,11 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 if super::ast_utils::operator_primes_parameter(params, body, &merged_defs) {
                     return eval_substituted(body, params, args, env, &merged_defs);
                 }
+                if params.is_empty()
+                    && let Some(definition) = FunctionDefinition::of(body)
+                {
+                    return function_value(Some(op), &definition, env, &merged_defs);
+                }
 
                 let mut arg_vals = Vec::with_capacity(args.len());
                 for arg_expr in args {
@@ -1882,46 +1898,72 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
     }
 }
 
-/// `f[key]` when `f` is a function definition, `f[x \in S] == e`, an instance's
-/// `I!f`, or `[x \in S |-> e]`, applied without building the whole function;
-/// `None` when `f` is a value to evaluate first.
+/// The argument of a function application: an expression to evaluate, or a
+/// value already known, as the position `i` of `t[i]`.
+enum Argument<'a> {
+    Expr(&'a Expr),
+    Value(Value),
+}
+
+impl Argument<'_> {
+    fn value(self, env: &mut Env, defs: &Definitions) -> Result<Value> {
+        match self {
+            Argument::Expr(expr) => eval(expr, env, defs),
+            Argument::Value(value) => Ok(value),
+        }
+    }
+}
+
+/// The function definition an application `f[k]` applies, and where.
+enum FunctionTarget<'a> {
+    Current(Option<&'a Arc<str>>, FunctionDefinition<'a>),
+    Next(&'a Arc<str>, FunctionDefinition<'a>),
+    Instance(&'a Arc<str>, Definitions),
+}
+
+/// `f[arg]` when `f` is a function definition, `f[x \in S] == e`, its primed
+/// `f'`, an instance's `I!f`, or `[x \in S |-> e]`, applied without building
+/// the whole function; `None` when `f` is a value to evaluate first.
 fn apply_function_definition_at(
     f: &Expr,
-    key: impl FnOnce(&mut Env) -> Result<Value>,
+    arg: Argument,
     env: &mut Env,
     defs: &Definitions,
 ) -> Option<Result<Value>> {
-    match f {
+    let target = match f {
         Expr::Var(name) if !env.contains_key(name) => {
-            let definition = function_definition(name, defs)?;
-            Some(key(env).and_then(|key| apply_function(Some(name), &definition, key, env, defs)))
+            FunctionTarget::Current(Some(name), function_definition(name, defs)?)
         }
         Expr::Prime(name) if !env.contains_key(&crate::intern::primed_name(name)) => {
-            let definition = function_definition(name, defs)?;
-            Some(key(env).and_then(|key| {
-                in_next_state(name, env, |env| {
-                    apply_function_anew(Some(name), &definition, key, env, defs)
-                })
-            }))
+            FunctionTarget::Next(name, function_definition(name, defs)?)
         }
-        Expr::FnDef(..) => {
-            let definition = FunctionDefinition::of(f)?;
-            Some(key(env).and_then(|key| apply_function(None, &definition, key, env, defs)))
-        }
+        Expr::FnDef(..) => FunctionTarget::Current(None, FunctionDefinition::of(f)?),
         Expr::QualifiedCall(instance, op, args) if args.is_empty() => {
-            let instance_defs = match instance_definitions(instance, op, env, defs)? {
-                Ok(instance_defs) => instance_defs,
+            match instance_definitions(instance, op, env, defs)? {
+                Ok(instance_defs) => FunctionTarget::Instance(op, instance_defs),
                 Err(error) => return Some(Err(error)),
-            };
-            let definition = function_definition(op, &instance_defs)?;
-            Some(
-                key(env).and_then(|key| {
-                    apply_function(Some(op), &definition, key, env, &instance_defs)
-                }),
-            )
+            }
         }
-        _ => None,
-    }
+        _ => return None,
+    };
+    let key = match arg.value(env, defs) {
+        Ok(key) => key,
+        Err(error) => return Some(Err(error)),
+    };
+    Some(match target {
+        FunctionTarget::Current(name, definition) => {
+            apply_function(name, &definition, key, env, defs)
+        }
+        FunctionTarget::Next(name, definition) => in_next_state(name, env, |env| {
+            apply_function_anew(Some(name), &definition, key, env, defs)
+        }),
+        FunctionTarget::Instance(op, instance_defs) => {
+            match function_definition(op, &instance_defs) {
+                Some(definition) => apply_function(Some(op), &definition, key, env, &instance_defs),
+                None => Err(EvalError::domain_error(format!("`{op}` is not a function"))),
+            }
+        }
+    })
 }
 
 /// `defs` with the definitions of the instance `I` or `P(args)` over them, as a

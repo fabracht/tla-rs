@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -44,36 +44,35 @@ pub(crate) fn function_definition<'a>(
     }
 }
 
-/// A named function being evaluated, with the values computed so far. Its
-/// domain is resolved once, the first time an argument is checked: only the
-/// points an application reaches are evaluated, as in TLC.
+/// A function being evaluated, with the values computed so far; `name` is the
+/// definition it is the body of, through which it may call itself. Its domain
+/// is resolved once, the first time an argument is checked: only the points an
+/// application reaches are evaluated, as in TLC.
 struct RecursiveFunction {
-    name: Arc<str>,
+    name: Option<Arc<str>>,
     body: *const Expr,
     domain: RefCell<Option<ResolvedDomain>>,
     values: RefCell<BTreeMap<Value, Value>>,
     whole: RefCell<Option<Value>>,
+    building: Cell<bool>,
 }
 
 impl RecursiveFunction {
-    fn new(
-        name: Arc<str>,
-        definition: &FunctionDefinition,
-        domain: Option<BTreeSet<Value>>,
-    ) -> Self {
+    fn new(name: Option<&Arc<str>>, definition: &FunctionDefinition) -> Self {
         RecursiveFunction {
-            name,
+            name: name.cloned(),
             body: definition.body,
-            domain: RefCell::new(domain.map(ResolvedDomain::Concrete)),
+            domain: RefCell::new(None),
             values: RefCell::new(BTreeMap::new()),
             whole: RefCell::new(None),
+            building: Cell::new(false),
         }
     }
 
     /// Whether `name` refers to this function in `defs`, and not to another
     /// function of the same name, as a `LET` inside its evaluation may define.
     fn is(&self, name: &Arc<str>, body: &Expr) -> bool {
-        &self.name == name && std::ptr::eq(self.body, body)
+        self.name.as_ref() == Some(name) && std::ptr::eq(self.body, body)
     }
 
     fn contains(
@@ -88,13 +87,8 @@ impl RecursiveFunction {
             let resolved = ResolvedDomain::resolve(definition.domain, env, defs)?;
             self.domain.replace(Some(resolved));
         }
-        let decided = match self.domain.borrow().as_ref() {
-            Some(ResolvedDomain::Concrete(values)) => Some(values.contains(key)),
-            Some(ResolvedDomain::Infinite(integers)) => Some(integers.contains(key)),
-            Some(ResolvedDomain::Symbolic) | None => None,
-        };
-        match decided {
-            Some(member) => Ok(member),
+        match self.domain.borrow().as_ref() {
+            Some(domain) => domain.contains(key, definition.domain, env, defs),
             None => in_set_symbolic(key, definition.domain, env, defs),
         }
     }
@@ -139,51 +133,68 @@ pub(crate) fn with_function<T>(name: &Arc<str>, defs: &Definitions, body: impl F
     let Some(definition) = function_definition(name, defs) else {
         return body();
     };
-    let function = Rc::new(RecursiveFunction::new(name.clone(), &definition, None));
+    let function = Rc::new(RecursiveFunction::new(Some(name), &definition));
     let active = ActiveFunction::enter(&function);
     let result = body();
     drop(active);
     result
 }
 
-/// The whole function `definition`, built over its domain; `name` is the
-/// definition it is the body of, through which it may call itself.
+/// The whole function `definition`, built over its domain, with the values an
+/// active evaluation of it has computed.
 pub(crate) fn function_value(
     name: Option<&Arc<str>>,
     definition: &FunctionDefinition,
     env: &mut Env,
     defs: &Definitions,
 ) -> Result<Value> {
-    let active = name.and_then(|name| active_function(name, definition));
-    if let Some(function) = &active
-        && let Some(whole) = function.whole.borrow().clone()
-    {
+    match name.and_then(|name| active_function(name, definition)) {
+        Some(function) => build_function(&function, definition, env, defs),
+        None => function_value_anew(name, definition, env, defs),
+    }
+}
+
+/// The whole function `definition` with values of its own, as for a primed
+/// `f'`, which reads the next state.
+pub(crate) fn function_value_anew(
+    name: Option<&Arc<str>>,
+    definition: &FunctionDefinition,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<Value> {
+    let function = Rc::new(RecursiveFunction::new(name, definition));
+    let entered = name.map(|_| ActiveFunction::enter(&function));
+    let result = build_function(&function, definition, env, defs);
+    drop(entered);
+    result
+}
+
+fn build_function(
+    function: &RecursiveFunction,
+    definition: &FunctionDefinition,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<Value> {
+    if let Some(whole) = function.whole.borrow().clone() {
         return Ok(whole);
     }
-    let domain = eval_set(definition.domain, env, defs)?;
-    let function = match active {
-        Some(function) => {
-            function
-                .domain
-                .replace(Some(ResolvedDomain::Concrete(domain.clone())));
-            function
-        }
-        None => Rc::new(RecursiveFunction::new(
-            name.cloned().unwrap_or_else(|| Arc::from("")),
-            definition,
-            Some(domain.clone()),
-        )),
-    };
-    let entered = name.map(|_| ActiveFunction::enter(&function));
-    let mut values = BTreeMap::new();
-    let result = domain.into_iter().try_for_each(|key| {
-        let value = apply_memoized(definition, key.clone(), env, defs, &function)?;
-        values.insert(key, value);
-        Ok(())
+    if function.building.replace(true) {
+        let name = function.name.as_deref().unwrap_or("a function");
+        return Err(EvalError::domain_error(format!(
+            "`{name}` is used as a whole value in its own definition"
+        )));
+    }
+    let result = eval_set(definition.domain, env, defs).and_then(|domain| {
+        domain
+            .into_iter()
+            .try_fold(BTreeMap::new(), |mut values, key| {
+                let value = value_at(definition, key.clone(), env, defs, function)?;
+                values.insert(key, value);
+                Ok(values)
+            })
     });
-    drop(entered);
-    result?;
-    let whole = Value::func(values);
+    function.building.set(false);
+    let whole = Value::func(result?);
     function.whole.replace(Some(whole.clone()));
     Ok(whole)
 }
@@ -215,11 +226,7 @@ pub(crate) fn apply_function_anew(
     env: &mut Env,
     defs: &Definitions,
 ) -> Result<Value> {
-    let function = Rc::new(RecursiveFunction::new(
-        name.cloned().unwrap_or_else(|| Arc::from("")),
-        definition,
-        None,
-    ));
+    let function = Rc::new(RecursiveFunction::new(name, definition));
     let entered = name.map(|_| ActiveFunction::enter(&function));
     let result = apply_memoized(definition, key, env, defs, &function);
     drop(entered);
@@ -242,6 +249,21 @@ fn apply_memoized(
             "key {} not in function domain",
             format_value(&key)
         )));
+    }
+    value_at(definition, key, env, defs, function)
+}
+
+/// The value of the function at `key`, a point of its domain, computed once.
+fn value_at(
+    definition: &FunctionDefinition,
+    key: Value,
+    env: &mut Env,
+    defs: &Definitions,
+    function: &RecursiveFunction,
+) -> Result<Value> {
+    let cached = function.values.borrow().get(&key).cloned();
+    if let Some(value) = cached {
+        return Ok(value);
     }
     let param = definition.param;
     let prev = env.insert(param.clone(), key.clone());
