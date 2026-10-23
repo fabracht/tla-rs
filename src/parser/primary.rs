@@ -176,6 +176,7 @@ impl Parser {
                 } else if overridden {
                     Ok(Expr::Var(name))
                 } else if !self.let_scope.contains(&name)
+                    && !self.function_names.contains(&name)
                     && let Some(def) = self.definitions.get(&name)
                 {
                     Ok(def.clone())
@@ -283,7 +284,7 @@ impl Parser {
                 .iter()
                 .enumerate()
                 .any(|(other, a)| other != index && crate::eval::expr_references(a, param));
-            match self.operator_argument(arg) {
+            match self.operator_argument(arg, body) {
                 Some(operator) => substitutions.push((param.clone(), operator)),
                 None if primes(param) => substitutions.push((param.clone(), arg.clone())),
                 None if captured => {
@@ -313,11 +314,23 @@ impl Parser {
     /// An argument that is an operator rather than a value: a `LAMBDA`, the name
     /// of an operator with parameters (as the equivalent `LAMBDA`), or an operator
     /// of an `INSTANCE`, so that a call of the parameter it is passed for becomes a
-    /// call of that operator.
-    fn operator_argument(&self, arg: &Expr) -> Option<Expr> {
+    /// call of that operator. The name of a function defined at the top level is
+    /// passed as itself too, so applying the parameter applies the function
+    /// without building it (`f[n \in Nat]`); its body refers to no bound variable
+    /// that the operator could rebind. It is passed as a value instead when the
+    /// operator's `body` uses the same name, which could stand for something else
+    /// there.
+    fn operator_argument(&self, arg: &Expr, body: &Expr) -> Option<Expr> {
         match arg {
             Expr::Lambda(_, _) => Some(arg.clone()),
             Expr::QualifiedCall(_, _, instance_args) if instance_args.is_empty() => {
+                Some(arg.clone())
+            }
+            Expr::Var(name)
+                if !self.let_scope.contains(name)
+                    && self.function_names.contains(name)
+                    && !crate::eval::expr_references(body, name) =>
+            {
                 Some(arg.clone())
             }
             Expr::Var(name) if !self.let_scope.contains(name) => {
@@ -421,6 +434,81 @@ impl Parser {
             .with_span(self.current_span())
     }
 
+    /// The argument of a function application `f[e]`, or the tuple `<<a, b>>` of
+    /// the arguments of `f[a, b]`, a function of several arguments being a
+    /// function of their tuple.
+    pub(super) fn parse_arguments(&mut self) -> Result<Expr> {
+        let first = self.parse_expr()?;
+        if *self.peek() != Token::Comma {
+            return Ok(first);
+        }
+        let mut arguments = vec![first];
+        while *self.peek() == Token::Comma {
+            self.advance();
+            arguments.push(self.parse_expr()?);
+        }
+        Ok(Expr::TupleLit(arguments))
+    }
+
+    /// The bound variables of a function, up to `|->` in a constructor or `]` in a
+    /// definition: `x \in S`, `<<y, z>> \in T` and `u, v \in U`, separated by
+    /// commas, each paired with its domain.
+    pub(super) fn parse_function_binders(&mut self) -> Result<Vec<(Binder, Expr)>> {
+        let mut binders = Vec::new();
+        let mut pending = Vec::new();
+        loop {
+            let span = self.current_span();
+            let item = self.parse_expr()?;
+            match item {
+                Expr::In(lhs, domain) => {
+                    let binder = extract_binder(&lhs).ok_or_else(|| {
+                        ParseError::new("expected a name or a tuple of names before `\\in`")
+                            .with_span(span)
+                    })?;
+                    pending.push(binder);
+                    binders.extend(pending.drain(..).map(|binder| (binder, (*domain).clone())));
+                }
+                other => {
+                    let binder = extract_binder(&other).ok_or_else(|| {
+                        ParseError::new("expected a bound variable of the function").with_span(span)
+                    })?;
+                    pending.push(binder);
+                }
+            }
+            if *self.peek() != Token::Comma {
+                break;
+            }
+            self.advance();
+        }
+        if !pending.is_empty() {
+            return Err(ParseError::new(format!(
+                "expected `\\in` after the bound variables, found {}",
+                self.peek()
+            ))
+            .with_span(self.current_span()));
+        }
+        Ok(binders)
+    }
+
+    /// The function of `binders` with value `body`: one bound variable ranges over
+    /// its domain, and several over the product of their domains, so the function
+    /// is applied to the tuple of their values, as in `f[a, b]`.
+    pub(super) fn function_of(
+        &mut self,
+        mut binders: Vec<(Binder, Expr)>,
+        body: Expr,
+    ) -> Result<Expr> {
+        let (binder, domain) = match binders.len() {
+            1 => binders.remove(0),
+            _ => {
+                let (binders, domains): (Vec<Binder>, Vec<Expr>) = binders.into_iter().unzip();
+                (Binder::Tuple(binders), Expr::Cartesian(domains))
+            }
+        };
+        let (var, body) = wrap_binder(self, binder, body)?;
+        Ok(Expr::FnDef(var, Box::new(domain), Box::new(body)))
+    }
+
     pub(super) fn parse_record_or_fn(&mut self) -> Result<Expr> {
         let start_pos = self.pos;
 
@@ -430,6 +518,19 @@ impl Parser {
         }
 
         let first = self.parse_expr()?;
+
+        let binds = match &first {
+            Expr::In(lhs, _) => extract_binder(lhs).is_some(),
+            other => extract_binder(other).is_some(),
+        };
+        if *self.peek() == Token::Comma && binds {
+            self.pos = start_pos;
+            let binders = self.parse_function_binders()?;
+            self.expect(Token::MapsTo)?;
+            let body = self.parse_expr()?;
+            self.expect(Token::RBracket)?;
+            return self.function_of(binders, body);
+        }
 
         if *self.peek() == Token::RightArrow {
             self.advance();
@@ -770,13 +871,11 @@ impl Parser {
 
             if *self.peek() == Token::LBracket {
                 self.advance();
-                let param = self.expect_ident()?;
-                self.expect(Token::In)?;
-                let domain = self.parse_range()?;
+                let binders = self.parse_function_binders()?;
                 self.expect(Token::RBracket)?;
                 self.expect(Token::EqEq)?;
                 let body = self.parse_expr()?;
-                let fn_def = Expr::FnDef(param, Box::new(domain), Box::new(body));
+                let fn_def = self.function_of(binders, body)?;
                 self.let_scope.push(var.clone());
                 bindings.push((var, fn_def));
             } else if *self.peek() == Token::LParen {
@@ -909,7 +1008,7 @@ impl Parser {
                 keys.push(Expr::Lit(Value::Str(field)));
             } else if *self.peek() == Token::LBracket {
                 self.advance();
-                keys.push(self.parse_expr()?);
+                keys.push(self.parse_arguments()?);
                 self.expect(Token::RBracket)?;
             } else {
                 break;

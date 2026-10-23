@@ -261,6 +261,82 @@ mod tests {
     }
 
     #[test]
+    fn a_function_of_several_bound_variables_ranges_over_their_product() {
+        for source in [
+            "[a \\in S, b \\in T |-> a + b]",
+            "[a, b \\in S |-> a + b]",
+            "[a \\in S, <<b, c>> \\in T |-> a + b + c]",
+        ] {
+            let Ok(Expr::FnDef(_, domain, _)) = parse_expr(source) else {
+                panic!("{source} is a function");
+            };
+            assert!(
+                matches!(domain.as_ref(), Expr::Cartesian(sets) if sets.len() == 2),
+                "{source}: {domain:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_application_to_several_arguments_applies_to_their_tuple() {
+        let expr = parse_expr("f[a, b]").unwrap();
+        assert_eq!(
+            expr,
+            Expr::FnApp(
+                Box::new(Expr::Var("f".into())),
+                Box::new(Expr::TupleLit(vec![
+                    Expr::Var("a".into()),
+                    Expr::Var("b".into())
+                ]))
+            )
+        );
+        let Ok(Expr::Except(_, updates)) = parse_expr("[f EXCEPT ![a, b] = 1]") else {
+            panic!("an EXCEPT");
+        };
+        assert!(matches!(&updates[0].0[0], Expr::TupleLit(keys) if keys.len() == 2));
+    }
+
+    #[test]
+    fn a_parenthesized_product_is_a_component_of_the_product() {
+        let Ok(Expr::Cartesian(sets)) = parse_expr("(A \\X B) \\X C") else {
+            panic!("a product");
+        };
+        assert_eq!(sets.len(), 2);
+        assert!(matches!(&sets[0], Expr::Cartesian(inner) if inner.len() == 2));
+        let Ok(Expr::Cartesian(sets)) = parse_expr("A \\X B \\X C") else {
+            panic!("a product");
+        };
+        assert_eq!(sets.len(), 3);
+    }
+
+    #[test]
+    fn a_top_level_function_definition_is_a_definition() {
+        let spec = parse(
+            "VARIABLE x\nfact[n \\in Nat] == IF n = 0 THEN 1 ELSE n * fact[n - 1]\nsum[a \\in S, b \\in T] == a + b\nInit == x = 0\nNext == x' = x",
+        )
+        .expect("both function definitions parse");
+        for name in ["fact", "sum"] {
+            let (params, body) = &spec.definitions[name];
+            assert!(params.is_empty(), "{name}");
+            assert!(matches!(body.as_ref(), Expr::FnDef(..)), "{name}: {body:?}");
+        }
+        assert!(spec.next.is_some());
+    }
+
+    #[test]
+    fn a_function_definition_is_not_taken_for_an_invariant_or_the_behavior() {
+        let spec = parse(
+            "VARIABLE x\nInvCount[i \\in 1..2] == i * 2\nInit[i \\in 1..2] == i\nPairSpec[i \\in 1..2] == i\nInv == x = 0",
+        )
+        .expect("the functions parse");
+        assert_eq!(spec.invariants.len(), 1);
+        assert!(spec.init.is_none());
+        for name in ["InvCount", "Init", "PairSpec"] {
+            assert!(spec.definitions.contains_key(name), "{name}");
+        }
+    }
+
+    #[test]
     fn parse_record() {
         let expr = parse_expr("[a |-> 1, b |-> 2]").unwrap();
         if let Expr::RecordLit(fields) = expr {
@@ -620,7 +696,7 @@ mod tests {
     #[test]
     fn definitions_indented_right_of_a_failed_one_are_kept() {
         let (spec, _) = unparsed(
-            "VARIABLE x\n  Bad == [i \\in 1..2, j \\in 1..2 |-> i]\n    Init == x = 0\n    Next == x' = 1 - x",
+            "VARIABLE x\n  Bad == [a |-> ]\n    Init == x = 0\n    Next == x' = 1 - x",
             "Bad",
         );
         assert!(matches!(spec.init, Some(Expr::Eq(_, _))), "{:?}", spec.init);
@@ -755,9 +831,9 @@ mod tests {
     }
 
     #[test]
-    fn a_function_definition_is_recorded_as_unparsed() {
-        let (spec, f) = unparsed("VARIABLE x\nf[n \\in 1..3] == n\nInit == x = f[1]", "f");
-        assert_eq!((f.line, f.column), (2, 2));
+    fn a_function_definition_that_does_not_parse_is_recorded_as_unparsed() {
+        let (spec, f) = unparsed("VARIABLE x\nf[n \\in ] == n\nInit == x = f[1]", "f");
+        assert_eq!((f.line, f.column), (2, 9));
         assert!(spec.init.is_some());
     }
 

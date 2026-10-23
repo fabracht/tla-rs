@@ -59,7 +59,7 @@ Cross-checked against:
 | `\union`, `\cup` | ∪ | Union |
 | `\intersect`, `\cap` | ∩ | Intersection |
 | `\` | | Set difference |
-| `\times`, `\X` | × | Cartesian product |
+| `\times`, `\X` | × | Cartesian product; `A \X B \X C` is a set of triples, and a parenthesized product is one component: `(A \X B) \X C` is a set of pairs whose first element is a pair |
 | `SUBSET` | | Powerset (of a set of at most 20 elements by default; `--max-powerset`) |
 | `UNION` | | Distributed union |
 | `{x \in S : P}` | | Set filter |
@@ -89,7 +89,10 @@ Cross-checked against:
 |-------|---------|-------------|
 | `[x \in S \|-> e]` | | Function definition |
 | `[<<x, y>> \in S \|-> e]` | | Function definition with tuple binder |
+| `[x \in S, y \in T \|-> e]`, `[x, y \in S \|-> e]` | | Function of several bound variables, with domain `S \X T` (`S \X S`) |
+| `f[x \in S] == e`, `f[x \in S, y \in T] == e` | | Function definition at the top level or in a `LET`, recursion included; applying it evaluates only the points it needs, so `f[n \in Nat]` works |
 | `f[x]` | | Function application |
+| `f[a, b]` | | Application to several arguments, `f[<<a, b>>]`; `[f EXCEPT ![a, b] = e]` likewise |
 | `DOMAIN f` | | Function domain |
 | `[f EXCEPT ![a] = b]` | | Function update |
 | `@` | | Self-reference in EXCEPT |
@@ -313,7 +316,6 @@ Temporal properties may be quantified over a constant set (requires `--check-liv
 |---------|-------------|
 | Unbounded `\E` / `\A` | `\E x : P` / `\A x : P` without domain (the universe cannot be enumerated). Unbounded `CHOOSE` is supported for the `x \notin S` and `x = e` patterns. |
 | User-defined infix operators | A definition such as `a ** b == a * b` or `a ++ b == a + b` makes the whole module fail to parse ("unexpected `*`"). Defining a predefined backslash operator such as `a \prec b == a < b` works. [#186](https://github.com/fabracht/tla-rs/issues/186) |
-| Top-level function definitions | `f[x \in S] == e` does not parse; the definition is reported with its parse error when used. The same definition inside a `LET` (`LET f[n \in 0..5] == IF n = 0 THEN 1 ELSE n * f[n - 1] IN f[3]`) works, recursion included. [#187](https://github.com/fabracht/tla-rs/issues/187) |
 | Temporal quantifiers | `\EE x : F` and `\AA x : F` do not parse. |
 | `-+->` | The "while-plus" operator does not parse. |
 
@@ -386,7 +388,6 @@ Current behavior where tla-rs and TLC disagree on the same input:
 | `JavaTime` | Error | Current time |
 | `Next == <<A>>_v` | Error: `<<A>>_v` cannot be evaluated as an action; [#188](https://github.com/fabracht/tla-rs/issues/188) | Checked as the action `A /\ v' # v` |
 | `a ** b == a * b` (user-defined infix operator) | The module fails to parse; [#186](https://github.com/fabracht/tla-rs/issues/186) | Supported |
-| `f[x \in S] == e` at the top level | The definition does not parse; [#187](https://github.com/fabracht/tla-rs/issues/187) | Supported |
 | `⟨1, 2⟩`, `1 ÷ 1`, `Op ≜ e` | Error: unexpected character; [#194](https://github.com/fabracht/tla-rs/issues/194) | Supported |
 | `Cardinality` used without `EXTENDS FiniteSets` | Evaluated; [#192](https://github.com/fabracht/tla-rs/issues/192) | Error: unknown operator |
 | cfg `ACTION_CONSTRAINT`, `ALIAS`, `POSTCONDITION` | Ignored, with the warning "not yet supported, ignoring" | Supported |

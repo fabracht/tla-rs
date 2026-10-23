@@ -14,7 +14,10 @@ use super::helpers::{
     eval_set, eval_tuple, fn_as_tuple, get_nested, in_set_symbolic, is_symbolic_set_expr,
     subseq_range, update_nested_value,
 };
-use super::recursive::{apply_active_function, eval_fn_def_recursive};
+use super::recursive::{
+    FunctionDefinition, apply_function, apply_function_anew, function_definition, function_value,
+    function_value_anew, with_function,
+};
 use crate::ast::{Env, Expr, Value};
 use crate::checker::format_value;
 use crate::substitution::substitute_expr;
@@ -111,18 +114,17 @@ fn eval_substituted(
     eval(&substitute_expr(body, &subs), env, defs)
 }
 
-/// `Op'` for an operator `Op` without parameters: `Op` evaluated in the next state,
-/// its body read with every state variable bound to its next-state value, so the
+/// `evaluate` run as `Op'` for an operator `Op` without parameters, in the next
+/// state: with every state variable bound to its next-state value, so the
 /// operators it calls, with or without parameters, see the next state too. When
 /// the state variables are known ([`super::global_state::with_state_vars`]), one
 /// that has no next-state value yet is unbound while the body is evaluated, so
 /// reading it fails, as in TLC; otherwise the state variables are taken to be the
 /// names the environment holds a next-state value for.
-fn eval_in_next_state(
+fn in_next_state(
     name: &Arc<str>,
-    body: &Expr,
     env: &mut Env,
-    defs: &Definitions,
+    evaluate: impl FnOnce(&mut Env) -> Result<Value>,
 ) -> Result<Value> {
     let vars = super::global_state::state_vars_in_scope().unwrap_or_else(|| {
         env.keys()
@@ -153,7 +155,7 @@ fn eval_in_next_state(
             }
         }
     }
-    let result = eval(body, env, defs);
+    let result = evaluate(env);
     for (key, value) in saved {
         match value {
             Some(value) => {
@@ -190,7 +192,10 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Some((params, body)) = defs.get(name)
                 && params.is_empty()
             {
-                return eval(body, env, defs);
+                return match FunctionDefinition::of(body) {
+                    Some(definition) => function_value(Some(name), &definition, env, defs),
+                    None => eval(body, env, defs),
+                };
             }
             Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
         }
@@ -203,7 +208,15 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             if let Some((params, body)) = defs.get(name)
                 && params.is_empty()
             {
-                return eval_in_next_state(name, body, env, defs);
+                if let Some(definition) = FunctionDefinition::of(body) {
+                    if is_rigid_function(&definition, defs) {
+                        return function_value(Some(name), &definition, env, defs);
+                    }
+                    return in_next_state(name, env, |env| {
+                        function_value_anew(Some(name), &definition, env, defs)
+                    });
+                }
+                return in_next_state(name, env, |env| eval(body, env, defs));
             }
             if let Some(value) = env.get(name)
                 && super::global_state::is_rigid_name(name)
@@ -514,8 +527,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             Ok(Value::set(ls.difference(&rs).cloned().collect()))
         }
 
-        Expr::Cartesian(l, r) => {
-            let operands = super::ast_utils::cartesian_operands(l, r);
+        Expr::Cartesian(operands) => {
             let sets: Vec<BTreeSet<Value>> = operands
                 .iter()
                 .map(|op| eval_set(op, env, defs))
@@ -736,10 +748,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 }
                 return result;
             }
-            if let Expr::Var(name) = f.as_ref()
-                && !env.contains_key(name)
-                && let Some(result) = apply_active_function(name, arg, env, defs)
-            {
+            if let Some(result) = apply_function_definition_at(f, Argument::Expr(arg), env, defs) {
                 return result;
             }
             let fval = eval(f, env, defs)?;
@@ -751,11 +760,13 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
             "lambda expression cannot be evaluated directly; must be applied",
         )),
 
-        Expr::FnDef(var, domain, body) => {
-            let dom = eval_set(domain, env, defs)?;
-            let placeholder_name: Arc<str> = "".into();
-            let result = eval_fn_def_recursive(&placeholder_name, var, dom, body, env, defs)?;
-            Ok(Value::func(result))
+        Expr::FnDef(param, domain, body) => {
+            let definition = FunctionDefinition {
+                param,
+                domain,
+                body,
+            };
+            function_value(None, &definition, env, defs)
         }
 
         Expr::FnCall(name, args) => {
@@ -997,6 +1008,14 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::Domain(f) => {
+            let definition = match f.as_ref() {
+                Expr::Var(name) if !env.contains_key(name) => function_definition(name, defs),
+                Expr::FnDef(..) => FunctionDefinition::of(f),
+                _ => None,
+            };
+            if let Some(definition) = definition {
+                return eval(definition.domain, env, defs);
+            }
             let fv = eval(f, env, defs)?;
             match fv {
                 Value::Fn(fmap) => {
@@ -1088,6 +1107,10 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
         }
 
         Expr::TupleAccess(tup, idx) => {
+            let position = Argument::Value(Value::Int((*idx + 1) as i64));
+            if let Some(result) = apply_function_definition_at(tup, position, env, defs) {
+                return result;
+            }
             let v = eval(tup, env, defs)?;
             match v {
                 Value::Tuple(tv) => tv.get(*idx).cloned().ok_or_else(|| {
@@ -1609,13 +1632,11 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 local_defs.insert(var.clone(), (params, Arc::new(op_body.clone())));
                 return eval(body, env, &local_defs);
             }
-            if let Expr::FnDef(param, domain_expr, fn_body) = binding.as_ref() {
+            if let Expr::FnDef(..) = binding.as_ref() {
                 let mut local_defs = defs.clone();
                 local_defs.insert(var.clone(), (vec![], Arc::new((**binding).clone())));
-                let dom = eval_set(domain_expr, env, &local_defs)?;
-                let fn_result = eval_fn_def_recursive(var, param, dom, fn_body, env, &local_defs)?;
-                let prev = env.insert(var.clone(), Value::func(fn_result));
-                let result = eval(body, env, &local_defs);
+                let prev = env.remove(var);
+                let result = with_function(var, &local_defs, || eval(body, env, &local_defs));
                 match prev {
                     Some(old) => {
                         env.insert(var.clone(), old);
@@ -1762,6 +1783,11 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 if super::ast_utils::operator_primes_parameter(params, body, &merged_defs) {
                     return eval_substituted(body, params, args, env, &merged_defs);
                 }
+                if params.is_empty()
+                    && let Some(definition) = FunctionDefinition::of(body)
+                {
+                    return function_value(Some(op), &definition, env, &merged_defs);
+                }
 
                 let mut arg_vals = Vec::with_capacity(args.len());
                 for arg_expr in args {
@@ -1864,6 +1890,130 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
 
         Expr::LabeledAction(_label, action) => eval(action, env, defs),
     }
+}
+
+/// The argument of a function application: an expression to evaluate, or a
+/// value already known, as the position `i` of `t[i]`.
+enum Argument<'a> {
+    Expr(&'a Expr),
+    Value(Value),
+}
+
+impl Argument<'_> {
+    fn value(self, env: &mut Env, defs: &Definitions) -> Result<Value> {
+        match self {
+            Argument::Expr(expr) => eval(expr, env, defs),
+            Argument::Value(value) => Ok(value),
+        }
+    }
+}
+
+/// Whether the function `definition` is the same in every state: its domain and
+/// body refer to no state variable, so its primed `f'` is `f` itself, even where
+/// no next state is in scope, as for a constant in TLC.
+fn is_rigid_function(definition: &FunctionDefinition, defs: &Definitions) -> bool {
+    super::global_state::state_vars_in_scope().is_some_and(|vars| {
+        !super::ast_utils::references_state(definition.domain, &vars, defs)
+            && !super::ast_utils::references_state(definition.body, &vars, defs)
+    })
+}
+
+/// The function definition an application `f[k]` applies, and where.
+enum FunctionTarget<'a> {
+    Current(Option<&'a Arc<str>>, FunctionDefinition<'a>),
+    Next(&'a Arc<str>, FunctionDefinition<'a>),
+    Instance(&'a Arc<str>, Definitions),
+}
+
+/// `f[arg]` when `f` is a function definition, `f[x \in S] == e`, its primed
+/// `f'`, an instance's `I!f`, or `[x \in S |-> e]`, applied without building
+/// the whole function; `None` when `f` is a value to evaluate first.
+fn apply_function_definition_at(
+    f: &Expr,
+    arg: Argument,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Option<Result<Value>> {
+    let target = match f {
+        Expr::Var(name) if !env.contains_key(name) => {
+            FunctionTarget::Current(Some(name), function_definition(name, defs)?)
+        }
+        Expr::Prime(name) => {
+            let definition = function_definition(name, defs)?;
+            if env.contains_key(&crate::intern::primed_name(name)) {
+                return None;
+            }
+            match is_rigid_function(&definition, defs) {
+                true => FunctionTarget::Current(Some(name), definition),
+                false => FunctionTarget::Next(name, definition),
+            }
+        }
+        Expr::FnDef(..) => FunctionTarget::Current(None, FunctionDefinition::of(f)?),
+        Expr::QualifiedCall(instance, op, args) if args.is_empty() => {
+            match instance_definitions(instance, op, env, defs)? {
+                Ok(instance_defs) => FunctionTarget::Instance(op, instance_defs),
+                Err(error) => return Some(Err(error)),
+            }
+        }
+        _ => return None,
+    };
+    let key = match arg.value(env, defs) {
+        Ok(key) => key,
+        Err(error) => return Some(Err(error)),
+    };
+    Some(match target {
+        FunctionTarget::Current(name, definition) => {
+            apply_function(name, &definition, key, env, defs)
+        }
+        FunctionTarget::Next(name, definition) => in_next_state(name, env, |env| {
+            apply_function_anew(Some(name), &definition, key, env, defs)
+        }),
+        FunctionTarget::Instance(op, instance_defs) => {
+            match function_definition(op, &instance_defs) {
+                Some(definition) => apply_function(Some(op), &definition, key, env, &instance_defs),
+                None => Err(EvalError::domain_error(format!("`{op}` is not a function"))),
+            }
+        }
+    })
+}
+
+/// `defs` with the definitions of the instance `I` or `P(args)` over them, as a
+/// qualified call `I!Op` evaluates `Op`, when `op` is a function definition of
+/// the instance; `None` otherwise, leaving the call to the qualified-call path.
+fn instance_definitions(
+    instance: &Expr,
+    op: &Arc<str>,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Option<Result<Definitions>> {
+    let instance_defs = match instance {
+        Expr::Var(name) => RESOLVED_INSTANCES.with(|instances| {
+            let instances = instances.borrow();
+            let instance_defs = instances.get(name)?;
+            function_definition(op, instance_defs)?;
+            Some(instance_defs.clone())
+        })?,
+        Expr::FnCall(name, args) => {
+            let parameterized = PARAMETERIZED_INSTANCES.with(|instances| {
+                let instances = instances.borrow();
+                let parameterized = instances.get(name)?;
+                function_definition(op, &parameterized.module_defs)?;
+                Some(parameterized.clone())
+            })?;
+            if parameterized.params.len() != args.len() {
+                return None;
+            }
+            let values = match args.iter().map(|arg| eval(arg, env, defs)).collect() {
+                Ok(values) => values,
+                Err(error) => return Some(Err(error)),
+            };
+            super::resolve_parameterized_defs(&parameterized, values)
+        }
+        _ => return None,
+    };
+    let mut merged = defs.clone();
+    merged.extend(instance_defs);
+    Some(Ok(merged))
 }
 
 fn try_eval_unbounded_choose(

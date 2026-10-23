@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -8,13 +8,89 @@ use crate::ast::{Env, Expr, Value};
 use super::Definitions;
 use super::core::{STACK_GROWTH, STACK_RED_ZONE, eval};
 use super::error::{EvalError, Result, value_type_name};
-use super::helpers::apply_fn_value;
+use super::helpers::{ResolvedDomain, eval_set};
 use crate::checker::format_value;
 
+/// A function definition `f[param \in domain] == body`, or the constructor
+/// `[param \in domain |-> body]`.
+pub(crate) struct FunctionDefinition<'a> {
+    pub(crate) param: &'a Arc<str>,
+    pub(crate) domain: &'a Expr,
+    pub(crate) body: &'a Expr,
+}
+
+impl<'a> FunctionDefinition<'a> {
+    pub(crate) fn of(expr: &'a Expr) -> Option<Self> {
+        match expr {
+            Expr::FnDef(param, domain, body) => Some(FunctionDefinition {
+                param,
+                domain,
+                body,
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// The function `name` stands for in `defs`, when it is a definition without
+/// parameters whose body is a function.
+pub(crate) fn function_definition<'a>(
+    name: &Arc<str>,
+    defs: &'a Definitions,
+) -> Option<FunctionDefinition<'a>> {
+    match defs.get(name) {
+        Some((params, definition)) if params.is_empty() => FunctionDefinition::of(definition),
+        _ => None,
+    }
+}
+
+/// A function being evaluated, with the values computed so far; `name` is the
+/// definition it is the body of, through which it may call itself. Its domain
+/// is resolved once, the first time an argument is checked: only the points an
+/// application reaches are evaluated, as in TLC.
 struct RecursiveFunction {
-    name: Arc<str>,
-    domain: BTreeSet<Value>,
+    name: Option<Arc<str>>,
+    body: *const Expr,
+    domain: OnceCell<ResolvedDomain>,
     values: RefCell<BTreeMap<Value, Value>>,
+    whole: RefCell<Option<Value>>,
+    building: Cell<bool>,
+}
+
+impl RecursiveFunction {
+    fn new(name: Option<&Arc<str>>, definition: &FunctionDefinition) -> Self {
+        RecursiveFunction {
+            name: name.cloned(),
+            body: definition.body,
+            domain: OnceCell::new(),
+            values: RefCell::new(BTreeMap::new()),
+            whole: RefCell::new(None),
+            building: Cell::new(false),
+        }
+    }
+
+    /// Whether `name` refers to this function in `defs`, and not to another
+    /// function of the same name, as a `LET` inside its evaluation may define.
+    fn is(&self, name: &Arc<str>, body: &Expr) -> bool {
+        self.name.as_ref() == Some(name) && std::ptr::eq(self.body, body)
+    }
+
+    fn contains(
+        &self,
+        key: &Value,
+        definition: &FunctionDefinition,
+        env: &mut Env,
+        defs: &Definitions,
+    ) -> Result<bool> {
+        let domain = match self.domain.get() {
+            Some(domain) => domain,
+            None => {
+                let resolved = ResolvedDomain::resolve(definition.domain, env, defs)?;
+                self.domain.get_or_init(|| resolved)
+            }
+        };
+        domain.contains(key, definition.domain, env, defs)
+    }
 }
 
 thread_local! {
@@ -36,89 +112,161 @@ impl Drop for ActiveFunction {
     }
 }
 
-pub(crate) fn eval_fn_def_recursive(
-    fn_name: &Arc<str>,
-    param: &Arc<str>,
-    domain: BTreeSet<Value>,
-    body: &Expr,
-    env: &mut Env,
-    defs: &Definitions,
-) -> Result<BTreeMap<Value, Value>> {
-    let function = Rc::new(RecursiveFunction {
-        name: fn_name.clone(),
-        domain,
-        values: RefCell::new(BTreeMap::new()),
-    });
+fn active_function(
+    name: &Arc<str>,
+    definition: &FunctionDefinition,
+) -> Option<Rc<RecursiveFunction>> {
+    ACTIVE_FUNCTIONS.with_borrow(|active| {
+        active
+            .iter()
+            .rev()
+            .find(|function| function.is(name, definition.body))
+            .cloned()
+    })
+}
+
+/// Evaluates `body` with the function `name` of `defs` active, so its
+/// applications in `body` share one set of computed values: those of a `LET`
+/// function, evaluated once per evaluation of the `LET`.
+pub(crate) fn with_function<T>(name: &Arc<str>, defs: &Definitions, body: impl FnOnce() -> T) -> T {
+    let Some(definition) = function_definition(name, defs) else {
+        return body();
+    };
+    let function = Rc::new(RecursiveFunction::new(Some(name), &definition));
     let active = ActiveFunction::enter(&function);
-    let prev = env.remove(param);
-    let result = function.domain.iter().try_for_each(|val| {
-        if function.values.borrow().contains_key(val) {
-            return Ok(());
-        }
-        env.insert(param.clone(), val.clone());
-        let value = eval_with_memo(body, env, defs, &function)?;
-        function.values.borrow_mut().insert(val.clone(), value);
-        Ok(())
-    });
-    match prev {
-        Some(old) => {
-            env.insert(param.clone(), old);
-        }
-        None => {
-            env.remove(param);
-        }
-    }
+    let result = body();
     drop(active);
-    result.map(|()| function.values.take())
+    result
 }
 
-pub(crate) fn apply_active_function(
-    name: &Arc<str>,
-    arg: &Expr,
+/// The whole function `definition`, built over its domain, with the values an
+/// active evaluation of it has computed.
+pub(crate) fn function_value(
+    name: Option<&Arc<str>>,
+    definition: &FunctionDefinition,
     env: &mut Env,
     defs: &Definitions,
-) -> Option<Result<Value>> {
-    let function = ACTIVE_FUNCTIONS
-        .with_borrow(|active| active.iter().rev().find(|f| &f.name == name).cloned())?;
-    let (param, body) = recursive_definition(name, defs)?;
-    Some(
-        eval(arg, env, defs).and_then(|key| apply_memoized(param, body, key, env, defs, &function)),
-    )
+) -> Result<Value> {
+    match name.and_then(|name| active_function(name, definition)) {
+        Some(function) => build_function(&function, definition, env, defs),
+        None => function_value_anew(name, definition, env, defs),
+    }
 }
 
-fn recursive_definition<'a>(
-    name: &Arc<str>,
-    defs: &'a Definitions,
-) -> Option<(&'a Arc<str>, &'a Expr)> {
-    match defs.get(name) {
-        Some((params, definition)) if params.is_empty() => match definition.as_ref() {
-            Expr::FnDef(param, _, body) => Some((param, body.as_ref())),
-            _ => None,
-        },
-        _ => None,
+/// The whole function `definition` with values of its own, as for a primed
+/// `f'`, which reads the next state.
+pub(crate) fn function_value_anew(
+    name: Option<&Arc<str>>,
+    definition: &FunctionDefinition,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<Value> {
+    let function = Rc::new(RecursiveFunction::new(name, definition));
+    let entered = name.map(|_| ActiveFunction::enter(&function));
+    let result = build_function(&function, definition, env, defs);
+    drop(entered);
+    result
+}
+
+fn build_function(
+    function: &RecursiveFunction,
+    definition: &FunctionDefinition,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<Value> {
+    if let Some(whole) = function.whole.borrow().clone() {
+        return Ok(whole);
     }
+    if function.building.replace(true) {
+        let name = function.name.as_deref().unwrap_or("a function");
+        return Err(EvalError::domain_error(format!(
+            "`{name}` is used as a whole value in its own definition"
+        )));
+    }
+    let result = eval_set(definition.domain, env, defs).and_then(|domain| {
+        domain
+            .into_iter()
+            .try_fold(BTreeMap::new(), |mut values, key| {
+                let value = value_at(definition, key.clone(), env, defs, function)?;
+                values.insert(key, value);
+                Ok(values)
+            })
+    });
+    function.building.set(false);
+    let whole = Value::func(result?);
+    function.whole.replace(Some(whole.clone()));
+    Ok(whole)
+}
+
+/// The function `definition` applied to `key`, evaluated only at the points the
+/// application reaches, each once: `fact[n \in Nat]` applied to 4 evaluates
+/// `fact` at 4, 3, 2, 1 and 0. An application inside the function, or inside a
+/// [`with_function`] scope, reuses the values computed so far.
+pub(crate) fn apply_function(
+    name: Option<&Arc<str>>,
+    definition: &FunctionDefinition,
+    key: Value,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<Value> {
+    if let Some(function) = name.and_then(|name| active_function(name, definition)) {
+        return apply_memoized(definition, key, env, defs, &function);
+    }
+    apply_function_anew(name, definition, key, env, defs)
+}
+
+/// The function `definition` applied to `key` with values of its own, not those
+/// an active evaluation of it has computed: a primed application `f'[k]` reads
+/// the next state, so it cannot reuse the values `f[k]` took in this one.
+pub(crate) fn apply_function_anew(
+    name: Option<&Arc<str>>,
+    definition: &FunctionDefinition,
+    key: Value,
+    env: &mut Env,
+    defs: &Definitions,
+) -> Result<Value> {
+    let function = Rc::new(RecursiveFunction::new(name, definition));
+    let entered = name.map(|_| ActiveFunction::enter(&function));
+    let result = apply_memoized(definition, key, env, defs, &function);
+    drop(entered);
+    result
 }
 
 fn apply_memoized(
-    param: &Arc<str>,
-    body: &Expr,
+    definition: &FunctionDefinition,
     key: Value,
     env: &mut Env,
     defs: &Definitions,
     function: &RecursiveFunction,
 ) -> Result<Value> {
-    if !function.domain.contains(&key) {
+    let cached = function.values.borrow().get(&key).cloned();
+    if let Some(value) = cached {
+        return Ok(value);
+    }
+    if !function.contains(&key, definition, env, defs)? {
         return Err(EvalError::domain_error(format!(
             "key {} not in function domain",
             format_value(&key)
         )));
     }
+    value_at(definition, key, env, defs, function)
+}
+
+/// The value of the function at `key`, a point of its domain, computed once.
+fn value_at(
+    definition: &FunctionDefinition,
+    key: Value,
+    env: &mut Env,
+    defs: &Definitions,
+    function: &RecursiveFunction,
+) -> Result<Value> {
     let cached = function.values.borrow().get(&key).cloned();
     if let Some(value) = cached {
         return Ok(value);
     }
+    let param = definition.param;
     let prev = env.insert(param.clone(), key.clone());
-    let result = eval_with_memo(body, env, defs, function);
+    let result = eval_with_memo(definition.body, env, defs, function);
     match prev {
         Some(old) => {
             env.insert(param.clone(), old);
@@ -152,15 +300,14 @@ fn eval_with_memo_inner(
     match expr {
         Expr::FnApp(f, arg) => {
             if let Expr::Var(name) = f.as_ref()
-                && name == &function.name
-                && let Some((param, body)) = recursive_definition(name, defs)
+                && !env.contains_key(name)
+                && let Some(definition) = function_definition(name, defs)
+                && function.is(name, definition.body)
             {
                 let key = eval_with_memo(arg, env, defs, function)?;
-                return apply_memoized(param, body, key, env, defs, function);
+                return apply_memoized(&definition, key, env, defs, function);
             }
-            let fval = eval_with_memo(f, env, defs, function)?;
-            let av = eval_with_memo(arg, env, defs, function)?;
-            apply_fn_value(fval, av)
+            eval(expr, env, defs)
         }
 
         Expr::Let(var, binding, body) => {
@@ -195,7 +342,10 @@ fn eval_with_memo_inner(
             let lv = eval_with_memo(l, env, defs, function)?;
             let rv = eval_with_memo(r, env, defs, function)?;
             match (lv, rv) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
+                (Value::Int(a), Value::Int(b)) => a
+                    .checked_add(b)
+                    .map(Value::Int)
+                    .ok_or_else(|| EvalError::domain_error("integer overflow in addition")),
                 (a, b) => Err(EvalError::domain_error(format!(
                     "cannot add {} and {} (expected Int + Int)",
                     value_type_name(&a),
@@ -237,12 +387,15 @@ fn eval_with_memo_inner(
             if let Some(val) = env.get(name) {
                 return Ok(val.clone());
             }
-            if let Some((params, body)) = defs.get(name)
-                && params.is_empty()
-            {
-                return eval_with_memo(body, env, defs, function);
+            match defs.get(name) {
+                Some((params, body))
+                    if params.is_empty() && !matches!(body.as_ref(), Expr::FnDef(..)) =>
+                {
+                    eval_with_memo(body, env, defs, function)
+                }
+                Some(_) => eval(expr, env, defs),
+                None => Err(EvalError::undefined_var_with_env(name.clone(), env, defs)),
             }
-            Err(EvalError::undefined_var_with_env(name.clone(), env, defs))
         }
 
         _ => eval(expr, env, defs),
