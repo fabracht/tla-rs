@@ -176,8 +176,8 @@ impl Parser {
                 } else if overridden {
                     Ok(Expr::Var(name))
                 } else if !self.let_scope.contains(&name)
+                    && !self.function_names.contains(&name)
                     && let Some(def) = self.definitions.get(&name)
-                    && !matches!(def, Expr::FnDef(..))
                 {
                     Ok(def.clone())
                 } else {
@@ -328,7 +328,7 @@ impl Parser {
             }
             Expr::Var(name)
                 if !self.let_scope.contains(name)
-                    && matches!(self.definitions.get(name), Some(Expr::FnDef(..)))
+                    && self.function_names.contains(name)
                     && !crate::eval::expr_references(body, name) =>
             {
                 Some(arg.clone())

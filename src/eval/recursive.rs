@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use crate::ast::{Env, Expr, Value};
 use super::Definitions;
 use super::core::{STACK_GROWTH, STACK_RED_ZONE, eval};
 use super::error::{EvalError, Result, value_type_name};
-use super::helpers::{ResolvedDomain, eval_set, in_set_symbolic};
+use super::helpers::{ResolvedDomain, eval_set};
 use crate::checker::format_value;
 
 /// A function definition `f[param \in domain] == body`, or the constructor
@@ -51,7 +51,7 @@ pub(crate) fn function_definition<'a>(
 struct RecursiveFunction {
     name: Option<Arc<str>>,
     body: *const Expr,
-    domain: RefCell<Option<ResolvedDomain>>,
+    domain: OnceCell<ResolvedDomain>,
     values: RefCell<BTreeMap<Value, Value>>,
     whole: RefCell<Option<Value>>,
     building: Cell<bool>,
@@ -62,7 +62,7 @@ impl RecursiveFunction {
         RecursiveFunction {
             name: name.cloned(),
             body: definition.body,
-            domain: RefCell::new(None),
+            domain: OnceCell::new(),
             values: RefCell::new(BTreeMap::new()),
             whole: RefCell::new(None),
             building: Cell::new(false),
@@ -82,15 +82,14 @@ impl RecursiveFunction {
         env: &mut Env,
         defs: &Definitions,
     ) -> Result<bool> {
-        let unresolved = self.domain.borrow().is_none();
-        if unresolved {
-            let resolved = ResolvedDomain::resolve(definition.domain, env, defs)?;
-            self.domain.replace(Some(resolved));
-        }
-        match self.domain.borrow().as_ref() {
-            Some(domain) => domain.contains(key, definition.domain, env, defs),
-            None => in_set_symbolic(key, definition.domain, env, defs),
-        }
+        let domain = match self.domain.get() {
+            Some(domain) => domain,
+            None => {
+                let resolved = ResolvedDomain::resolve(definition.domain, env, defs)?;
+                self.domain.get_or_init(|| resolved)
+            }
+        };
+        domain.contains(key, definition.domain, env, defs)
     }
 }
 

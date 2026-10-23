@@ -442,9 +442,8 @@ fn collect_candidates_impl<T: CandidateTarget>(
         }
 
         Expr::Let(bound, binding, body)
-            if (contains_prime_ref(binding, defs)
-                || super::ast_utils::is_operator_reference(binding, env, defs))
-                && super::ast_utils::let_definition(binding).is_none() =>
+            if contains_prime_ref(binding, defs)
+                || super::ast_utils::is_operator_reference(binding, env, defs) =>
         {
             let applied =
                 crate::substitution::substitute_expr(body, &[(bound.clone(), (**binding).clone())]);

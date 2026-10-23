@@ -114,22 +114,13 @@ fn eval_substituted(
     eval(&substitute_expr(body, &subs), env, defs)
 }
 
-/// `Op'` for an operator `Op` without parameters: `Op` evaluated in the next state,
-/// its body read with every state variable bound to its next-state value, so the
+/// `evaluate` run as `Op'` for an operator `Op` without parameters, in the next
+/// state: with every state variable bound to its next-state value, so the
 /// operators it calls, with or without parameters, see the next state too. When
 /// the state variables are known ([`super::global_state::with_state_vars`]), one
 /// that has no next-state value yet is unbound while the body is evaluated, so
 /// reading it fails, as in TLC; otherwise the state variables are taken to be the
 /// names the environment holds a next-state value for.
-fn eval_in_next_state(
-    name: &Arc<str>,
-    body: &Expr,
-    env: &mut Env,
-    defs: &Definitions,
-) -> Result<Value> {
-    in_next_state(name, env, |env| eval(body, env, defs))
-}
-
 fn in_next_state(
     name: &Arc<str>,
     env: &mut Env,
@@ -218,11 +209,14 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                 && params.is_empty()
             {
                 if let Some(definition) = FunctionDefinition::of(body) {
+                    if is_rigid_function(&definition, defs) {
+                        return function_value(Some(name), &definition, env, defs);
+                    }
                     return in_next_state(name, env, |env| {
                         function_value_anew(Some(name), &definition, env, defs)
                     });
                 }
-                return eval_in_next_state(name, body, env, defs);
+                return in_next_state(name, env, |env| eval(body, env, defs));
             }
             if let Some(value) = env.get(name)
                 && super::global_state::is_rigid_name(name)
@@ -1914,6 +1908,16 @@ impl Argument<'_> {
     }
 }
 
+/// Whether the function `definition` is the same in every state: its domain and
+/// body refer to no state variable, so its primed `f'` is `f` itself, even where
+/// no next state is in scope, as for a constant in TLC.
+fn is_rigid_function(definition: &FunctionDefinition, defs: &Definitions) -> bool {
+    super::global_state::state_vars_in_scope().is_some_and(|vars| {
+        !super::ast_utils::references_state(definition.domain, &vars, defs)
+            && !super::ast_utils::references_state(definition.body, &vars, defs)
+    })
+}
+
 /// The function definition an application `f[k]` applies, and where.
 enum FunctionTarget<'a> {
     Current(Option<&'a Arc<str>>, FunctionDefinition<'a>),
@@ -1934,8 +1938,15 @@ fn apply_function_definition_at(
         Expr::Var(name) if !env.contains_key(name) => {
             FunctionTarget::Current(Some(name), function_definition(name, defs)?)
         }
-        Expr::Prime(name) if !env.contains_key(&crate::intern::primed_name(name)) => {
-            FunctionTarget::Next(name, function_definition(name, defs)?)
+        Expr::Prime(name) => {
+            let definition = function_definition(name, defs)?;
+            if env.contains_key(&crate::intern::primed_name(name)) {
+                return None;
+            }
+            match is_rigid_function(&definition, defs) {
+                true => FunctionTarget::Current(Some(name), definition),
+                false => FunctionTarget::Next(name, definition),
+            }
         }
         Expr::FnDef(..) => FunctionTarget::Current(None, FunctionDefinition::of(f)?),
         Expr::QualifiedCall(instance, op, args) if args.is_empty() => {

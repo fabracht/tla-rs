@@ -13,10 +13,12 @@ step[s \in 0..2, t \in 0..2] == s + t
 gx[n \in 0..3] == n + x
 steps[n \in 0..20] == IF n = 1 THEN 0 ELSE IF n % 2 = 0 THEN 1 + steps[n \div 2] ELSE 1 + steps[3 * n + 1]
 ApplyAt4(f) == f[4]
+fd[i \in 1..3] == i
+ctbl == [i \in 1..3 |-> i]
 selfdom[n \in 0..3] == IF n = 0 THEN Cardinality(DOMAIN selfdom) ELSE selfdom[n - 1]
 Probe(f) == \A j \in {100} : f[1] = 6
 Init == x = 0
-Next == x < 2 /\ x' = step[x, 1] /\ (fact[x])' > 0 /\ (gx[1])' = x' + 1
+Next == (fd[1])' = 1 /\ (ctbl[2])' = 2 /\ x < 2 /\ x' = step[x, 1] /\ (fact[x])' > 0 /\ (gx[1])' = x' + 1
         /\ LET pg[i \in 1..2] == x + i IN pg[1] < (pg[1])'
 InvFact == fact[4] = 24 /\ fact[0] = 1
 InvAdd == add[2, 3] = 5

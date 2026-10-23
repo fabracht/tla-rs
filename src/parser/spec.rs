@@ -153,6 +153,7 @@ impl Parser {
                         Definition::Instance(inst) => self.instances.push(inst),
                         Definition::Function(body) => {
                             let body = self.replacement(&name).map_or(body, Expr::Var);
+                            self.function_names.insert(name.clone());
                             self.definitions.insert(name, body);
                         }
                         Definition::Operator { params, body } => {
