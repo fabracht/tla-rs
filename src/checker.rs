@@ -1,3 +1,5 @@
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::BTreeSet;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
@@ -10,6 +12,8 @@ use std::time::Instant;
 
 use indexmap::IndexSet;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ast::InstanceDecl;
 use crate::ast::{Env, Expr, SafetyProperty, Spec, State, Value};
 use crate::eval::{
     CheckerStats as EvalCheckerStats, Definitions, EvalContext, EvalError, contains_prime_ref,
@@ -440,11 +444,12 @@ pub fn prepare_spec(
         && let Some(spec_path) = spec_path
     {
         let mut registry = ModuleRegistry::with_overrides(spec.operator_overrides.clone());
-        let mut pending: std::collections::VecDeque<(crate::ast::InstanceDecl, Vec<Arc<str>>)> =
-            spec.instances
-                .iter()
-                .map(|inst| (inst.clone(), Vec::new()))
-                .collect();
+        let mut merged: BTreeSet<Arc<str>> = BTreeSet::new();
+        let mut pending: VecDeque<(InstanceDecl, Vec<Arc<str>>)> = spec
+            .instances
+            .iter()
+            .map(|inst| (inst.clone(), Vec::new()))
+            .collect();
         let mut instances = Vec::new();
         while let Some((inst, enclosing)) = pending.pop_front() {
             if stdlib::is_stdlib_module(&inst.module_name) {
@@ -456,9 +461,10 @@ pub fn prepare_spec(
                 return Err(module_load_error(&inst.module_name, error));
             }
             match registry.load(&inst.module_name, spec_path) {
-                Ok(_) => registry
+                Ok(_) if merged.insert(inst.module_name.clone()) => registry
                     .merge_declarations(&inst.module_name, spec_path)
                     .map_err(PrepareSpecError::ModuleParse)?,
+                Ok(_) => {}
                 Err(ModuleError::NotFound(_)) => {
                     if !quiet {
                         let module = &inst.module_name;

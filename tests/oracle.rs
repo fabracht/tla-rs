@@ -2381,6 +2381,20 @@ fn test_should_pass_nested_named_instance() {
     }
 }
 
+/// Each unnamed instantiation of a module has its own nested instance (one in
+/// the root, one `LOCAL` in an extended module, with different `WITH`), and an
+/// implicit substitution two levels down refers to the definition of the module
+/// in between, not to a substitution of the root (TLC: 3 distinct states).
+#[test]
+fn test_should_pass_nested_instance_scoping() {
+    let path =
+        Path::new("test_cases/should_pass/nested_instance_scoping/nested_instance_scoping.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("nested_instance_scoping.tla should pass, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_should_pass_prime_parameters() {
     let path = Path::new("test_cases/should_pass/prime_parameters/prime_parameters.tla");
