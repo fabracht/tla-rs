@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.24.10] - 2026-10-21
+
+### Fixed
+
+- A top-level function definition `f[x \in S] == e` did not parse (#187), so a use of it failed with its parse error. It is now a definition, recursive or not, as inside a `LET`, and `f[x \in S, y \in T] == e` is accepted in both places. A function definition is not taken for `Init`, `Next` or an invariant by its name, and an instanced module's function is applied through the instance (`I!fact[4]`, `P(2)!f[3]`).
+- A function constructor with several bound variables, `[a \in S, b \in T |-> e]` or `[a, b \in S |-> e]`, did not parse (#207). As in TLC, it is a function on `S \X T`, and its bound variables may be tuples (`<<b, c>> \in T`).
+- Applying a function to several arguments, `f[a, b]`, did not parse (#208), nor did `[f EXCEPT ![a, b] = e]`. It is `f[<<a, b>>]`, as in TLC. This is how Echo from tlaplus/Examples writes `anc[n, initiator]`; MCEcho now gives TLC's 75 states.
+- `(A \X B) \X C` was the set of triples `A \X B \X C` instead of pairs whose first element is a pair, so `<<<<1, 2>>, 3>> \in (A \X B) \X C` was FALSE where TLC finds it TRUE. A parenthesized product is now one component of the product around it.
+- `f[n \in Nat] == IF n = 0 THEN 1 ELSE n * f[n - 1]`, in a `LET` or at the top level, failed with "integer overflow in multiplication": the function was built over all of `Nat`'s bound before `f[4]` was read. Applying a function definition, or a constructor `[x \in S |-> e]`, now evaluates it only at the points the application reaches, each once, and checks the argument against the domain by membership, as TLC does, so a value the application does not need is not computed. The applications of a `LET` function share the values computed so far, a primed application such as `(fact[x])'` is evaluated the same way in the next state, and a top-level function definition passed to an operator (`Op(fact)` with `Op(f) == f[4]`) is applied rather than built. An addition in a recursive function's body that overflows is reported as "integer overflow in addition", as elsewhere; it wrapped around in a release build and panicked in a debug build.
+- A recursive `LET` function in an action, `x' = f[x]` with `LET f[n \in S] == ... f[n - 1] ...`, failed with "undefined variable `f`" while computing successors, and the inference engine (`TLA_ENGINE=inference`) silently found no successors for it; TLC checks it.
+
 ## [0.24.9] - 2026-10-21
 
 ### Fixed

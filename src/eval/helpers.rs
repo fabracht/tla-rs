@@ -118,12 +118,12 @@ pub(crate) fn is_symbolic_set_expr(expr: &Expr, env: &mut Env, defs: &Definition
     Ok(match expr {
         Expr::Any => true,
         e if is_structural_set_expr(e) => true,
-        Expr::Union(l, r)
-        | Expr::Intersect(l, r)
-        | Expr::SetMinus(l, r)
-        | Expr::Cartesian(l, r) => {
+        Expr::Union(l, r) | Expr::Intersect(l, r) | Expr::SetMinus(l, r) => {
             is_symbolic_set_expr(l, env, defs)? || is_symbolic_set_expr(r, env, defs)?
         }
+        Expr::Cartesian(sets) => sets.iter().try_fold(false, |found, set| -> Result<bool> {
+            Ok(found || is_symbolic_set_expr(set, env, defs)?)
+        })?,
         Expr::Var(_) => matches!(eval(expr, env, defs)?, Value::IntSet(_)),
         _ => false,
     })
@@ -158,26 +158,29 @@ pub(crate) fn is_non_enumerable_set_expr(
             }
             false
         }
-        Expr::Union(l, r)
-        | Expr::Intersect(l, r)
-        | Expr::SetMinus(l, r)
-        | Expr::Cartesian(l, r) => {
+        Expr::Union(l, r) | Expr::Intersect(l, r) | Expr::SetMinus(l, r) => {
             is_non_enumerable_set_expr(l, env, defs)? || is_non_enumerable_set_expr(r, env, defs)?
         }
+        Expr::Cartesian(sets) => sets.iter().try_fold(false, |found, set| -> Result<bool> {
+            Ok(found || is_non_enumerable_set_expr(set, env, defs)?)
+        })?,
         _ => false,
     })
 }
 
-enum ResolvedDomain<'a> {
+/// A set resolved once for repeated membership tests: its values, an infinite
+/// set of integers, or a set whose membership is decided from its expression
+/// without enumerating it.
+pub(crate) enum ResolvedDomain {
     Concrete(BTreeSet<Value>),
     Infinite(IntDomain),
-    Symbolic(&'a Expr),
+    Symbolic,
 }
 
-impl<'a> ResolvedDomain<'a> {
-    fn resolve(expr: &'a Expr, env: &mut Env, defs: &Definitions) -> Result<Self> {
+impl ResolvedDomain {
+    pub(crate) fn resolve(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Self> {
         if is_symbolic_set_expr(expr, env, defs)? {
-            return Ok(ResolvedDomain::Symbolic(expr));
+            return Ok(ResolvedDomain::Symbolic);
         }
         match eval(expr, env, defs)? {
             Value::Set(s) => Ok(ResolvedDomain::Concrete(Arc::unwrap_or_clone(s))),
@@ -186,11 +189,18 @@ impl<'a> ResolvedDomain<'a> {
         }
     }
 
-    fn contains(&self, val: &Value, env: &mut Env, defs: &Definitions) -> Result<bool> {
+    /// Whether `val` belongs to the set `expr` was resolved from.
+    pub(crate) fn contains(
+        &self,
+        val: &Value,
+        expr: &Expr,
+        env: &mut Env,
+        defs: &Definitions,
+    ) -> Result<bool> {
         match self {
             ResolvedDomain::Concrete(s) => Ok(s.contains(val)),
             ResolvedDomain::Infinite(domain) => Ok(domain.contains(val)),
-            ResolvedDomain::Symbolic(e) => in_set_symbolic(val, e, env, defs),
+            ResolvedDomain::Symbolic => in_set_symbolic(val, expr, env, defs),
         }
     }
 }
@@ -207,7 +217,7 @@ pub(crate) fn in_set_symbolic(
             if let Value::Set(s) = val {
                 let inner_domain = ResolvedDomain::resolve(inner, env, defs)?;
                 for member in s.iter() {
-                    if !inner_domain.contains(member, env, defs)? {
+                    if !inner_domain.contains(member, inner, env, defs)? {
                         return Ok(false);
                     }
                 }
@@ -228,7 +238,7 @@ pub(crate) fn in_set_symbolic(
             if let Some(seq) = seq {
                 let domain = ResolvedDomain::resolve(domain_expr, env, defs)?;
                 for e in &seq {
-                    if !domain.contains(e, env, defs)? {
+                    if !domain.contains(e, domain_expr, env, defs)? {
                         return Ok(false);
                     }
                 }
@@ -266,20 +276,17 @@ pub(crate) fn in_set_symbolic(
         Expr::SetMinus(l, r) if set_op_is_symbolic(l, r, env, defs)? => {
             Ok(in_set_symbolic(val, l, env, defs)? && !in_set_symbolic(val, r, env, defs)?)
         }
-        Expr::Cartesian(l, r) if set_op_is_symbolic(l, r, env, defs)? => {
-            let operands = super::ast_utils::cartesian_operands(l, r);
-            match val {
-                Value::Tuple(t) if t.len() == operands.len() => {
-                    for (elem, op) in t.iter().zip(operands.iter()) {
-                        if !in_set_symbolic(elem, op, env, defs)? {
-                            return Ok(false);
-                        }
+        Expr::Cartesian(sets) if is_symbolic_set_expr(set_expr, env, defs)? => match val {
+            Value::Tuple(t) if t.len() == sets.len() => {
+                for (elem, op) in t.iter().zip(sets.iter()) {
+                    if !in_set_symbolic(elem, op, env, defs)? {
+                        return Ok(false);
                     }
-                    Ok(true)
                 }
-                _ => Ok(false),
+                Ok(true)
             }
-        }
+            _ => Ok(false),
+        },
         _ => match eval(set_expr, env, defs)? {
             Value::Set(s) => Ok(s.contains(val)),
             Value::IntSet(d) => Ok(d.contains(val)),

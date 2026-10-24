@@ -144,7 +144,6 @@ impl<'a> LevelAnalysis<'a> {
             | Expr::Union(l, r)
             | Expr::Intersect(l, r)
             | Expr::SetMinus(l, r)
-            | Expr::Cartesian(l, r)
             | Expr::Subset(l, r)
             | Expr::ProperSubset(l, r)
             | Expr::Concat(l, r)
@@ -182,7 +181,9 @@ impl<'a> LevelAnalysis<'a> {
                 self.bound_levels(std::slice::from_ref(var), body, locals)
             }
             Expr::Lambda(params, body) => self.bound_levels(params, body, locals),
-            Expr::SetEnum(items) | Expr::TupleLit(items) => self.all_levels(items, locals),
+            Expr::SetEnum(items) | Expr::TupleLit(items) | Expr::Cartesian(items) => {
+                self.all_levels(items, locals)
+            }
             Expr::RecordLit(fields) | Expr::RecordSet(fields) => {
                 fields.iter().fold(Levels::CONSTANT, |acc, (_, e)| {
                     acc.max(self.levels_in(e, locals))

@@ -52,6 +52,16 @@ pub(crate) fn format_expr_brief(expr: &Expr) -> String {
     }
 }
 
+/// A `LET` binding that is a definition rather than a value: an operator with
+/// parameters, or a function `f[x \in S] == e`, which may call itself and so is
+/// registered as a definition for its body to find it.
+pub(crate) fn let_definition(binding: &Expr) -> Option<(Vec<Arc<str>>, &Expr)> {
+    match binding {
+        Expr::FnDef(..) => Some((Vec::new(), binding)),
+        _ => parameterized_let_op(binding),
+    }
+}
+
 /// A parameterized `LET F(p1, ..) == body` operator, which the parser encodes as
 /// `Let("_params", TupleLit([p1, ..]), body)`. Returns its parameter names and
 /// body so a caller can register it as a definition; `None` for a plain LET value.
@@ -510,7 +520,6 @@ fn refers_through_defs(
         | Expr::Union(l, r)
         | Expr::Intersect(l, r)
         | Expr::SetMinus(l, r)
-        | Expr::Cartesian(l, r)
         | Expr::Subset(l, r)
         | Expr::ProperSubset(l, r)
         | Expr::Concat(l, r)
@@ -551,7 +560,7 @@ fn refers_through_defs(
                 || refers_through_defs(b, defs, visited, leaf, scope)
         }
         Expr::ChooseUnbounded(_, b) => refers_through_defs(b, defs, visited, leaf, scope),
-        Expr::SetEnum(elems) | Expr::TupleLit(elems) => elems
+        Expr::SetEnum(elems) | Expr::TupleLit(elems) | Expr::Cartesian(elems) => elems
             .iter()
             .any(|e| refers_through_defs(e, defs, visited, leaf, scope)),
         Expr::RecordLit(fields) | Expr::RecordSet(fields) => fields
@@ -684,22 +693,6 @@ pub(crate) fn expr_is_var(expr: &Expr, name: &Arc<str>) -> bool {
     matches!(expr, Expr::Var(n) if n == name)
 }
 
-pub(crate) fn cartesian_operands<'a>(l: &'a Expr, r: &'a Expr) -> Vec<&'a Expr> {
-    fn walk_left<'a>(e: &'a Expr, out: &mut Vec<&'a Expr>) {
-        match e {
-            Expr::Cartesian(ll, lr) => {
-                walk_left(ll, out);
-                out.push(lr);
-            }
-            _ => out.push(e),
-        }
-    }
-    let mut out = Vec::new();
-    walk_left(l, &mut out);
-    out.push(r);
-    out
-}
-
 pub(crate) fn expr_references(expr: &Expr, name: &Arc<str>) -> bool {
     match expr {
         Expr::Var(n) => n == name,
@@ -763,7 +756,6 @@ pub(crate) fn expr_references(expr: &Expr, name: &Arc<str>) -> bool {
         | Expr::Union(l, r)
         | Expr::Intersect(l, r)
         | Expr::SetMinus(l, r)
-        | Expr::Cartesian(l, r)
         | Expr::Subset(l, r)
         | Expr::ProperSubset(l, r)
         | Expr::Concat(l, r)
@@ -798,7 +790,7 @@ pub(crate) fn expr_references(expr: &Expr, name: &Arc<str>) -> bool {
             expr_references(d, name) || (v != name && expr_references(b, name))
         }
         Expr::ChooseUnbounded(v, b) => v != name && expr_references(b, name),
-        Expr::SetEnum(elems) | Expr::TupleLit(elems) => {
+        Expr::SetEnum(elems) | Expr::TupleLit(elems) | Expr::Cartesian(elems) => {
             elems.iter().any(|e| expr_references(e, name))
         }
         Expr::RecordLit(fields) | Expr::RecordSet(fields) => {
@@ -894,7 +886,6 @@ pub(crate) fn expr_contains(haystack: &Expr, needle: &Expr) -> bool {
         | Expr::Union(l, r)
         | Expr::Intersect(l, r)
         | Expr::SetMinus(l, r)
-        | Expr::Cartesian(l, r)
         | Expr::Subset(l, r)
         | Expr::ProperSubset(l, r)
         | Expr::Concat(l, r)
@@ -927,7 +918,7 @@ pub(crate) fn expr_contains(haystack: &Expr, needle: &Expr) -> bool {
         | Expr::SetMap(_, d, b)
         | Expr::CustomOp(_, d, b) => expr_contains(d, needle) || expr_contains(b, needle),
         Expr::ChooseUnbounded(_, b) => expr_contains(b, needle),
-        Expr::SetEnum(elems) | Expr::TupleLit(elems) => {
+        Expr::SetEnum(elems) | Expr::TupleLit(elems) | Expr::Cartesian(elems) => {
             elems.iter().any(|e| expr_contains(e, needle))
         }
         Expr::RecordLit(fields) | Expr::RecordSet(fields) => {
