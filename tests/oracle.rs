@@ -2368,6 +2368,19 @@ fn test_should_pass_function_instance() {
     }
 }
 
+/// A named instance declared in an instanced module: one per instance of that
+/// module, with the outer `WITH` applied to its own and inherited where it
+/// substitutes implicitly, and found through an unnamed `INSTANCE` too (TLC: 3
+/// distinct states, every invariant holds).
+#[test]
+fn test_should_pass_nested_named_instance() {
+    let path = Path::new("test_cases/should_pass/nested_named_instance/nested_named_instance.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("nested_named_instance.tla should pass, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_should_pass_prime_parameters() {
     let path = Path::new("test_cases/should_pass/prime_parameters/prime_parameters.tla");

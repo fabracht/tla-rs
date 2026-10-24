@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.24.11] - 2026-10-24
+
+### Fixed
+
+- A named `J == INSTANCE N` declared in a module the spec instances was not found (#240): a definition of that module using `J!Op`, reached through `I == INSTANCE M` or an unnamed `INSTANCE M`, failed with "instance J not found". As in TLC, each instance of `M` now has its own `J`, whose `WITH` expressions take `M`'s substitutions (`z <- y` in `M` with `y <- x` gives `z <- x`) and which inherits them for the names it substitutes implicitly. A module that instances itself is reported as a cyclic dependency.
+
 ## [0.24.10] - 2026-10-21
 
 ### Fixed

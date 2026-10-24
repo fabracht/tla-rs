@@ -22,7 +22,7 @@ use crate::export::{DotExport, DotMode, EdgeList, export_dot};
 use crate::graph::StateGraph;
 use crate::liveness::{self, LivenessViolation};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::modules::{ModuleError, ModuleRegistry, resolve_instances};
+use crate::modules::{ModuleError, ModuleRegistry, declared_instances, resolve_instance_list};
 use crate::stdlib;
 use crate::symmetry::SymmetryConfig;
 
@@ -440,9 +440,20 @@ pub fn prepare_spec(
         && let Some(spec_path) = spec_path
     {
         let mut registry = ModuleRegistry::with_overrides(spec.operator_overrides.clone());
-        for inst in &spec.instances {
+        let mut pending: std::collections::VecDeque<(crate::ast::InstanceDecl, Vec<Arc<str>>)> =
+            spec.instances
+                .iter()
+                .map(|inst| (inst.clone(), Vec::new()))
+                .collect();
+        let mut instances = Vec::new();
+        while let Some((inst, enclosing)) = pending.pop_front() {
             if stdlib::is_stdlib_module(&inst.module_name) {
+                instances.push(inst);
                 continue;
+            }
+            if enclosing.contains(&inst.module_name) {
+                let error = ModuleError::CyclicDependency(inst.module_name.clone());
+                return Err(module_load_error(&inst.module_name, error));
             }
             match registry.load(&inst.module_name, spec_path) {
                 Ok(_) => registry
@@ -458,8 +469,23 @@ pub fn prepare_spec(
                 }
                 Err(error) => return Err(module_load_error(&inst.module_name, error)),
             }
+            if let Some(module) = registry.get(&inst.module_name)
+                && inst.params.is_empty()
+            {
+                let within: Vec<Arc<str>> = enclosing
+                    .iter()
+                    .cloned()
+                    .chain(std::iter::once(inst.module_name.clone()))
+                    .collect();
+                pending.extend(
+                    declared_instances(&inst, module)
+                        .into_iter()
+                        .map(|nested| (nested, within.clone())),
+                );
+            }
+            instances.push(inst);
         }
-        match resolve_instances(spec, &registry) {
+        match resolve_instance_list(&instances, &registry) {
             Ok((static_instances, param_instances, instance_vars)) => {
                 let total = static_instances.len() + param_instances.len();
                 if total > 0 && !quiet {

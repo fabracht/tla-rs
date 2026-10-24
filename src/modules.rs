@@ -521,15 +521,92 @@ type ResolvedInstances = (
     InstanceVars,
 );
 
+/// The name under which `inner`, a named instance declared in a module, is
+/// resolved when that module is instanced as `outer`: `I!J` for `J` in the
+/// module of `I == INSTANCE M`, and `J` itself for an unnamed `INSTANCE M`,
+/// whose definitions refer to it by its own name.
+pub fn nested_alias(outer: Option<&Arc<str>>, inner: &Arc<str>) -> Arc<str> {
+    match outer {
+        Some(outer) => format!("{outer}!{inner}").into(),
+        None => inner.clone(),
+    }
+}
+
+/// Each named instance `module` declares, renamed to the alias it is resolved
+/// under within `outer`, so two instances of the module do not share one.
+fn nested_renames(outer: Option<&Arc<str>>, module: &Spec) -> Vec<(Arc<str>, Expr)> {
+    match outer {
+        Some(_) => module
+            .instances
+            .iter()
+            .filter_map(|nested| nested.alias.as_ref())
+            .map(|inner| (inner.clone(), Expr::Var(nested_alias(outer, inner))))
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+/// The named instances `J == INSTANCE N WITH ...` declared in `module`, the
+/// module of `inst`, as instances of their own: under the alias of
+/// [`nested_alias`], with `inst`'s substitutions applied to their `WITH`
+/// expressions, and inherited for the names they leave to the implicit
+/// substitution, which refer to `module`'s.
+pub fn declared_instances(inst: &InstanceDecl, module: &Spec) -> Vec<InstanceDecl> {
+    let outer = inst.alias.as_ref();
+    let context: Vec<(Arc<str>, Expr)> = inst
+        .substitutions
+        .iter()
+        .cloned()
+        .chain(nested_renames(outer, module))
+        .collect();
+    module
+        .instances
+        .iter()
+        .filter(|nested| nested.params.is_empty())
+        .filter_map(|nested| {
+            let inner = nested.alias.as_ref()?;
+            let explicit = nested.substitutions.iter().map(|(target, expr)| {
+                (
+                    target.clone(),
+                    crate::substitution::substitute_expr(expr, &context),
+                )
+            });
+            let inherited = inst
+                .substitutions
+                .iter()
+                .filter(|(target, _)| !nested.substitutions.iter().any(|(own, _)| own == target))
+                .cloned();
+            Some(InstanceDecl {
+                alias: Some(nested_alias(outer, inner)),
+                params: Vec::new(),
+                module_name: nested.module_name.clone(),
+                substitutions: explicit.chain(inherited).collect(),
+                local: false,
+            })
+        })
+        .collect()
+}
+
 pub fn resolve_instances(
     spec: &Spec,
+    registry: &ModuleRegistry,
+) -> std::result::Result<ResolvedInstances, ModuleError> {
+    resolve_instance_list(&spec.instances, registry)
+}
+
+/// [`resolve_instances`] for `instances`, which may include the ones
+/// [`declared_instances`] finds in instanced modules. A substitution applies
+/// only to a name the module declares, and the named instances a module
+/// declares are renamed in its definitions to the aliases they resolve under.
+pub fn resolve_instance_list(
+    instances: &[InstanceDecl],
     registry: &ModuleRegistry,
 ) -> std::result::Result<ResolvedInstances, ModuleError> {
     let mut resolved = BTreeMap::new();
     let mut parameterized = BTreeMap::new();
     let mut instance_vars = BTreeMap::new();
 
-    for inst in &spec.instances {
+    for inst in instances {
         let alias = match &inst.alias {
             Some(a) => a.clone(),
             None => inst.module_name.clone(),
@@ -537,7 +614,16 @@ pub fn resolve_instances(
 
         if let Some(module) = registry.get(&inst.module_name) {
             if inst.params.is_empty() {
-                let substituted = apply_substitutions(&module.definitions, &inst.substitutions);
+                let declared =
+                    |name: &Arc<str>| module.constants.contains(name) || module.vars.contains(name);
+                let substitutions: Vec<(Arc<str>, Expr)> = inst
+                    .substitutions
+                    .iter()
+                    .filter(|(target, _)| declared(target))
+                    .cloned()
+                    .chain(nested_renames(inst.alias.as_ref(), module))
+                    .collect();
+                let substituted = apply_substitutions(&module.definitions, &substitutions);
                 resolved.insert(alias.clone(), substituted);
                 instance_vars.insert(alias, module.vars.clone());
             } else {
