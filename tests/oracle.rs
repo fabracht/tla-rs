@@ -2384,7 +2384,9 @@ fn test_should_pass_nested_named_instance() {
 /// Each unnamed instantiation of a module has its own nested instance (one in
 /// the root, one `LOCAL` in an extended module, with different `WITH`), and an
 /// implicit substitution two levels down refers to the definition of the module
-/// in between, not to a substitution of the root (TLC: 3 distinct states).
+/// in between, not to a substitution of the root; a nested `WITH` that calls an
+/// operator of the module declaring it calls that one, not the nested module's
+/// operator of the same name, also through `IH!J!Val` (TLC: 3 distinct states).
 #[test]
 fn test_should_pass_nested_instance_scoping() {
     let path =

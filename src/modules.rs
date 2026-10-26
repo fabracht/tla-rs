@@ -160,7 +160,9 @@ impl Default for ModuleRegistry {
 /// added under their own names, except those of a `LOCAL INSTANCE` in an extended
 /// module, which only the definitions of that module see. A named `I == INSTANCE M`
 /// in an extended module is added to `spec.instances`, unless the spec declares
-/// its own `I`, so `I!Op` resolves in the definitions it brings in. The standard modules
+/// its own `I`, so `I!Op` resolves in the definitions it brings in; so is each
+/// named instance `J` that an unnamed instance's module declares, as `M!J#n` for
+/// that instantiation, which its definitions are rewritten to call. The standard modules
 /// instanced modules depend on, and those that cannot be found or read, are added
 /// to `spec.instances`, for [`crate::checker::prepare_spec`] to load or warn about.
 pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<(), String> {
@@ -471,7 +473,7 @@ impl InstanceResolver {
             .collect();
         let own_instances: Vec<(Arc<str>, &InstanceDecl)> = instances
             .iter()
-            .filter(|nested| nested.params.is_empty())
+            .filter(|nested| is_nested_instance(nested))
             .filter_map(|nested| {
                 let inner_alias = nested.alias.as_ref()?;
                 Some((format!("{name}!{inner_alias}#{copy}").into(), nested))
@@ -614,10 +616,19 @@ fn nested_renames(outer: Option<&Arc<str>>, module: &Spec) -> Vec<(Arc<str>, Exp
     module
         .instances
         .iter()
-        .filter(|nested| nested.params.is_empty())
+        .filter(|nested| is_nested_instance(nested))
         .filter_map(|nested| nested.alias.as_ref())
         .map(|inner| (inner.clone(), Expr::Var(nested_alias(outer, inner))))
         .collect()
+}
+
+/// A named instance without parameters of a user module, resolved per instance
+/// of the module that declares it; a standard module has no definitions to
+/// instance.
+fn is_nested_instance(nested: &InstanceDecl) -> bool {
+    nested.alias.is_some()
+        && nested.params.is_empty()
+        && !crate::stdlib::is_stdlib_module(&nested.module_name)
 }
 
 /// The named instances `J == INSTANCE N WITH ...` without parameters declared in
@@ -638,15 +649,21 @@ pub fn declared_instances(inst: &InstanceDecl, module: &Spec) -> Vec<InstanceDec
         .filter(|(target, _)| declared.contains(target))
         .cloned()
         .collect();
+    let own_definitions = module.definitions.keys().map(|name| {
+        let qualified =
+            Expr::QualifiedCall(Box::new(Expr::Var(outer.clone())), name.clone(), Vec::new());
+        (name.clone(), qualified)
+    });
     let renamings: Vec<(Arc<str>, Expr)> = inherited
         .iter()
         .cloned()
         .chain(nested_renames(Some(outer), module))
+        .chain(own_definitions)
         .collect();
     module
         .instances
         .iter()
-        .filter(|nested| nested.params.is_empty())
+        .filter(|nested| is_nested_instance(nested))
         .filter_map(|nested| {
             let inner = nested.alias.as_ref()?;
             let scoped = InstanceDecl {
@@ -685,12 +702,11 @@ pub fn resolve_instance_list(
 
         if let Some(module) = registry.get(&inst.module_name) {
             if inst.params.is_empty() {
-                let declared =
-                    |name: &Arc<str>| module.constants.contains(name) || module.vars.contains(name);
+                let declared = declared_names(module);
                 let substitutions: Vec<(Arc<str>, Expr)> = inst
                     .substitutions
                     .iter()
-                    .filter(|(target, _)| declared(target))
+                    .filter(|(target, _)| declared.contains(target))
                     .cloned()
                     .chain(nested_renames(inst.alias.as_ref(), module))
                     .collect();

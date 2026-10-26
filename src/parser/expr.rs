@@ -1218,7 +1218,18 @@ impl Parser {
                         }
                         self.expect(Token::RParen)?;
                     }
-                    expr = Expr::QualifiedCall(Box::new(expr), op_name, args);
+                    let instance = match expr {
+                        Expr::QualifiedCall(outer, nested, nested_args)
+                            if nested_args.is_empty() =>
+                        {
+                            match *outer {
+                                Expr::Var(outer) => Expr::Var(format!("{outer}!{nested}").into()),
+                                other => Expr::QualifiedCall(Box::new(other), nested, nested_args),
+                            }
+                        }
+                        other => other,
+                    };
+                    expr = Expr::QualifiedCall(Box::new(instance), op_name, args);
                 }
                 _ => break,
             }
