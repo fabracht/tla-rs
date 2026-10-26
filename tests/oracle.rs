@@ -2397,6 +2397,22 @@ fn test_should_pass_nested_instance_scoping() {
     }
 }
 
+/// Three levels of instances, each module getting its variable and constant
+/// through `EXTENDS`, with a `WITH` calling an operator the leaf also defines and
+/// an implicit substitution of a constant at every level: unnamed at the top
+/// (`UNN_EEE`) and named throughout, read as `I!K!J!Val3` too (`NNN_EEE`) (TLC:
+/// 3 distinct states each, every invariant holds).
+#[test]
+fn test_should_pass_nested_instance_levels() {
+    for name in ["UNN_EEE", "NNN_EEE"] {
+        let path = format!("test_cases/should_pass/{name}/{name}.tla");
+        match check_spec_file(Path::new(&path)) {
+            CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3, "{name}"),
+            other => panic!("{name}.tla should pass, got: {other:?}"),
+        }
+    }
+}
+
 #[test]
 fn test_should_pass_prime_parameters() {
     let path = Path::new("test_cases/should_pass/prime_parameters/prime_parameters.tla");

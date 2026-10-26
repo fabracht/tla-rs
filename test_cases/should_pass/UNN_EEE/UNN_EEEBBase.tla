@@ -1,0 +1,4 @@
+---- MODULE UNN_EEEBBase ----
+VARIABLE y
+CONSTANT C3
+====

@@ -484,7 +484,7 @@ pub fn prepare_spec(
                     .chain(std::iter::once(inst.module_name.clone()))
                     .collect();
                 pending.extend(
-                    declared_instances(&inst, module)
+                    declared_instances(&inst, module, &registry)
                         .into_iter()
                         .map(|nested| (nested, within.clone())),
                 );
