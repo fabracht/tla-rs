@@ -904,11 +904,12 @@ pub fn resolve_instance_list(
                 resolved.insert(alias.clone(), substituted);
                 instance_vars.insert(alias, module.vars.clone());
             } else {
+                let module_defs = scope_definitions(&alias, &module.definitions);
                 parameterized.insert(
                     alias,
                     ParameterizedInstance {
                         params: inst.params.clone(),
-                        module_defs: module.definitions.clone(),
+                        module_defs,
                         substitutions: inst.substitutions.clone(),
                     },
                 );

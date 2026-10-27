@@ -2456,6 +2456,7 @@ fn test_should_pass_instance_shadowed_definition() {
     for (name, states) in [
         ("instance_shadowed_definition", 2),
         ("instance_shadowed_definition_action", 2),
+        ("instance_shadowed_definition_param", 2),
         ("NNU_EEE_def", 3),
     ] {
         let path = format!("test_cases/should_pass/{name}/{name}.tla");
