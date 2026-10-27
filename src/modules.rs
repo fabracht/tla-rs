@@ -410,11 +410,6 @@ impl InstanceResolver {
         Ok(imports)
     }
 
-    /// Module `name` instanced with `substitutions`: the names it exports, linked
-    /// to its definitions under fresh keys, together with the definitions of the
-    /// modules it extends and instances, all rewritten so that every name refers
-    /// to the definition in scope where it was written. `None` when the module
-    /// cannot be found or read.
     /// The constants and variables module `name` declares, with those of the
     /// modules it extends, transitively.
     fn declared_with_extends(
@@ -440,6 +435,11 @@ impl InstanceResolver {
         declared
     }
 
+    /// Module `name` instanced with `substitutions`: the names it exports, linked
+    /// to its definitions under fresh keys, together with the definitions of the
+    /// modules it extends and instances, all rewritten so that every name refers
+    /// to the definition in scope where it was written. `None` when the module
+    /// cannot be found or read.
     fn instantiate(
         &mut self,
         name: &Arc<str>,
@@ -531,7 +531,14 @@ impl InstanceResolver {
                     .map(|(key, _)| key.clone())
             }))
             .collect();
-        let inherited = declared_substitutions(substitutions, &declared);
+        let inherited: Vec<(Arc<str>, Expr)> = declared_substitutions(substitutions, &declared)
+            .into_iter()
+            .chain(
+                in_scope
+                    .iter()
+                    .map(|link| (link.name.clone(), Expr::Var(link.key.clone()))),
+            )
+            .collect();
         let nested_instances = own_instances
             .iter()
             .map(|(key, nested)| InstanceDecl {
@@ -710,7 +717,7 @@ fn is_nested_instance(nested: &InstanceDecl) -> bool {
 
 /// The named instances `J == INSTANCE N WITH ...` without parameters declared in
 /// `module`, the module of the named instance `inst`, as instances of their own
-/// under [`nested_alias`]: with `inst`'s substitutions for the names `module`
+/// under `I!J`: with `inst`'s substitutions for the names `module`
 /// declares applied to their `WITH` expressions, and inherited for the names
 /// they leave to the implicit substitution, which refer to `module`'s. Those of
 /// an unnamed instance are found by [`merge_extended_declarations`], which
@@ -729,17 +736,22 @@ pub fn declared_instances(
         &mut |name| registry.get(name).map(|loaded| loaded.instances.clone()),
         &mut vec![inst.module_name.clone()],
     );
-    let own_definitions = module.definitions.keys().map(|name| {
-        let qualified =
-            Expr::QualifiedCall(Box::new(Expr::Var(outer.clone())), name.clone(), Vec::new());
-        (name.clone(), qualified)
-    });
+    let own_definitions: Vec<(Arc<str>, Expr)> = module
+        .definitions
+        .keys()
+        .map(|name| {
+            let qualified =
+                Expr::QualifiedCall(Box::new(Expr::Var(outer.clone())), name.clone(), Vec::new());
+            (name.clone(), qualified)
+        })
+        .collect();
     let renamings: Vec<(Arc<str>, Expr)> = inherited
         .iter()
         .cloned()
         .chain(path_renames(&paths, |head| Some(nested_alias(outer, head))))
-        .chain(own_definitions)
+        .chain(own_definitions.iter().cloned())
         .collect();
+    let inherited: Vec<(Arc<str>, Expr)> = inherited.into_iter().chain(own_definitions).collect();
     module
         .instances
         .iter()

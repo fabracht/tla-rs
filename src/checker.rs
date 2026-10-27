@@ -315,6 +315,52 @@ fn load_module_extends(
     Ok(())
 }
 
+/// Loads module `name` with what it extends and instances merged in, once, and
+/// the modules of its named instances in turn, so a module's nested instances
+/// are known before the paths it reaches them by are resolved. A module that
+/// cannot be found is skipped with a warning, once.
+#[cfg(not(target_arch = "wasm32"))]
+fn load_instanced_module(
+    registry: &mut ModuleRegistry,
+    loaded: &mut BTreeSet<Arc<str>>,
+    name: &Arc<str>,
+    spec_path: &std::path::Path,
+    quiet: bool,
+) -> Result<(), PrepareSpecError> {
+    if stdlib::is_stdlib_module(name) || !loaded.insert(name.clone()) {
+        return Ok(());
+    }
+    match registry.load(name, spec_path) {
+        Ok(_) => registry
+            .merge_declarations(name, spec_path)
+            .map_err(PrepareSpecError::ModuleParse)?,
+        Err(ModuleError::NotFound(_)) => {
+            if !quiet {
+                eprintln!(
+                    "  Warning: could not load module {name}: no file {name}.tla in spec directory"
+                );
+            }
+            return Ok(());
+        }
+        Err(error) => return Err(module_load_error(name, error)),
+    }
+    let nested: Vec<Arc<str>> = registry
+        .get(name)
+        .map(|module| {
+            module
+                .instances
+                .iter()
+                .filter(|nested| nested.alias.is_some())
+                .map(|nested| nested.module_name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    for module in &nested {
+        load_instanced_module(registry, loaded, module, spec_path, quiet)?;
+    }
+    Ok(())
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn module_load_error(name: &str, error: ModuleError) -> PrepareSpecError {
     let message = error.describe(name);
@@ -444,7 +490,7 @@ pub fn prepare_spec(
         && let Some(spec_path) = spec_path
     {
         let mut registry = ModuleRegistry::with_overrides(spec.operator_overrides.clone());
-        let mut merged: BTreeSet<Arc<str>> = BTreeSet::new();
+        let mut loaded: BTreeSet<Arc<str>> = BTreeSet::new();
         let mut pending: VecDeque<(InstanceDecl, Vec<Arc<str>>)> = spec
             .instances
             .iter()
@@ -460,21 +506,13 @@ pub fn prepare_spec(
                 let error = ModuleError::CyclicDependency(inst.module_name.clone());
                 return Err(module_load_error(&inst.module_name, error));
             }
-            match registry.load(&inst.module_name, spec_path) {
-                Ok(_) if merged.insert(inst.module_name.clone()) => registry
-                    .merge_declarations(&inst.module_name, spec_path)
-                    .map_err(PrepareSpecError::ModuleParse)?,
-                Ok(_) => {}
-                Err(ModuleError::NotFound(_)) => {
-                    if !quiet {
-                        let module = &inst.module_name;
-                        eprintln!(
-                            "  Warning: could not load module {module}: no file {module}.tla in spec directory"
-                        );
-                    }
-                }
-                Err(error) => return Err(module_load_error(&inst.module_name, error)),
-            }
+            load_instanced_module(
+                &mut registry,
+                &mut loaded,
+                &inst.module_name,
+                spec_path,
+                quiet,
+            )?;
             if let Some(module) = registry.get(&inst.module_name)
                 && inst.params.is_empty()
             {

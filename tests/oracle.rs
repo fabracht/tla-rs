@@ -2413,6 +2413,21 @@ fn test_should_pass_nested_instance_levels() {
     }
 }
 
+/// A nested instance's constant implicitly substituted by an operator the
+/// enclosing module defines reads that operator, not the root's constant of the
+/// same name, and a nested `WITH` reaching two levels deeper (`K!L!Val`) resolves
+/// (TLC: 2 distinct states, both invariants hold).
+#[test]
+fn test_should_pass_nested_instance_definitions() {
+    let path = Path::new(
+        "test_cases/should_pass/nested_instance_definitions/nested_instance_definitions.tla",
+    );
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 2),
+        other => panic!("nested_instance_definitions.tla should pass, got: {other:?}"),
+    }
+}
+
 #[test]
 fn test_should_pass_prime_parameters() {
     let path = Path::new("test_cases/should_pass/prime_parameters/prime_parameters.tla");
