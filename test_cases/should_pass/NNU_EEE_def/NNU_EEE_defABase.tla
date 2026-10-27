@@ -1,0 +1,4 @@
+---- MODULE NNU_EEE_defABase ----
+VARIABLE w
+CONSTANT C3
+====

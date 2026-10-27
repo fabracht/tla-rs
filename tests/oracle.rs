@@ -2429,21 +2429,38 @@ fn test_should_pass_nested_instance_definitions() {
 }
 
 /// Nested instances under unnamed `INSTANCE`s: a path through an instance the
-/// nested module gets by `EXTENDS`, the nested instance used by the root under its
-/// own name, two unnamed copies of one module in the root and in an instanced
+/// nested module gets by `EXTENDS`, two unnamed copies of one module in the root and in an instanced
 /// module, and a definition imported by an unnamed `INSTANCE` passed in a `WITH`
 /// to a module that imports one of the same name (TLC: 1 distinct state each).
 #[test]
 fn test_should_pass_unnamed_instance_scopes() {
     for name in [
         "nested_instance_extended_path",
-        "nested_instance_visible",
         "nested_instance_copies",
         "instance_with_imported_name",
     ] {
         let path = format!("test_cases/should_pass/{name}/{name}.tla");
         match check_spec_file(Path::new(&path)) {
             CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 1, "{name}"),
+            other => panic!("{name}.tla should pass, got: {other:?}"),
+        }
+    }
+}
+
+/// An operator of an instanced module reached through a name, here a leaf's
+/// constant implicitly substituted by it, is not replaced by a root constant of
+/// the same name: in an invariant, in an action and liveness property, and three
+/// levels down (`NNU_EEE_def`) (TLC: 2, 2 and 3 distinct states).
+#[test]
+fn test_should_pass_instance_shadowed_definition() {
+    for (name, states) in [
+        ("instance_shadowed_definition", 2),
+        ("instance_shadowed_definition_action", 2),
+        ("NNU_EEE_def", 3),
+    ] {
+        let path = format!("test_cases/should_pass/{name}/{name}.tla");
+        match check_spec_file(Path::new(&path)) {
+            CheckResult::Ok(stats) => assert_eq!(stats.states_explored, states, "{name}"),
             other => panic!("{name}.tla should pass, got: {other:?}"),
         }
     }

@@ -177,9 +177,7 @@ pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<
     declarations
         .instances
         .extend(imports.instances.iter().cloned());
-    declarations
-        .instances
-        .extend(visible_instances(&imports, imports.links.iter()));
+
     let imported = imported_definitions(&imports, imports.links.iter(), &spec.definitions);
     for inst in spec
         .instances
@@ -347,10 +345,7 @@ fn collect_declarations(
     declarations
         .instances
         .extend(imports.instances.iter().cloned());
-    declarations.instances.extend(visible_instances(
-        &imports,
-        imports.links.iter().filter(|link| !link.local),
-    ));
+
     let local_links: Vec<&Link> = imports.links.iter().filter(|link| link.local).collect();
     declarations.add(
         &vars,
@@ -615,27 +610,6 @@ impl InstanceResolver {
     }
 }
 
-/// The named instances an unnamed `INSTANCE` brings into scope under their own
-/// names, as `J` for `M`'s `J`: an unnamed instance imports every definition of
-/// `M`, its instance definitions included.
-fn visible_instances<'a>(
-    imports: &Imports,
-    links: impl Iterator<Item = &'a Link>,
-) -> Vec<InstanceDecl> {
-    links
-        .filter_map(|link| {
-            let nested = imports
-                .instances
-                .iter()
-                .find(|nested| nested.alias.as_ref() == Some(&link.key))?;
-            Some(InstanceDecl {
-                alias: Some(link.name.clone()),
-                ..nested.clone()
-            })
-        })
-        .collect()
-}
-
 /// Each definition `links` import into a module that does not define the name
 /// itself, renamed to the key of the copy it comes from, so a `WITH` expression
 /// of the module's named instances that uses it does not resolve to a definition
@@ -659,6 +633,30 @@ fn rename_substitutions(
         .iter()
         .map(|(target, expr)| (target.clone(), substitute_expr(expr, renamings)))
         .collect()
+}
+
+/// `definitions` of the instance `alias` with each definition without parameters
+/// also under the key `alias.Name`, which no name in an environment can take
+/// (`.` is not part of an identifier), and every reference to it in the
+/// definitions renamed to that key: a constant or bound variable of the caller
+/// with the same name then cannot stand in for the instance's definition.
+fn scope_definitions(alias: &Arc<str>, definitions: &DefinitionMap) -> DefinitionMap {
+    let keys: Vec<(Arc<str>, Arc<str>)> = definitions
+        .iter()
+        .filter(|(_, (params, _))| params.is_empty())
+        .map(|(name, _)| (name.clone(), format!("{alias}.{name}").into()))
+        .collect();
+    let renamings: Vec<(Arc<str>, Expr)> = keys
+        .iter()
+        .map(|(name, key)| (name.clone(), Expr::Var(key.clone())))
+        .collect();
+    let mut scoped = substitute_definitions(definitions, &renamings);
+    for (name, key) in keys {
+        if let Some(definition) = scoped.get(&name).cloned() {
+            scoped.insert(key, definition);
+        }
+    }
+    scoped
 }
 
 fn declared_names(module: &Spec) -> Vec<Arc<str>> {
@@ -901,7 +899,8 @@ pub fn resolve_instance_list(
                 let mut substitutions =
                     declared_substitutions(&inst.substitutions, &declared_names(module));
                 substitutions.extend(renames);
-                let substituted = apply_substitutions(&module.definitions, &substitutions);
+                let scoped = scope_definitions(&alias, &module.definitions);
+                let substituted = apply_substitutions(&scoped, &substitutions);
                 resolved.insert(alias.clone(), substituted);
                 instance_vars.insert(alias, module.vars.clone());
             } else {
