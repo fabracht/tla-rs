@@ -1,0 +1,5 @@
+---- MODULE X4 ----
+CONSTANT D
+INSTANCE M4 WITH C <- 2
+Foo == D
+====

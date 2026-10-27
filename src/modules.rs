@@ -177,6 +177,17 @@ pub fn merge_extended_declarations(spec: &mut Spec, spec_path: &Path) -> Result<
     declarations
         .instances
         .extend(imports.instances.iter().cloned());
+    declarations
+        .instances
+        .extend(visible_instances(&imports, imports.links.iter()));
+    let imported = imported_definitions(&imports, imports.links.iter(), &spec.definitions);
+    for inst in spec
+        .instances
+        .iter_mut()
+        .filter(|inst| inst.alias.is_some())
+    {
+        inst.substitutions = rename_substitutions(&inst.substitutions, &imported);
+    }
     declarations.add(&spec.vars, &spec.constants, &spec.definitions);
     spec.vars = declarations.vars;
     spec.constants = declarations.constants;
@@ -321,17 +332,25 @@ fn collect_declarations(
     for inner in &extends {
         collect_declarations(inner, resolver, visited, declarations)?;
     }
+    let imports = resolver.imports(&instances, &mut Vec::new())?;
+    let imported = imported_definitions(&imports, imports.links.iter(), &definitions);
     for inst in instances.iter().filter(|inst| inst.alias.is_some()) {
         declarations
             .instances
             .retain(|earlier| earlier.alias != inst.alias);
-        declarations.instances.push(inst.clone());
+        declarations.instances.push(InstanceDecl {
+            substitutions: rename_substitutions(&inst.substitutions, &imported),
+            ..inst.clone()
+        });
     }
-    let imports = resolver.imports(&instances, &mut Vec::new())?;
     declarations.import(&imports, imports.links.iter().filter(|link| !link.local));
     declarations
         .instances
         .extend(imports.instances.iter().cloned());
+    declarations.instances.extend(visible_instances(
+        &imports,
+        imports.links.iter().filter(|link| !link.local),
+    ));
     let local_links: Vec<&Link> = imports.links.iter().filter(|link| link.local).collect();
     declarations.add(
         &vars,
@@ -359,10 +378,14 @@ struct Imports {
     instances: Vec<InstanceDecl>,
 }
 
+/// The number of the next instantiated copy of a module, unique in the process,
+/// so the keys of two copies made by different merges (the root's and an
+/// instanced module's) never collide.
+static NEXT_COPY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 struct InstanceResolver {
     registry: ModuleRegistry,
     spec_path: PathBuf,
-    copies: usize,
     deferred_modules: Vec<Arc<str>>,
 }
 
@@ -371,7 +394,6 @@ impl InstanceResolver {
         Self {
             registry: ModuleRegistry::with_overrides(overrides),
             spec_path: spec_path.to_path_buf(),
-            copies: 0,
             deferred_modules: Vec::new(),
         }
     }
@@ -408,6 +430,31 @@ impl InstanceResolver {
                 }));
         }
         Ok(imports)
+    }
+
+    /// The instances module `name` declares, with those of the modules it
+    /// extends, transitively, as a module's definitions see them.
+    fn instances_with_extends(
+        &mut self,
+        name: &Arc<str>,
+        visiting: &mut Vec<Arc<str>>,
+    ) -> Vec<InstanceDecl> {
+        if visiting.contains(name) {
+            return Vec::new();
+        }
+        let (extends, mut instances) = match self.registry.load(name, &self.spec_path) {
+            Ok(module) => (module.extends.clone(), module.instances.clone()),
+            Err(_) => return Vec::new(),
+        };
+        visiting.push(name.clone());
+        for extended in extends
+            .iter()
+            .filter(|extended| !crate::stdlib::is_stdlib_module(extended))
+        {
+            instances.extend(self.instances_with_extends(extended, visiting));
+        }
+        visiting.pop();
+        instances
     }
 
     /// The constants and variables module `name` declares, with those of the
@@ -480,8 +527,7 @@ impl InstanceResolver {
         inner.instances.extend(imports.instances);
         loading.pop();
 
-        let copy = self.copies;
-        self.copies += 1;
+        let copy = NEXT_COPY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let own_links: Vec<Link> = definitions
             .keys()
             .map(|op| Link {
@@ -504,16 +550,9 @@ impl InstanceResolver {
                 Some((format!("{name}!{inner_alias}#{copy}").into(), nested))
             })
             .collect();
-        let registry = &mut self.registry;
-        let spec_path = &self.spec_path;
         let own_paths = nested_paths(
             &instances,
-            &mut |module| {
-                registry
-                    .load(module, spec_path)
-                    .ok()
-                    .map(|loaded| loaded.instances.clone())
-            },
+            &mut |module| Some(self.instances_with_extends(module, &mut Vec::new())),
             &mut vec![name.clone()],
         );
         let renamings: Vec<(Arc<str>, Expr)> = substitutions
@@ -555,10 +594,18 @@ impl InstanceResolver {
                 scoped.insert(link.key.clone(), definition.clone());
             }
         }
+        let instance_links = own_instances.iter().filter_map(|(key, nested)| {
+            Some(Link {
+                name: nested.alias.clone()?,
+                key: key.clone(),
+                local: false,
+            })
+        });
         let links = in_scope
             .into_iter()
             .filter(|link| !link.local)
             .cloned()
+            .chain(instance_links)
             .collect();
         Ok(Some(Imports {
             links,
@@ -566,6 +613,52 @@ impl InstanceResolver {
             instances: nested_instances,
         }))
     }
+}
+
+/// The named instances an unnamed `INSTANCE` brings into scope under their own
+/// names, as `J` for `M`'s `J`: an unnamed instance imports every definition of
+/// `M`, its instance definitions included.
+fn visible_instances<'a>(
+    imports: &Imports,
+    links: impl Iterator<Item = &'a Link>,
+) -> Vec<InstanceDecl> {
+    links
+        .filter_map(|link| {
+            let nested = imports
+                .instances
+                .iter()
+                .find(|nested| nested.alias.as_ref() == Some(&link.key))?;
+            Some(InstanceDecl {
+                alias: Some(link.name.clone()),
+                ..nested.clone()
+            })
+        })
+        .collect()
+}
+
+/// Each definition `links` import into a module that does not define the name
+/// itself, renamed to the key of the copy it comes from, so a `WITH` expression
+/// of the module's named instances that uses it does not resolve to a definition
+/// of the instanced module with the same name.
+fn imported_definitions<'a>(
+    imports: &Imports,
+    links: impl Iterator<Item = &'a Link>,
+    own: &DefinitionMap,
+) -> Vec<(Arc<str>, Expr)> {
+    links
+        .filter(|link| imports.scoped.contains_key(&link.key) && !own.contains_key(&link.name))
+        .map(|link| (link.name.clone(), Expr::Var(link.key.clone())))
+        .collect()
+}
+
+fn rename_substitutions(
+    substitutions: &[(Arc<str>, Expr)],
+    renamings: &[(Arc<str>, Expr)],
+) -> Vec<(Arc<str>, Expr)> {
+    substitutions
+        .iter()
+        .map(|(target, expr)| (target.clone(), substitute_expr(expr, renamings)))
+        .collect()
 }
 
 fn declared_names(module: &Spec) -> Vec<Arc<str>> {

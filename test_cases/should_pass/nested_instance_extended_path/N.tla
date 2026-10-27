@@ -1,0 +1,3 @@
+---- MODULE N ----
+EXTENDS NBase
+====
