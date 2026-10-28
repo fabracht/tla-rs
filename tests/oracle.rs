@@ -2468,6 +2468,15 @@ fn test_should_pass_instance_shadowed_definition() {
 }
 
 #[test]
+fn test_should_pass_instance_with_caller_definition() {
+    let path = "test_cases/should_pass/instance_with_caller_definition/instance_with_caller_definition.tla";
+    match check_spec_file(Path::new(path)) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 2),
+        other => panic!("instance_with_caller_definition.tla should pass, got: {other:?}"),
+    }
+}
+
+#[test]
 fn test_should_pass_prime_parameters() {
     let path = Path::new("test_cases/should_pass/prime_parameters/prime_parameters.tla");
     match check_spec_file(path) {

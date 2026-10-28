@@ -528,10 +528,7 @@ fn collect_candidates_impl<T: CandidateTarget>(
                             && params.len() == args.len()
                             && contains_prime_ref(body, defs)
                         {
-                            let mut merged_defs = defs.clone();
-                            for (name, def) in instance_defs {
-                                merged_defs.insert(name.clone(), def.clone());
-                            }
+                            let merged_defs = super::with_instance_definitions(defs, instance_defs);
                             collect_in_call(
                                 params,
                                 args,
@@ -563,10 +560,8 @@ fn collect_candidates_impl<T: CandidateTarget>(
                                 if let Some((params, body)) = instance_defs.get(op)
                                     && params.len() == args.len()
                                 {
-                                    let mut merged_defs = defs.clone();
-                                    for (name, def) in &instance_defs {
-                                        merged_defs.insert(name.clone(), def.clone());
-                                    }
+                                    let merged_defs =
+                                        super::with_instance_definitions(defs, &instance_defs);
                                     collect_in_call(
                                         params,
                                         args,

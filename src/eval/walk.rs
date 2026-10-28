@@ -918,10 +918,7 @@ fn walk_qualified_call(
     let subs: Vec<(Arc<str>, Expr)> = params.into_iter().zip(args.iter().cloned()).collect();
     let bound_body = substitute_expr(&body, &subs);
 
-    let mut merged = ctx.defs.clone();
-    for (name, def) in instance_defs {
-        merged.insert(name, def);
-    }
+    let merged = super::with_instance_definitions(ctx.defs, &instance_defs);
     let sub_ctx = WalkCtx {
         vars: ctx.vars,
         state_keys: ctx.state_keys,

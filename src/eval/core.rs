@@ -1775,10 +1775,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     )));
                 }
 
-                let mut merged_defs = defs.clone();
-                for (name, def) in instance_defs {
-                    merged_defs.insert(name.clone(), def.clone());
-                }
+                let merged_defs = super::with_instance_definitions(defs, instance_defs);
 
                 if super::ast_utils::operator_primes_parameter(params, body, &merged_defs) {
                     return eval_substituted(body, params, args, env, &merged_defs);
@@ -1850,10 +1847,7 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                         )));
                     }
 
-                    let mut merged_defs = defs.clone();
-                    for (name, def) in &instance_defs {
-                        merged_defs.insert(name.clone(), def.clone());
-                    }
+                    let merged_defs = super::with_instance_definitions(defs, &instance_defs);
 
                     if super::ast_utils::operator_primes_parameter(params, body, &merged_defs) {
                         return eval_substituted(body, params, args, env, &merged_defs);
@@ -2011,9 +2005,7 @@ fn instance_definitions(
         }
         _ => return None,
     };
-    let mut merged = defs.clone();
-    merged.extend(instance_defs);
-    Some(Ok(merged))
+    Some(Ok(super::with_instance_definitions(defs, &instance_defs)))
 }
 
 fn try_eval_unbounded_choose(
