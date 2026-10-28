@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.11] - 2026-10-24
+
+### Fixed
+
+- Inside an instance, a constant or bound variable of the caller with the name of one of the instanced module's operators was read instead of that operator wherever the operator was reached through a name the parser does not inline, such as a constant of a module it instances that the operator substitutes implicitly (#244): with `CONSTANT C = 5` in the root, `I == INSTANCE M`, `C == 9` in `M` and `INSTANCE Leaf` in `M` reading `C`, `I!Read` was 5 where TLC gives 9, in invariants, actions and properties alike, and through a parameterized `P(k) == INSTANCE M` too. Each instance's operators are now referred to by keys of its own.
+- A definition imported by an unnamed `INSTANCE`, used in the `WITH` of a named instance of a module that imports a definition of the same name, read the instanced module's definition: with `INSTANCE M WITH C <- 1` and `I == INSTANCE X WITH D <- Val`, where `X` has `INSTANCE M WITH C <- 2`, `I!D` was 2 where TLC gives 1. Each unnamed copy of a module now has keys of its own, and the `WITH` expression refers to the copy the spec imports.
+- A named `J == INSTANCE N` declared in a module the spec instances was not found (#240): a definition of that module using `J!Op`, reached through `I == INSTANCE M` or an unnamed `INSTANCE M`, failed with "instance J not found". As in TLC, each instance of `M` now has its own `J`, an unnamed one included, whose `WITH` expressions take `M`'s substitutions (`z <- y` in `M` with `y <- x` gives `z <- x`) and which inherits those of the names `M` declares for the names it substitutes implicitly. A nested `WITH` expression that uses an operator of `M` calls `M`'s operator even when `N` defines one of the same name, and the root can reach the nested instance as `I!J!Op`, at any depth (`I!J!K!Op`), as can the module itself (`J!K!Op`). A substitution of a constant the module gets through `EXTENDS` reaches its nested instances too, and a nested instance's constant left to the implicit substitution reads `M`'s operator of that name when `M` defines one. A module that instances itself is reported as a cyclic dependency. A parameterized `P(k) == INSTANCE N` inside an instanced module, or any nested instance under a parameterized `P(k) == INSTANCE M`, is still not found.
+
 ## [0.24.10] - 2026-10-21
 
 ### Fixed

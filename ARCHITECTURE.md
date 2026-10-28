@@ -47,7 +47,7 @@ Release builds use `lto = "fat"`, `codegen-units = 1`, `strip = true`, `panic = 
 | `checker.rs` | `prepare_spec` (module loading, constants, ASSUME), BFS, safety checks, liveness orchestration, symmetry expansion for liveness, trace formatting, JSON result encoding |
 | `config.rs` | TLC `.cfg` parser (`parse_cfg`) and `apply_config`, constant value parser (`parse_constant_value`) |
 | `load.rs` | `prepare_from_path`: read + parse + EXTENDS merge + cfg discovery/application, used by the demo tooling, the presenter and integration tests |
-| `modules.rs` | `ModuleRegistry` (loads `<Name>.tla` next to the spec, with cycle detection), `resolve_instances`, `merge_extended_declarations` |
+| `modules.rs` | `ModuleRegistry` (loads `<Name>.tla` next to the spec, with cycle detection), `resolve_instance_list`, `declared_instances`, `merge_extended_declarations` |
 | `substitution.rs` | `substitute_expr` (capture-avoiding, renames bound variables via `fresh_name`) and `apply_substitutions` for `INSTANCE ... WITH` |
 | `stdlib.rs` | Built-in modules: `BOOLEAN`, `STRING`, `Nat`, `Int`; recognizes `Naturals`, `Integers`, `Sequences`, `FiniteSets`, `TLC`, `Bags`, `Bits` as standard modules (their operators are `Expr` variants handled by the parser and evaluator) |
 | `level.rs` | `LevelAnalysis`: constant/state/action/temporal level of an expression, as SANY (`exact`) and as TLC's coarser bound (`bound`) |
@@ -413,7 +413,7 @@ The WASM build has no filesystem: module loading from disk, DOT/trace file outpu
 
 ## Module System
 
-- `INSTANCE M` / `I == INSTANCE M WITH p <- e`: `ModuleRegistry` loads `M.tla` from the spec's directory; `ModuleRegistry::merge_declarations` completes `M` with what it extends and instances (as `merge_extended_declarations` does for the root), and `resolve_instances` applies the substitutions to those definitions (`substitution::apply_substitutions`) and stores them in a thread-local map consulted by `QualifiedCall`. A named `INSTANCE` of an extended module is added to the root's `instances` by `merge_extended_declarations`.
+- `INSTANCE M` / `I == INSTANCE M WITH p <- e`: `ModuleRegistry` loads `M.tla` from the spec's directory; `ModuleRegistry::merge_declarations` completes `M` with what it extends and instances (as `merge_extended_declarations` does for the root), and `resolve_instance_list` applies the substitutions to those definitions (`substitution::apply_substitutions`) and stores them in a thread-local map consulted by `QualifiedCall`. A named `INSTANCE` of an extended module is added to the root's `instances` by `merge_extended_declarations`; one declared in an instanced module is resolved too (`modules::declared_instances`), as `I!J` with `I`'s substitutions applied to `J`'s, and renamed so in `I`'s definitions.
 - Parameterized `I(x) == INSTANCE M WITH ...`: stored as a template (`ParameterizedInstance`); parameters and substitutions are applied at each `I(v)!Op` call.
 - `EXTENDS` of user modules: merged into the spec after parsing (`merge_extended_declarations`) and loaded again by `prepare_spec` for evaluation. Redefining an extended operator is accepted (the extending module wins).
 - Standard modules named in `EXTENDS` or `INSTANCE` are handled by `stdlib.rs` and the evaluator rather than loaded from files.

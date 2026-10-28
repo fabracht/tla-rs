@@ -1,0 +1,4 @@
+---- MODULE NNN_EEEABase ----
+VARIABLE w
+CONSTANT C3
+====

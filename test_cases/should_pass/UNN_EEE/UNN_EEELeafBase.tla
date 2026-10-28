@@ -1,0 +1,4 @@
+---- MODULE UNN_EEELeafBase ----
+VARIABLE z
+CONSTANT C3
+====

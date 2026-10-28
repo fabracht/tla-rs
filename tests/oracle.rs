@@ -2368,6 +2368,105 @@ fn test_should_pass_function_instance() {
     }
 }
 
+/// A named instance declared in an instanced module: one per instance of that
+/// module, with the outer `WITH` applied to its own and inherited where it
+/// substitutes implicitly, and found through an unnamed `INSTANCE` too (TLC: 3
+/// distinct states, every invariant holds).
+#[test]
+fn test_should_pass_nested_named_instance() {
+    let path = Path::new("test_cases/should_pass/nested_named_instance/nested_named_instance.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("nested_named_instance.tla should pass, got: {other:?}"),
+    }
+}
+
+/// Each unnamed instantiation of a module has its own nested instance (one in
+/// the root, one `LOCAL` in an extended module, with different `WITH`), and an
+/// implicit substitution two levels down refers to the definition of the module
+/// in between, not to a substitution of the root; a nested `WITH` that calls an
+/// operator of the module declaring it calls that one, not the nested module's
+/// operator of the same name, also through `IH!J!Val` (TLC: 3 distinct states).
+#[test]
+fn test_should_pass_nested_instance_scoping() {
+    let path =
+        Path::new("test_cases/should_pass/nested_instance_scoping/nested_instance_scoping.tla");
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3),
+        other => panic!("nested_instance_scoping.tla should pass, got: {other:?}"),
+    }
+}
+
+/// Three levels of instances, each module getting its variable and constant
+/// through `EXTENDS`, with a `WITH` calling an operator the leaf also defines and
+/// an implicit substitution of a constant at every level: unnamed at the top
+/// (`UNN_EEE`) and named throughout, read as `I!K!J!Val3` too (`NNN_EEE`) (TLC:
+/// 3 distinct states each, every invariant holds).
+#[test]
+fn test_should_pass_nested_instance_levels() {
+    for name in ["UNN_EEE", "NNN_EEE"] {
+        let path = format!("test_cases/should_pass/{name}/{name}.tla");
+        match check_spec_file(Path::new(&path)) {
+            CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 3, "{name}"),
+            other => panic!("{name}.tla should pass, got: {other:?}"),
+        }
+    }
+}
+
+/// A nested instance's constant implicitly substituted by an operator the
+/// enclosing module defines reads that operator, not the root's constant of the
+/// same name, and a nested `WITH` reaching two levels deeper (`K!L!Val`) resolves
+/// (TLC: 2 distinct states, both invariants hold).
+#[test]
+fn test_should_pass_nested_instance_definitions() {
+    let path = Path::new(
+        "test_cases/should_pass/nested_instance_definitions/nested_instance_definitions.tla",
+    );
+    match check_spec_file(path) {
+        CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 2),
+        other => panic!("nested_instance_definitions.tla should pass, got: {other:?}"),
+    }
+}
+
+/// Nested instances under unnamed `INSTANCE`s: a path through an instance the
+/// nested module gets by `EXTENDS`, two unnamed copies of one module in the root and in an instanced
+/// module, and a definition imported by an unnamed `INSTANCE` passed in a `WITH`
+/// to a module that imports one of the same name (TLC: 1 distinct state each).
+#[test]
+fn test_should_pass_unnamed_instance_scopes() {
+    for name in [
+        "nested_instance_extended_path",
+        "nested_instance_copies",
+        "instance_with_imported_name",
+    ] {
+        let path = format!("test_cases/should_pass/{name}/{name}.tla");
+        match check_spec_file(Path::new(&path)) {
+            CheckResult::Ok(stats) => assert_eq!(stats.states_explored, 1, "{name}"),
+            other => panic!("{name}.tla should pass, got: {other:?}"),
+        }
+    }
+}
+
+/// An operator of an instanced module reached through a name, here a leaf's
+/// constant implicitly substituted by it, is not replaced by a root constant of
+/// the same name: in an invariant, in an action and liveness property, and three
+/// levels down (`NNU_EEE_def`) (TLC: 2, 2 and 3 distinct states).
+#[test]
+fn test_should_pass_instance_shadowed_definition() {
+    for (name, states) in [
+        ("instance_shadowed_definition", 2),
+        ("instance_shadowed_definition_action", 2),
+        ("instance_shadowed_definition_param", 2),
+        ("NNU_EEE_def", 3),
+    ] {
+        let path = format!("test_cases/should_pass/{name}/{name}.tla");
+        match check_spec_file(Path::new(&path)) {
+            CheckResult::Ok(stats) => assert_eq!(stats.states_explored, states, "{name}"),
+            other => panic!("{name}.tla should pass, got: {other:?}"),
+        }
+    }
+}
+
 #[test]
 fn test_should_pass_prime_parameters() {
     let path = Path::new("test_cases/should_pass/prime_parameters/prime_parameters.tla");
