@@ -219,6 +219,45 @@ fn prime_expr(expr: &Expr) -> Expr {
     }
 }
 
+/// `UNCHANGED vars` with `subs` applied: a name replaced by a name or a tuple of
+/// names stays in the `UNCHANGED` as those names, and one replaced by any other
+/// expression `e` becomes `e' = e`.
+fn substitute_unchanged(vars: &[Arc<str>], subs: &[(Arc<str>, Expr)]) -> Expr {
+    let mut names = Vec::new();
+    let mut equations = Vec::new();
+    for name in vars {
+        match subs.iter().find(|(param, _)| param == name) {
+            Some((_, replacement)) => match unchanged_names(replacement) {
+                Some(replaced) => names.extend(replaced),
+                None => equations.push(Expr::Eq(
+                    Box::new(prime_expr(replacement)),
+                    Box::new(replacement.clone()),
+                )),
+            },
+            None => names.push(name.clone()),
+        }
+    }
+    let unchanged = (!names.is_empty()).then_some(Expr::Unchanged(names));
+    unchanged
+        .into_iter()
+        .chain(equations)
+        .reduce(|left, right| Expr::And(Box::new(left), Box::new(right)))
+        .unwrap_or_else(|| Expr::Unchanged(Vec::new()))
+}
+
+/// The names `expr` is made of when it is a name or a tuple of them, nested or
+/// not, as `UNCHANGED` lists them.
+fn unchanged_names(expr: &Expr) -> Option<Vec<Arc<str>>> {
+    match expr {
+        Expr::Var(name) => Some(vec![name.clone()]),
+        Expr::TupleLit(elements) => elements.iter().try_fold(Vec::new(), |mut names, element| {
+            names.extend(unchanged_names(element)?);
+            Some(names)
+        }),
+        _ => None,
+    }
+}
+
 pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
     match expr {
         Expr::Var(name) => {
@@ -475,11 +514,17 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
             Box::new(substitute_expr(l, subs)),
             Box::new(substitute_expr(r, subs)),
         ),
-        Expr::CustomOp(name, l, r) => Expr::CustomOp(
-            name.clone(),
-            Box::new(substitute_expr(l, subs)),
-            Box::new(substitute_expr(r, subs)),
-        ),
+        Expr::CustomOp(name, l, r) => {
+            let operator = match subs.iter().find(|(param, _)| param == name) {
+                Some((_, Expr::Var(operator))) => operator.clone(),
+                _ => name.clone(),
+            };
+            Expr::CustomOp(
+                operator,
+                Box::new(substitute_expr(l, subs)),
+                Box::new(substitute_expr(r, subs)),
+            )
+        }
         Expr::Except(base, updates) => {
             let new_updates: Vec<_> = updates
                 .iter()
@@ -564,7 +609,7 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
                 .collect(),
         ),
 
-        Expr::Unchanged(vars) => Expr::Unchanged(vars.clone()),
+        Expr::Unchanged(vars) => substitute_unchanged(vars, subs),
         Expr::Prime(var) => {
             for (param, replacement) in subs {
                 if param == var {

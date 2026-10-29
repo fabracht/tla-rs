@@ -894,7 +894,8 @@ fn walk_qualified_call(
                         instance_args.to_vec(),
                     ),
                 };
-                let (params, body) = instance_defs.get(op)?;
+                let (params, body) =
+                    instance_defs.get(&crate::ast::instance_key(instance_name, op))?;
                 let params = params.clone();
                 let body = body.clone();
                 Some((instance_defs, params, body))
@@ -903,7 +904,9 @@ fn walk_qualified_call(
         _ => None,
     };
 
-    let Some((instance_defs, params, body)) = resolved else {
+    let (Some((instance_defs, params, body)), Expr::Var(alias) | Expr::FnCall(alias, _)) =
+        (resolved, instance_expr)
+    else {
         let fallback =
             Expr::QualifiedCall(Box::new(instance_expr.clone()), op.clone(), args.to_vec());
         return walk_bool(&fallback, cont, env, ctx, run);
@@ -918,10 +921,7 @@ fn walk_qualified_call(
     let subs: Vec<(Arc<str>, Expr)> = params.into_iter().zip(args.iter().cloned()).collect();
     let bound_body = substitute_expr(&body, &subs);
 
-    let mut merged = ctx.defs.clone();
-    for (name, def) in instance_defs {
-        merged.insert(name, def);
-    }
+    let merged = super::with_instance_definitions(ctx.defs, alias, &instance_defs);
     let sub_ctx = WalkCtx {
         vars: ctx.vars,
         state_keys: ctx.state_keys,

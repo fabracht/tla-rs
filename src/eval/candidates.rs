@@ -528,10 +528,11 @@ fn collect_candidates_impl<T: CandidateTarget>(
                             && params.len() == args.len()
                             && contains_prime_ref(body, defs)
                         {
-                            let mut merged_defs = defs.clone();
-                            for (name, def) in instance_defs {
-                                merged_defs.insert(name.clone(), def.clone());
-                            }
+                            let merged_defs = super::with_instance_definitions(
+                                defs,
+                                instance_name,
+                                instance_defs,
+                            );
                             collect_in_call(
                                 params,
                                 args,
@@ -559,14 +560,16 @@ fn collect_candidates_impl<T: CandidateTarget>(
                             if let Some(inst_arg_vals) = inst_arg_vals {
                                 let instance_defs =
                                     super::resolve_parameterized_defs(param_inst, inst_arg_vals);
+                                let scoped = crate::ast::instance_key(instance_name, op);
 
-                                if let Some((params, body)) = instance_defs.get(op)
+                                if let Some((params, body)) = instance_defs.get(&scoped)
                                     && params.len() == args.len()
                                 {
-                                    let mut merged_defs = defs.clone();
-                                    for (name, def) in &instance_defs {
-                                        merged_defs.insert(name.clone(), def.clone());
-                                    }
+                                    let merged_defs = super::with_instance_definitions(
+                                        defs,
+                                        instance_name,
+                                        &instance_defs,
+                                    );
                                     collect_in_call(
                                         params,
                                         args,

@@ -59,6 +59,30 @@ pub(crate) use self::helpers::eval_set;
 pub(crate) use self::state::angle_action_enabled_in;
 pub use self::walk::{EngineOverride, set_allow_unassigned_stutter, set_use_inference_engine};
 
+/// `defs` with the definitions of the instance `alias` under their
+/// [`instance_key`](crate::ast::instance_key)s, by which they refer to each
+/// other, as its operators are evaluated: a name of `defs`, which a `WITH`
+/// expression or an argument substituted into them refers to, keeps its
+/// definition.
+pub(crate) fn with_instance_definitions(
+    defs: &Definitions,
+    alias: &str,
+    instance_defs: &Definitions,
+) -> Definitions {
+    let prefix = crate::ast::instance_key(alias, "");
+    let mut merged = defs.clone();
+    for (name, def) in instance_defs
+        .range::<str, _>((
+            std::ops::Bound::Included(&*prefix),
+            std::ops::Bound::Unbounded,
+        ))
+        .take_while(|(name, _)| name.starts_with(&*prefix))
+    {
+        merged.insert(name.clone(), def.clone());
+    }
+    merged
+}
+
 pub(crate) fn resolve_parameterized_defs(
     param_inst: &ParameterizedInstance,
     inst_arg_vals: Vec<crate::ast::Value>,

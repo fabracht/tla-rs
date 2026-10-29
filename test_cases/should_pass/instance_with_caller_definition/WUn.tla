@@ -1,0 +1,3 @@
+---- MODULE WUn ----
+INSTANCE WBar
+====
