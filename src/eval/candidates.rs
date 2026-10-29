@@ -528,7 +528,11 @@ fn collect_candidates_impl<T: CandidateTarget>(
                             && params.len() == args.len()
                             && contains_prime_ref(body, defs)
                         {
-                            let merged_defs = super::with_instance_definitions(defs, instance_defs);
+                            let merged_defs = super::with_instance_definitions(
+                                defs,
+                                instance_name,
+                                instance_defs,
+                            );
                             collect_in_call(
                                 params,
                                 args,
@@ -560,8 +564,11 @@ fn collect_candidates_impl<T: CandidateTarget>(
                                 if let Some((params, body)) = instance_defs.get(op)
                                     && params.len() == args.len()
                                 {
-                                    let merged_defs =
-                                        super::with_instance_definitions(defs, &instance_defs);
+                                    let merged_defs = super::with_instance_definitions(
+                                        defs,
+                                        instance_name,
+                                        &instance_defs,
+                                    );
                                     collect_in_call(
                                         params,
                                         args,

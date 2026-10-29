@@ -903,7 +903,9 @@ fn walk_qualified_call(
         _ => None,
     };
 
-    let Some((instance_defs, params, body)) = resolved else {
+    let (Some((instance_defs, params, body)), Expr::Var(alias) | Expr::FnCall(alias, _)) =
+        (resolved, instance_expr)
+    else {
         let fallback =
             Expr::QualifiedCall(Box::new(instance_expr.clone()), op.clone(), args.to_vec());
         return walk_bool(&fallback, cont, env, ctx, run);
@@ -918,7 +920,7 @@ fn walk_qualified_call(
     let subs: Vec<(Arc<str>, Expr)> = params.into_iter().zip(args.iter().cloned()).collect();
     let bound_body = substitute_expr(&body, &subs);
 
-    let merged = super::with_instance_definitions(ctx.defs, &instance_defs);
+    let merged = super::with_instance_definitions(ctx.defs, alias, &instance_defs);
     let sub_ctx = WalkCtx {
         vars: ctx.vars,
         state_keys: ctx.state_keys,

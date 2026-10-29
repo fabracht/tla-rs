@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::ast::{DefinitionMap, Expr, InstanceDecl, Spec, UnparsedDefinition};
+use crate::ast::{DefinitionMap, Expr, InstanceDecl, Spec, UnparsedDefinition, instance_key};
 use crate::eval::{Definitions, ParameterizedInstance, ParameterizedInstances};
 use crate::parser;
 use crate::substitution::{apply_substitutions, substitute_expr};
@@ -635,16 +635,15 @@ fn rename_substitutions(
         .collect()
 }
 
-/// `definitions` of the instance `alias` with each definition also under the key
-/// `alias.Name`, which no name in an environment can take (`.` is not part of an
-/// identifier), and every reference to it in the definitions renamed to that
-/// key: a constant, bound variable or definition of the caller with the same
+/// `definitions` of the instance `alias` with each definition also under its
+/// [`instance_key`], and every reference to it in the definitions renamed to
+/// that key: a constant, bound variable or definition of the caller with the same
 /// name then cannot stand in for the instance's definition, nor the instance's
 /// for a name of the caller that a `WITH` expression uses.
 fn scope_definitions(alias: &Arc<str>, definitions: &DefinitionMap) -> DefinitionMap {
     let keys: Vec<(Arc<str>, Arc<str>)> = definitions
         .keys()
-        .map(|name| (name.clone(), format!("{alias}.{name}").into()))
+        .map(|name| (name.clone(), instance_key(alias, name)))
         .collect();
     let renamings: Vec<(Arc<str>, Expr)> = keys
         .iter()

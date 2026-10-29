@@ -413,6 +413,12 @@ pub struct Transition {
 
 pub type DefinitionMap = BTreeMap<Arc<str>, (Vec<Arc<str>>, Arc<Expr>)>;
 
+/// The key under which the instance `alias` keeps its definition `name`, which
+/// no name in an environment can take (`.` is not part of an identifier).
+pub fn instance_key(alias: &str, name: &str) -> Arc<str> {
+    format!("{alias}.{name}").into()
+}
+
 /// A liveness obligation named after the definition it came from: a cfg `PROPERTY`,
 /// or (legacy, without a cfg that defines the behavior) a `*Spec` definition whose
 /// temporal conjuncts are checked instead of assumed.

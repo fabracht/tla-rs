@@ -475,11 +475,17 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
             Box::new(substitute_expr(l, subs)),
             Box::new(substitute_expr(r, subs)),
         ),
-        Expr::CustomOp(name, l, r) => Expr::CustomOp(
-            name.clone(),
-            Box::new(substitute_expr(l, subs)),
-            Box::new(substitute_expr(r, subs)),
-        ),
+        Expr::CustomOp(name, l, r) => {
+            let operator = match subs.iter().find(|(param, _)| param == name) {
+                Some((_, Expr::Var(operator))) => operator.clone(),
+                _ => name.clone(),
+            };
+            Expr::CustomOp(
+                operator,
+                Box::new(substitute_expr(l, subs)),
+                Box::new(substitute_expr(r, subs)),
+            )
+        }
         Expr::Except(base, updates) => {
             let new_updates: Vec<_> = updates
                 .iter()

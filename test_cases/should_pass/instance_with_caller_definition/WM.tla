@@ -7,6 +7,8 @@ Bar == 2
 RECURSIVE Val(_)
 Val(a) == 2
 g[i \in 1..2] == 2
+a \oplus b == a + b
+Sum == 1 \oplus 1
 Get == c
 Set(a) == y' = a
 ====

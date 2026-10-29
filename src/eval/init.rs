@@ -152,8 +152,11 @@ fn infer_init_candidates(
                                 && let Some((params, body)) = instance_defs.get(op)
                                 && params.len() == args.len()
                             {
-                                let merged_defs =
-                                    super::with_instance_definitions(defs, instance_defs);
+                                let merged_defs = super::with_instance_definitions(
+                                    defs,
+                                    instance_name,
+                                    instance_defs,
+                                );
                                 let params: Vec<Arc<str>> = params.clone();
                                 let saved = bind_params(&params, args, env, defs);
                                 err = collect(
@@ -184,8 +187,11 @@ fn infer_init_candidates(
                                 if let Some((params, body)) = instance_defs.get(op)
                                     && params.len() == args.len()
                                 {
-                                    let merged_defs =
-                                        super::with_instance_definitions(defs, &instance_defs);
+                                    let merged_defs = super::with_instance_definitions(
+                                        defs,
+                                        instance_name,
+                                        &instance_defs,
+                                    );
                                     let params: Vec<Arc<str>> = params.clone();
                                     let body = body.clone();
                                     let saved = bind_params(&params, args, env, defs);

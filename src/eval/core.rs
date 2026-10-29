@@ -1775,7 +1775,8 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     )));
                 }
 
-                let merged_defs = super::with_instance_definitions(defs, instance_defs);
+                let merged_defs =
+                    super::with_instance_definitions(defs, instance_name, instance_defs);
 
                 if super::ast_utils::operator_primes_parameter(params, body, &merged_defs) {
                     return eval_substituted(body, params, args, env, &merged_defs);
@@ -1847,7 +1848,8 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                         )));
                     }
 
-                    let merged_defs = super::with_instance_definitions(defs, &instance_defs);
+                    let merged_defs =
+                        super::with_instance_definitions(defs, instance_name, &instance_defs);
 
                     if super::ast_utils::operator_primes_parameter(params, body, &merged_defs) {
                         return eval_substituted(body, params, args, env, &merged_defs);
@@ -1916,7 +1918,7 @@ fn is_rigid_function(definition: &FunctionDefinition, defs: &Definitions) -> boo
 enum FunctionTarget<'a> {
     Current(Option<&'a Arc<str>>, FunctionDefinition<'a>),
     Next(&'a Arc<str>, FunctionDefinition<'a>),
-    Instance(&'a Arc<str>, Definitions),
+    Instance(&'a Arc<str>, Arc<str>, Definitions),
 }
 
 /// `f[arg]` when `f` is a function definition, `f[x \in S] == e`, its primed
@@ -1945,7 +1947,7 @@ fn apply_function_definition_at(
         Expr::FnDef(..) => FunctionTarget::Current(None, FunctionDefinition::of(f)?),
         Expr::QualifiedCall(instance, op, args) if args.is_empty() => {
             match instance_definitions(instance, op, env, defs)? {
-                Ok(instance_defs) => FunctionTarget::Instance(op, instance_defs),
+                Ok((key, instance_defs)) => FunctionTarget::Instance(op, key, instance_defs),
                 Err(error) => return Some(Err(error)),
             }
         }
@@ -1962,30 +1964,33 @@ fn apply_function_definition_at(
         FunctionTarget::Next(name, definition) => in_next_state(name, env, |env| {
             apply_function_anew(Some(name), &definition, key, env, defs)
         }),
-        FunctionTarget::Instance(op, instance_defs) => {
-            match function_definition(op, &instance_defs) {
-                Some(definition) => apply_function(Some(op), &definition, key, env, &instance_defs),
+        FunctionTarget::Instance(op, scoped, instance_defs) => {
+            match function_definition(&scoped, &instance_defs) {
+                Some(definition) => {
+                    apply_function(Some(&scoped), &definition, key, env, &instance_defs)
+                }
                 None => Err(EvalError::domain_error(format!("`{op}` is not a function"))),
             }
         }
     })
 }
 
-/// `defs` with the definitions of the instance `I` or `P(args)` over them, as a
-/// qualified call `I!Op` evaluates `Op`, when `op` is a function definition of
-/// the instance; `None` otherwise, leaving the call to the qualified-call path.
+/// The key of `op` in the instance `I` or `P(args)` and `defs` with the
+/// instance's definitions, as a qualified call `I!Op` evaluates `Op`, when `op`
+/// is a function definition of the instance; `None` otherwise, leaving the call
+/// to the qualified-call path.
 fn instance_definitions(
     instance: &Expr,
     op: &Arc<str>,
     env: &mut Env,
     defs: &Definitions,
-) -> Option<Result<Definitions>> {
-    let instance_defs = match instance {
+) -> Option<Result<(Arc<str>, Definitions)>> {
+    let (alias, instance_defs) = match instance {
         Expr::Var(name) => RESOLVED_INSTANCES.with(|instances| {
             let instances = instances.borrow();
             let instance_defs = instances.get(name)?;
             function_definition(op, instance_defs)?;
-            Some(instance_defs.clone())
+            Some((name, instance_defs.clone()))
         })?,
         Expr::FnCall(name, args) => {
             let parameterized = PARAMETERIZED_INSTANCES.with(|instances| {
@@ -2001,11 +2006,17 @@ fn instance_definitions(
                 Ok(values) => values,
                 Err(error) => return Some(Err(error)),
             };
-            super::resolve_parameterized_defs(&parameterized, values)
+            (
+                name,
+                super::resolve_parameterized_defs(&parameterized, values),
+            )
         }
         _ => return None,
     };
-    Some(Ok(super::with_instance_definitions(defs, &instance_defs)))
+    Some(Ok((
+        crate::ast::instance_key(alias, op),
+        super::with_instance_definitions(defs, alias, &instance_defs),
+    )))
 }
 
 fn try_eval_unbounded_choose(
