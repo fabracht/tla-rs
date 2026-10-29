@@ -45,11 +45,12 @@ pub fn eval_with_instances(
                 )));
             }
 
-            if super::ast_utils::operator_primes_parameter(params, body, defs) {
+            let merged_defs = super::with_instance_definitions(defs, instance_name, instance_defs);
+            if super::ast_utils::operator_primes_parameter(params, body, &merged_defs) {
                 let subs: Vec<(Arc<str>, Expr)> =
                     params.iter().cloned().zip(args.iter().cloned()).collect();
                 let applied = crate::substitution::substitute_expr(body, &subs);
-                return eval_with_instances(&applied, env, defs, instances);
+                return eval_with_instances(&applied, env, &merged_defs, instances);
             }
 
             let mut arg_vals = Vec::with_capacity(args.len());
@@ -60,7 +61,7 @@ pub fn eval_with_instances(
             for (param, val) in params.iter().zip(arg_vals) {
                 prevs.push((param.clone(), env.insert(param.clone(), val)));
             }
-            let result = eval_with_instances(body, env, defs, instances);
+            let result = eval_with_instances(body, env, &merged_defs, instances);
             for (param, prev) in prevs {
                 match prev {
                     Some(old) => {
