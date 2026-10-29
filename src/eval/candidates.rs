@@ -560,8 +560,9 @@ fn collect_candidates_impl<T: CandidateTarget>(
                             if let Some(inst_arg_vals) = inst_arg_vals {
                                 let instance_defs =
                                     super::resolve_parameterized_defs(param_inst, inst_arg_vals);
+                                let scoped = crate::ast::instance_key(instance_name, op);
 
-                                if let Some((params, body)) = instance_defs.get(op)
+                                if let Some((params, body)) = instance_defs.get(&scoped)
                                     && params.len() == args.len()
                                 {
                                     let merged_defs = super::with_instance_definitions(

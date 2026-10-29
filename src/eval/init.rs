@@ -183,8 +183,9 @@ fn infer_init_candidates(
                                     param_inst,
                                     instance_args.to_vec(),
                                 );
+                                let scoped = crate::ast::instance_key(instance_name, op);
 
-                                if let Some((params, body)) = instance_defs.get(op)
+                                if let Some((params, body)) = instance_defs.get(&scoped)
                                     && params.len() == args.len()
                                 {
                                     let merged_defs = super::with_instance_definitions(

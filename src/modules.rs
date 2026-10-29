@@ -903,7 +903,10 @@ pub fn resolve_instance_list(
                 resolved.insert(alias.clone(), substituted);
                 instance_vars.insert(alias, module.vars.clone());
             } else {
-                let module_defs = scope_definitions(&alias, &module.definitions);
+                let module_defs = scope_definitions(&alias, &module.definitions)
+                    .into_iter()
+                    .filter(|(name, _)| !module.definitions.contains_key(name))
+                    .collect();
                 parameterized.insert(
                     alias,
                     ParameterizedInstance {

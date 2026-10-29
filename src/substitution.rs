@@ -570,7 +570,14 @@ pub fn substitute_expr(expr: &Expr, subs: &[(Arc<str>, Expr)]) -> Expr {
                 .collect(),
         ),
 
-        Expr::Unchanged(vars) => Expr::Unchanged(vars.clone()),
+        Expr::Unchanged(vars) => Expr::Unchanged(
+            vars.iter()
+                .map(|name| match subs.iter().find(|(param, _)| param == name) {
+                    Some((_, Expr::Var(renamed))) => renamed.clone(),
+                    _ => name.clone(),
+                })
+                .collect(),
+        ),
         Expr::Prime(var) => {
             for (param, replacement) in subs {
                 if param == var {

@@ -894,7 +894,8 @@ fn walk_qualified_call(
                         instance_args.to_vec(),
                     ),
                 };
-                let (params, body) = instance_defs.get(op)?;
+                let (params, body) =
+                    instance_defs.get(&crate::ast::instance_key(instance_name, op))?;
                 let params = params.clone();
                 let body = body.clone();
                 Some((instance_defs, params, body))

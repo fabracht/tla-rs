@@ -1832,7 +1832,8 @@ fn eval_inner(expr: &Expr, env: &mut Env, defs: &Definitions) -> Result<Value> {
                     let instance_defs =
                         super::resolve_parameterized_defs(param_inst, inst_arg_vals);
 
-                    let (params, body) = instance_defs.get(op).ok_or_else(|| {
+                    let scoped = crate::ast::instance_key(instance_name, op);
+                    let (params, body) = instance_defs.get(&scoped).ok_or_else(|| {
                         EvalError::domain_error(format!(
                             "operator {op} not found in instance {instance_name}"
                         ))
@@ -1996,7 +1997,10 @@ fn instance_definitions(
             let parameterized = PARAMETERIZED_INSTANCES.with(|instances| {
                 let instances = instances.borrow();
                 let parameterized = instances.get(name)?;
-                function_definition(op, &parameterized.module_defs)?;
+                function_definition(
+                    &crate::ast::instance_key(name, op),
+                    &parameterized.module_defs,
+                )?;
                 Some(parameterized.clone())
             })?;
             if parameterized.params.len() != args.len() {

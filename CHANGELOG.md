@@ -4,7 +4,8 @@
 
 ### Fixed
 
-- In `I == INSTANCE M WITH c <- Foo`, where both the instancing module and `M` define `Foo`, `c` read `M`'s `Foo` instead of the instancing module's (#245) whenever the parser had not inlined the instancing module's `Foo`: one it gets through `EXTENDS` or through an unnamed `INSTANCE` in a module it extends, a `RECURSIVE` operator, or a function definition `g[i \in S] == e`, and for a parameterized `P(k) == INSTANCE M` too. The same held for an argument of an instance's operator, `I!Set(Foo)` with `Set(a) == y' = a`. As in TLC, a `WITH` expression and an argument now name the instancing module's definitions: an instance's definitions refer to each other under keys of their own, and the caller's definitions take precedence over the instance's names where an instance's operator is evaluated.
+- In `I == INSTANCE M WITH c <- Foo`, where both the instancing module and `M` define `Foo`, `c` read `M`'s `Foo` instead of the instancing module's (#245) whenever the parser had not inlined the instancing module's `Foo`: one it gets through `EXTENDS` or through an unnamed `INSTANCE` in a module it extends, a `RECURSIVE` operator, or a function definition `g[i \in S] == e`, and for a parameterized `P(k) == INSTANCE M` too. The same held for an argument of an instance's operator, `I!Set(Foo)` with `Set(a) == y' = a`. As in TLC, a `WITH` expression and an argument now name the instancing module's definitions: an instance's definitions, infix operators included, refer to each other under keys of their own, and only those keys are added to the caller's definitions where an instance's operator is evaluated.
+- `UNCHANGED y` in an instanced module, with `I == INSTANCE M WITH y <- a`, failed with "undefined variable": the names of an `UNCHANGED` were not substituted. A variable substituted by another variable is now renamed there, as is a definition of the module such as `vars`, which no longer reads the caller's `vars`.
 
 ## [0.24.11] - 2026-10-24
 
